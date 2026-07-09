@@ -119,6 +119,13 @@ function extractAuthorDateCitations(text) {
   while ((m = narrativeRegex.exec(text)) !== null) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
     var year = m[2].trim();
+    if (!authors) continue;
+    var tokens = authors.split(/\s+/);
+    if (tokens[0] && tokens[0].replace(/\./g, '').length <= 1) {
+      tokens.shift();
+      if (tokens[0] && /^(and|dan)$/i.test(tokens[0])) tokens.shift();
+      authors = tokens.join(' ').replace(/^,\s*/, '');
+    }
     if (!authors || authors.split(/\s+/).length > 8) continue;
     var before = text.substring(0, m.index);
     var openP = (before.match(/\(/g) || []).length, closeP = (before.match(/\)/g) || []).length;
@@ -622,9 +629,11 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     if (!refMap.has(key)) refMap.set(key, []);
     refMap.get(key).push(r);
   });
+  this.refMap = refMap;
 
   var citedKeys = new Set();
   var citationDetails = [];
+  this.citedKeys = citedKeys;
 
   this.citations.forEach(function(c) {
     if (c.type === 'parenthetical') {
@@ -710,7 +719,9 @@ MultiFormatValidator.prototype.validateAuthorPage = function() {
     if (!refByAuthor.has(key)) refByAuthor.set(key, []);
     refByAuthor.get(key).push(r);
   });
+  this.refMap = refByAuthor;
   var citedKeys = new Set();
+  this.citedKeys = citedKeys;
 
   this.citations.forEach(function(c) {
     c.parts.forEach(function(p) {
@@ -767,6 +778,24 @@ MultiFormatValidator.prototype.keyFromCitationToken = function(token) {
   return normalizeKeyName(token, false);
 };
 
+// Public helpers for UI: determine whether a given in-text citation token/year
+// has a matching reference, and whether a given reference was cited in text.
+// Used by the citation map so unmatched items render as errors (red), not green.
+MultiFormatValidator.prototype.isCitationMatched = function(token, year) {
+  if (!this.refMap) return null; // not yet validated (numeric family doesn't use this)
+  var key = this.keyFromCitationToken(token) + (year != null ? '_' + year : (this.style.family === 'author-date' ? '_' : ''));
+  if (this.refMap.has(key)) return true;
+  return this.fuzzyFind(key, this.refMap) !== null;
+};
+
+MultiFormatValidator.prototype.isReferenceCited = function(r) {
+  if (!this.citedKeys) return null;
+  var key = this.keyFromRefAuthor(r) + (this.style.family === 'author-date' ? '_' + (r.year || '') : '');
+  if (this.citedKeys.has(key)) return true;
+  for (var ck of this.citedKeys) { if (this.isFuzzyMatch(key, ck)) return true; }
+  return false;
+};
+
 MultiFormatValidator.prototype.fuzzyFind = function(key, refMap) {
   for (var entry of refMap) {
     var rk = entry[0], refs = entry[1];
@@ -812,26 +841,82 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
   if (institutionalRefs.length === 0) return;
 
   institutionalRefs.forEach(function(r) {
-    var pairing = extractAcronymPairing(r.firstAuthor);
-    var isAcronymOnly = ACRONYM_PATTERN.test(r.firstAuthor.trim()) && !pairing;
+    var trimmedName = r.firstAuthor.trim();
+    var isAcronymOnly = ACRONYM_PATTERN.test(trimmedName);
     if (isAcronymOnly) {
-      self.warnings.push({ title: 'Referensi institusi hanya berupa singkatan', description: 'Entri referensi "' + r.firstAuthor + '" sebaiknya menuliskan nama lengkap institusi (dengan singkatan dalam kurung pada kemunculan pertama), bukan hanya singkatannya.', code: r.raw.substring(0, 120), severity: 'warning' });
+      self.warnings.push({ title: 'Referensi institusi hanya berupa singkatan', description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya.', code: r.raw.substring(0, 120), severity: 'warning' });
       return;
     }
-    if (!pairing) return; // full name only, no acronym defined - fine
-    // check: does an acronym-only in-text citation for this institution appear
-    // and does a full-name+acronym in-text citation exist to establish it?
-    var acr = pairing.acronym.toLowerCase();
-    var fullNameRegex = new RegExp(pairing.full.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').substring(0, Math.min(20, pairing.full.length)), 'i');
-    var hasFullFormInText = fullNameRegex.test(self.articleText);
-    var hasAcronymInText = new RegExp('\\b' + pairing.acronym + '\\b').test(self.articleText);
-    if (hasAcronymInText && !hasFullFormInText) {
-      self.warnings.push({ title: 'Singkatan institusi dipakai tanpa pengenalan nama lengkap', description: 'Teks menyitasi "' + pairing.acronym + '" tetapi nama lengkap "' + pairing.full + '" tidak pernah muncul di teks. Perkenalkan nama lengkap + singkatan pada sitasi pertama.', severity: 'warning' });
+
+    // Find an acronym associated with this institution (from a "Full Name [ACR]" pairing anywhere in the text)
+    var acronym = null;
+    if (self.acronymMap) {
+      for (var acr in self.acronymMap) {
+        if (Object.prototype.hasOwnProperty.call(self.acronymMap, acr) &&
+            normalizeKeyName(self.acronymMap[acr], true) === normalizeKeyName(trimmedName, true)) {
+          acronym = acr.toUpperCase();
+          break;
+        }
+      }
+    }
+    if (!acronym) return; // institution is never abbreviated anywhere -> nothing to check
+
+    var escapedFull = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var pairingRegex = new RegExp(escapedFull + '\\s*[\\(\\[]' + acronym + '[\\)\\]]', 'i');
+    var pairingMatch = pairingRegex.exec(self.articleText);
+
+    var bareRegex = new RegExp('\\b' + acronym + '\\b', 'g');
+    var firstBareIdx = -1, bm;
+    while ((bm = bareRegex.exec(self.articleText)) !== null) {
+      if (pairingMatch && bm.index >= pairingMatch.index && bm.index < pairingMatch.index + pairingMatch[0].length) continue;
+      firstBareIdx = bm.index;
+      break;
+    }
+
+    if (firstBareIdx !== -1 && (!pairingMatch || firstBareIdx < pairingMatch.index)) {
+      self.errors.push({
+        title: 'Singkatan institusi dipakai sebelum nama lengkap diperkenalkan',
+        description: 'Sitasi PERTAMA untuk institusi ini harus menuliskan nama lengkap beserta singkatannya, misalnya "' + trimmedName + ' [' + acronym + ']", baru sitasi berikutnya boleh memakai "' + acronym + '" saja. Saat ini singkatan "' + acronym + '" ditemukan dipakai duluan, sebelum (atau tanpa) pengenalan nama lengkap.',
+        severity: 'error'
+      });
     }
   });
 };
 
-// ---------- DOI / CROSSREF CHECKER ----------
+// ---------- DOCUMENT AUTO-SPLIT (find References/Daftar Pustaka heading) ----------
+var REFERENCES_HEADING_RE = /(references|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
+
+function findReferencesHeading(fullText) {
+  var lines = fullText.split('\n');
+  var offset = 0;
+  var candidates = [];
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var trimmed = line.trim();
+    if (trimmed.length > 0 && trimmed.length <= 60 && REFERENCES_HEADING_RE.test(trimmed)) {
+      var stripped = trimmed.replace(/^[\dIVXLC]+[.\)]\s*/i, '').replace(/[:.\s]+$/, '');
+      var wordCount = stripped.split(/\s+/).length;
+      if (REFERENCES_HEADING_RE.test(stripped) && wordCount <= 4) {
+        candidates.push({ lineIndex: i, offset: offset, lineLength: line.length, text: trimmed });
+      }
+    }
+    offset += line.length + 1;
+  }
+  if (candidates.length === 0) return null;
+  // prefer the LAST matching heading (a real heading near the end of the doc,
+  // not an earlier in-text mention like "...see references below...")
+  return candidates[candidates.length - 1];
+}
+
+function splitDocumentByReferences(fullText) {
+  var heading = findReferencesHeading(fullText);
+  if (!heading) return null;
+  var article = fullText.substring(0, heading.offset).trim();
+  var afterHeading = fullText.substring(heading.offset + heading.lineLength).trim();
+  return { article: article, references: afterHeading, headingText: heading.text };
+}
+
+
 var DOIChecker = {
   validateViaCrossRef: function(doi) {
     var url = 'https://api.crossref.org/works/' + encodeURIComponent(doi);
@@ -909,6 +994,8 @@ var CitationEngine = {
   extractAcronymPairing: extractAcronymPairing,
   looksLikePersonalName: looksLikePersonalName,
   DOIChecker: DOIChecker,
+  splitDocumentByReferences: splitDocumentByReferences,
+  findReferencesHeading: findReferencesHeading,
 };
 if (typeof module !== 'undefined' && module.exports) { module.exports = CitationEngine; }
 if (typeof window !== 'undefined') { window.CitationEngine = CitationEngine; }

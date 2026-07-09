@@ -186,7 +186,15 @@
       <b>Penulis institusi:</b> perkenalkan singkatan pada sitasi pertama: <code>World Health Organization [WHO] (2020)</code>, lalu <code>(WHO, 2020)</code> pada sitasi berikutnya.
     </div>
 
-    <div class="input-grid" style="margin-top:16px;">
+    <div class="field-label" style="margin-top:18px;">Tempel Dokumen Lengkap (Introduction — References), lalu klik Pisahkan</div>
+    <textarea id="fullDocText" style="min-height:140px;" placeholder="Tempel seluruh naskah di sini, dari Introduction sampai daftar Referensi/Daftar Pustaka. Sistem akan otomatis mendeteksi heading referensi dan memisahkannya ke dua kolom di bawah."></textarea>
+    <div class="actions" style="margin:10px 0 4px;">
+      <button class="ghost" id="btnAutoSplit">✂️ Pisahkan Otomatis</button>
+      <span id="splitStatus" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);"></span>
+    </div>
+
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-faint);margin-top:18px;letter-spacing:.06em;">— atau isi/edit manual per kolom di bawah —</div>
+    <div class="input-grid" style="margin-top:10px;">
       <div>
         <div class="field-label">Teks Artikel (In-Text Citations)</div>
         <textarea id="articleText" placeholder="Tempel seluruh teks artikel Anda di sini..."></textarea>

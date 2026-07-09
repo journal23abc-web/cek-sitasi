@@ -9,6 +9,9 @@
     confFill: document.getElementById('confFill'),
     exampleToggle: document.getElementById('exampleToggle'),
     exampleBox: document.getElementById('exampleBox'),
+    fullDocText: document.getElementById('fullDocText'),
+    btnAutoSplit: document.getElementById('btnAutoSplit'),
+    splitStatus: document.getElementById('splitStatus'),
     articleText: document.getElementById('articleText'),
     referenceText: document.getElementById('referenceText'),
     validateBtn: document.getElementById('validateBtn'),
@@ -27,12 +30,33 @@
   };
 
   var lastResult = null;
+  var lastValidator = null;
   var lastDoiIssues = [];
   var lastStyleId = 'apa7';
   var lastConfidence = null;
 
   els.exampleToggle.addEventListener('click', function() {
     els.exampleBox.classList.toggle('show');
+  });
+
+  els.btnAutoSplit.addEventListener('click', function() {
+    var fullText = els.fullDocText.value;
+    if (!fullText.trim()) {
+      els.splitStatus.textContent = 'Tempel dokumennya dulu di kotak atas.';
+      els.splitStatus.style.color = 'var(--red)';
+      return;
+    }
+    var split = CE.splitDocumentByReferences(fullText);
+    if (!split) {
+      els.splitStatus.textContent = '⚠️ Heading referensi tidak terdeteksi (coba beri heading eksplisit seperti "References" atau "Daftar Pustaka" di baris tersendiri, atau isi manual di bawah).';
+      els.splitStatus.style.color = 'var(--amber)';
+      return;
+    }
+    els.articleText.value = split.article;
+    els.referenceText.value = split.references;
+    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
+    els.splitStatus.style.color = 'var(--green)';
+    if (els.articleText.scrollIntoView) els.articleText.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
   function showToast(msg) {
@@ -87,6 +111,7 @@
       var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
       var result = validator.validate();
       lastResult = result;
+      lastValidator = validator;
       lastDoiIssues = [];
 
       els.loading.classList.remove('active');
@@ -208,23 +233,40 @@
       panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
       return;
     }
-    // author-date / author-page
-    var refKeys = new Set(result.references.map(function(r){ return r.firstAuthor + '_' + (r.year||''); }));
+
+    // author-date / author-page: use the validator's real match index (not a placeholder)
     var citeItems = [];
+    var seenCiteLabels = new Set();
     result.citations.forEach(function(c) {
       if (c.parts) {
         c.parts.forEach(function(p) {
           var label = (p.firstAuthor||'-') + (p.year ? ', ' + p.year : (p.page ? ' p.' + p.page : ''));
-          citeItems.push({ label: label, matched: true }); // matched status shown via errors/warnings instead
+          if (seenCiteLabels.has(label)) return;
+          seenCiteLabels.add(label);
+          var matched = lastValidator ? lastValidator.isCitationMatched(p.firstAuthor, p.year || null) : null;
+          citeItems.push({ label: label, matched: matched !== false });
         });
       } else {
-        citeItems.push({ label: (c.authors||'-') + (c.year ? ', ' + c.year : ''), matched: true });
+        var label2 = (c.authors||'-') + (c.year ? ', ' + c.year : '');
+        if (seenCiteLabels.has(label2)) return;
+        seenCiteLabels.add(label2);
+        var firstTok = splitFirstToken(c.authors);
+        var matched2 = lastValidator ? lastValidator.isCitationMatched(firstTok, c.year || null) : null;
+        citeItems.push({ label: label2, matched: matched2 !== false });
       }
     });
     var refItems = result.references.map(function(r){
-      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: true };
+      var cited = lastValidator ? lastValidator.isReferenceCited(r) : null;
+      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: cited !== false };
     });
     panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
+  }
+
+  function splitFirstToken(authorsStr) {
+    if (!authorsStr) return authorsStr;
+    var cleaned = authorsStr.replace(/\s*et\s+al\.?/i, '');
+    var arr = CE.splitOnSeparators(cleaned);
+    return arr[0] || cleaned;
   }
 
   function mapHTML(labelA, itemsA, labelB, itemsB) {
