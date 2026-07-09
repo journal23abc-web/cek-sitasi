@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Validator Sitasi Multi-Format</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#090C14; --panel:#10141F; --panel-raised:#141928; --grid:#1C2333; --hairline:#2A3247;
+    --text:#E7EBF5; --text-dim:#6B7690; --text-faint:#414B63;
+    --cyan:#4FE3E8; --violet:#8B7CF0; --amber:#F2B84B; --red:#F26D6D; --green:#3ED98F;
+    --glow-cyan: rgba(79,227,232,0.35);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; padding:40px 16px 80px;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+      radial-gradient(ellipse 900px 500px at 50% -10%, rgba(139,124,240,0.14), transparent 60%),
+      radial-gradient(ellipse 700px 400px at 90% 100%, rgba(79,227,232,0.08), transparent 60%),
+      var(--void);
+    background-size: 42px 42px, 42px 42px, auto, auto, auto;
+    font-family:'Inter', sans-serif; color:var(--text); line-height:1.6;
+  }
+  .wrap{ max-width:1200px; margin:0 auto; }
+  a{ color:var(--cyan); }
+
+  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
+  .eyebrow{ font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--cyan); margin-bottom:6px; }
+  h1{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:28px; margin:0; letter-spacing:-0.01em; }
+  .status-pill{ display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:0.1em; color:var(--text-dim); border:1px solid var(--hairline); border-radius:20px; padding:6px 12px; background:var(--panel); }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px 1px var(--glow-cyan); animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  .panel{ position:relative; background:linear-gradient(180deg, var(--panel-raised), var(--panel)); border:1px solid var(--hairline); border-radius:10px; padding:24px; margin-bottom:20px; }
+  .corner{ position:absolute; width:16px; height:16px; border:1.5px solid var(--cyan); opacity:.7; }
+  .corner.tl{ top:-1px; left:-1px; border-right:none; border-bottom:none; border-radius:10px 0 0 0; }
+  .corner.tr{ top:-1px; right:-1px; border-left:none; border-bottom:none; border-radius:0 10px 0 0; }
+  .corner.bl{ bottom:-1px; left:-1px; border-right:none; border-top:none; border-radius:0 0 0 10px; }
+  .corner.br{ bottom:-1px; right:-1px; border-left:none; border-top:none; border-radius:0 0 10px 0; }
+
+  .format-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px; }
+  .format-row label{ font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); }
+  select{ font-family:'JetBrains Mono', monospace; font-size:13px; color:var(--text); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
+  select:focus{ border-color:var(--cyan); }
+  .confidence-badge{ font-family:'JetBrains Mono', monospace; font-size:11px; padding:4px 10px; border-radius:12px; border:1px solid var(--hairline); color:var(--text-dim); display:none; }
+  .confidence-badge.show{ display:inline-flex; align-items:center; gap:6px; }
+  .confidence-badge .bar{ width:40px; height:4px; background:var(--hairline); border-radius:2px; overflow:hidden; }
+  .confidence-badge .fill{ height:100%; background:linear-gradient(90deg, var(--cyan), var(--violet)); }
+
+  .input-grid{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media(max-width:860px){ .input-grid{ grid-template-columns:1fr; } }
+  .field-label{ font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  .field-label::before{ content:"›"; color:var(--cyan); font-weight:600; }
+  textarea{ width:100%; min-height:260px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:14px; color:var(--text); font-family:'JetBrains Mono', monospace; font-size:12.5px; line-height:1.7; resize:vertical; outline:none; transition:border-color .15s ease, box-shadow .15s ease; }
+  textarea:focus{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(79,227,232,.12); }
+  textarea::placeholder{ color:var(--text-faint); }
+
+  .example-toggle{ font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--violet); cursor:pointer; margin:10px 0; display:inline-block; }
+  .example-box{ display:none; margin-top:10px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:14px; font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); line-height:1.8; }
+  .example-box.show{ display:block; }
+  .example-box code{ color:var(--violet); }
+
+  .actions{ display:flex; align-items:center; gap:16px; margin:22px 0; flex-wrap:wrap; }
+  button.primary{ font-family:'JetBrains Mono', monospace; font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
+  button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
+  button.primary:active{ transform:translateY(1px); }
+  button.ghost{ font-family:'JetBrains Mono', monospace; font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; cursor:pointer; transition:all .15s ease; }
+  button.ghost:hover{ border-color:var(--cyan); color:var(--cyan); }
+  button.ghost.copied{ border-color:var(--green); color:var(--green); }
+
+  .loading{ display:none; text-align:center; padding:30px; font-family:'JetBrains Mono', monospace; color:var(--text-dim); font-size:12.5px; }
+  .loading.active{ display:block; }
+  .spinner{ width:32px; height:32px; border:3px solid var(--hairline); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 12px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .doi-progress{ display:none; }
+  .doi-progress.active{ display:block; }
+  .doi-progress-header{ display:flex; align-items:center; gap:10px; margin-bottom:10px; font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--text-dim); }
+  .spinner-sm{ width:16px; height:16px; border:2px solid var(--hairline); border-top-color:var(--amber); border-radius:50%; animation:spin .8s linear infinite; }
+  .doi-bar{ width:100%; height:6px; background:var(--hairline); border-radius:3px; overflow:hidden; }
+  .doi-fill{ height:100%; background:linear-gradient(90deg, var(--amber), var(--cyan)); width:0%; transition:width .3s; }
+
+  .results{ display:none; }
+  .results.active{ display:block; }
+
+  .summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; margin-bottom:18px; }
+  .sum-card{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center; }
+  .sum-card .n{ font-family:'Space Grotesk', sans-serif; font-size:22px; font-weight:700; }
+  .sum-card .l{ font-family:'JetBrains Mono', monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:2px; }
+  .sum-card.err .n{ color:var(--red); } .sum-card.warn .n{ color:var(--amber); } .sum-card.sugg .n{ color:var(--cyan); }
+  .sum-card.ok .n{ color:var(--green); } .sum-card.fmt .n{ font-size:14px; color:var(--violet); }
+
+  .tabs{ display:flex; gap:4px; background:var(--panel); border:1px solid var(--hairline); border-radius:10px; padding:4px; margin-bottom:16px; flex-wrap:wrap; }
+  .tab-btn{ flex:1; min-width:90px; padding:9px 8px; background:transparent; border:none; color:var(--text-dim); font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.03em; cursor:pointer; border-radius:6px; transition:all .15s ease; }
+  .tab-btn.active{ background:var(--panel-raised); color:var(--text); }
+  .tab-btn:hover:not(.active){ color:var(--text); }
+  .tab-content{ display:none; } .tab-content.active{ display:block; }
+
+  .issue-list{ display:flex; flex-direction:column; gap:10px; }
+  .issue-item{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px 16px; border-left:3px solid; }
+  .issue-item.error{ border-left-color:var(--red); }
+  .issue-item.warning{ border-left-color:var(--amber); }
+  .issue-item.suggestion{ border-left-color:var(--cyan); }
+  .issue-header{ display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+  .issue-sev{ font-family:'JetBrains Mono', monospace; font-size:9.5px; font-weight:700; text-transform:uppercase; padding:2px 7px; border-radius:4px; letter-spacing:.04em; }
+  .issue-item.error .issue-sev{ background:rgba(242,109,109,.15); color:var(--red); }
+  .issue-item.warning .issue-sev{ background:rgba(242,184,75,.15); color:var(--amber); }
+  .issue-item.suggestion .issue-sev{ background:rgba(79,227,232,.15); color:var(--cyan); }
+  .issue-title{ font-weight:600; font-size:13.5px; }
+  .issue-desc{ font-size:12.5px; color:var(--text-dim); margin-bottom:8px; }
+  .code-block{ font-family:'JetBrains Mono', monospace; font-size:11.5px; padding:8px 34px 8px 10px; border-radius:6px; margin-top:6px; word-break:break-word; position:relative; cursor:pointer; }
+  .code-block:hover{ filter:brightness(1.15); }
+  .code-issue{ background:#0C1019; border:1px solid var(--hairline); color:var(--violet); }
+  .code-fix{ background:rgba(62,217,143,.08); border:1px solid rgba(62,217,143,.25); color:var(--green); }
+  .copy-inline{ position:absolute; top:6px; right:6px; background:var(--panel-raised); border:1px solid var(--hairline); color:var(--text-dim); width:24px; height:24px; border-radius:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:10px; }
+  .no-issues{ text-align:center; padding:36px; color:var(--text-dim); font-family:'JetBrains Mono', monospace; font-size:12.5px; }
+
+  .map-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:700px){ .map-grid{ grid-template-columns:1fr; } }
+  .map-col h4{ font-family:'JetBrains Mono', monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin:0 0 10px; }
+  .map-item{ display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; font-size:12px; font-family:'JetBrains Mono', monospace; margin-bottom:4px; }
+  .map-item.matched{ background:rgba(62,217,143,.08); color:var(--green); }
+  .map-item.unmatched{ background:rgba(242,109,109,.08); color:var(--red); }
+  .map-item .d{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .map-item.matched .d{ background:var(--green); } .map-item.unmatched .d{ background:var(--red); }
+
+  details.detected{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; margin-bottom:16px; }
+  details.detected summary{ padding:12px 16px; cursor:pointer; font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--cyan); list-style:none; }
+  details.detected summary::-webkit-details-marker{ display:none; }
+  details.detected summary::before{ content:'▶ '; font-size:9px; }
+  details.detected[open] summary::before{ content:'▼ '; }
+  .detected-content{ padding:0 16px 14px; }
+  .det-item{ font-family:'JetBrains Mono', monospace; font-size:11px; padding:8px 10px; background:#0C1019; border-radius:5px; margin-bottom:4px; color:var(--text); }
+  .det-item .sub{ color:var(--text-dim); font-size:10px; margin-top:2px; }
+  .type-tag{ font-size:9.5px; padding:1px 6px; border-radius:3px; margin-left:6px; }
+  .type-tag.inst{ background:rgba(139,124,240,.15); color:var(--violet); }
+
+  .toast{ position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--panel-raised); border:1px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'JetBrains Mono', monospace; font-size:12px; z-index:1000; transition:transform .3s ease; }
+  .toast.show{ transform:translateX(-50%) translateY(0); }
+
+  .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
+      <h1>Validator Sitasi Multi-Format</h1>
+    </div>
+    <div class="status-pill"><span class="dot"></span>ENGINE READY</div>
+  </header>
+
+  <div class="panel">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+
+    <div class="format-row">
+      <label for="styleSelect">Gaya Sitasi</label>
+      <select id="styleSelect">
+        <option value="auto">🔍 Auto-detect</option>
+        <option value="apa7">APA 7th Edition</option>
+        <option value="mla9">MLA 9th Edition</option>
+        <option value="chicago">Chicago (Author-Date)</option>
+        <option value="harvard">Harvard</option>
+        <option value="ieee">IEEE</option>
+        <option value="vancouver">Vancouver</option>
+      </select>
+      <span class="confidence-badge" id="confBadge">
+        <span id="confText">-</span>
+        <span class="bar"><span class="fill" id="confFill" style="width:0%"></span></span>
+      </span>
+    </div>
+
+    <span class="example-toggle" id="exampleToggle">📋 Lihat contoh input per gaya</span>
+    <div class="example-box" id="exampleBox">
+      <b>APA7:</b> <code>Smith (2020) found X (Brown &amp; Lee, 2019).</code> → ref: <code>Smith, J. (2020). Title. Journal, 1(1), 1-10.</code><br>
+      <b>MLA9:</b> <code>This is evident (Smith 45).</code> → ref: <code>Smith, John. "Title." Journal, vol. 1, no. 1, 2020, pp. 40-50.</code><br>
+      <b>Chicago:</b> <code>Smith (2020, 12) argues...</code> → ref: <code>Smith, John. 2020. "Title." Journal 1 (1): 10-20.</code><br>
+      <b>Harvard:</b> <code>Smith (2020) argues...</code> → ref: <code>Smith, J. (2020) 'Title', Journal, 1(1), pp. 10-20.</code><br>
+      <b>IEEE:</b> <code>Prior work [1] showed X.</code> → ref: <code>[1] J. Smith, "Title," Journal, vol. 1, no. 1, pp. 10-20, 2020.</code><br>
+      <b>Vancouver:</b> <code>Prior work (1) showed X.</code> → ref: <code>1. Smith J. Title. J Abbr. 2020;1(1):10-20.</code><br>
+      <b>Penulis institusi:</b> perkenalkan singkatan pada sitasi pertama: <code>World Health Organization [WHO] (2020)</code>, lalu <code>(WHO, 2020)</code> pada sitasi berikutnya.
+    </div>
+
+    <div class="input-grid" style="margin-top:16px;">
+      <div>
+        <div class="field-label">Teks Artikel (In-Text Citations)</div>
+        <textarea id="articleText" placeholder="Tempel seluruh teks artikel Anda di sini..."></textarea>
+      </div>
+      <div>
+        <div class="field-label">Daftar Referensi (satu entri per baris)</div>
+        <textarea id="referenceText" placeholder="Tempel daftar referensi Anda di sini, satu per baris..."></textarea>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="validateBtn">Validasi Sitasi</button>
+      <span id="topStatus" style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-dim);"></span>
+    </div>
+
+    <div class="disclaimer">
+      Validator ini bekerja berdasarkan pola teks (heuristik), bukan pemeriksaan tata bahasa penuh. Untuk gaya author-date yang mirip (APA/Harvard/Chicago), auto-detect memakai perbedaan tanda kutip &amp; posisi tahun — kalau dirasa salah deteksi, pilih gaya secara manual di dropdown. Selalu periksa ulang hasil sebelum submit ke jurnal.
+    </div>
+  </div>
+
+  <div class="loading" id="loading"><div class="spinner"></div>Menganalisis sitasi...</div>
+
+  <div class="doi-progress panel" id="doiProgress">
+    <div class="doi-progress-header"><div class="spinner-sm"></div><span id="doiLabel">Memvalidasi DOI via CrossRef...</span></div>
+    <div class="doi-bar"><div class="doi-fill" id="doiFill"></div></div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="summary-grid" id="summaryGrid"></div>
+
+    <div class="actions">
+      <button class="ghost" id="btnCopyReport">📋 Copy Full Report</button>
+      <button class="ghost" id="btnCopyFixes">✅ Copy Semua Koreksi</button>
+    </div>
+
+    <div class="panel" id="citationMapPanel"></div>
+
+    <details class="detected" id="detectedSection" open>
+      <summary>Data Terdeteksi — Sitasi &amp; Referensi</summary>
+      <div class="detected-content" id="detectedContent"></div>
+    </details>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="errors">🔴 Error</button>
+      <button class="tab-btn" data-tab="warnings">🟡 Warning</button>
+      <button class="tab-btn" data-tab="suggestions">🔵 Saran</button>
+      <button class="tab-btn" data-tab="doi">🔗 DOI</button>
+      <button class="tab-btn" data-tab="all">📋 Semua</button>
+    </div>
+    <div class="tab-content active" id="tab-errors"><div class="issue-list" id="list-errors"></div></div>
+    <div class="tab-content" id="tab-warnings"><div class="issue-list" id="list-warnings"></div></div>
+    <div class="tab-content" id="tab-suggestions"><div class="issue-list" id="list-suggestions"></div></div>
+    <div class="tab-content" id="tab-doi"><div class="issue-list" id="list-doi"></div></div>
+    <div class="tab-content" id="tab-all"><div class="issue-list" id="list-all"></div></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
