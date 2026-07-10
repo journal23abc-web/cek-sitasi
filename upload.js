@@ -414,7 +414,7 @@
         segments.push({ start: text.length, end: text.length + t.length, node: node });
         text += t;
       }
-      text += ' ';
+      text += '\n';
     }
     return { text: text, segments: segments };
   }
@@ -474,7 +474,10 @@
       });
       if (cursor < fullText.length) newRuns.push(makeRun(xmlDoc, runEl, fullText.slice(cursor), null));
       newRuns = newRuns.filter(Boolean);
-      if (newRuns.length > 0) runEl.replaceWith.apply(runEl, newRuns);
+      if (newRuns.length > 0) {
+        newRuns.forEach(function(r) { runEl.parentNode.insertBefore(r, runEl); });
+        runEl.parentNode.removeChild(runEl);
+      }
     });
   }
 
@@ -576,7 +579,11 @@
           if (clean.length === 0) return { blob: null, count: 0 };
 
           applyHighlightsToXml(xmlDoc, index, clean);
-          var newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + new XMLSerializer().serializeToString(xmlDoc);
+          // Serialize the root element (not the whole Document) — serializing a full XML
+          // Document in some browsers auto-prepends its own <?xml ...?> declaration, and
+          // adding ours on top produces two declarations, which Word refuses to open.
+          var newXml = new XMLSerializer().serializeToString(xmlDoc.documentElement);
+          if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
           zip.file(docPath, newXml);
           return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
             .then(function(blob) { return { blob: blob, count: clean.length }; });
