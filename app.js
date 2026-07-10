@@ -222,26 +222,8 @@
   }
 
   // ---------- Year-range recency analysis ----------
-  function getRefYearNum(r) {
-    if (!r || !r.year) return null;
-    var m = String(r.year).match(/(\d{4})/);
-    return m ? parseInt(m[1], 10) : null;
-  }
-
   function computeYearRange(references, from, to) {
-    var inRange = [], outRange = [], unknown = [];
-    references.forEach(function(r) {
-      var y = getRefYearNum(r);
-      if (y == null) unknown.push(r);
-      else if (y >= from && y <= to) inRange.push({ ref: r, y: y });
-      else outRange.push({ ref: r, y: y });
-    });
-    outRange.sort(function(a, b) { return b.y - a.y; });
-    var total = references.length;
-    var knownTotal = inRange.length + outRange.length;
-    var pctOfKnown = knownTotal > 0 ? Math.round((inRange.length / knownTotal) * 100) : 0;
-    var pctOfAll = total > 0 ? Math.round((inRange.length / total) * 100) : 0;
-    return { inRange: inRange, outRange: outRange, unknown: unknown, total: total, pctOfKnown: pctOfKnown, pctOfAll: pctOfAll };
+    return CE.YearRange.compute(references, from, to);
   }
 
   function setActivePreset(years) {
@@ -251,8 +233,7 @@
   }
 
   function applyYearPreset(years) {
-    var nowYear = new Date().getFullYear();
-    currentYearRange = { from: nowYear - years + 1, to: nowYear, label: years + ' Tahun Terakhir (' + (nowYear - years + 1) + '–' + nowYear + ')' };
+    currentYearRange = CE.YearRange.presetToRange(years);
     els.yrFrom.value = ''; els.yrTo.value = '';
     setActivePreset(years);
     if (lastResult) renderYearRange(lastResult);

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upload &amp; Ekspor Laporan — Validator Sitasi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --void:#090C14; --panel:#10141F; --panel-raised:#141928; --grid:#1C2333; --hairline:#2A3247;
+    --text:#E7EBF5; --text-dim:#6B7690; --text-faint:#414B63;
+    --cyan:#4FE3E8; --violet:#8B7CF0; --amber:#F2B84B; --red:#F26D6D; --green:#3ED98F;
+    --glow-cyan: rgba(79,227,232,0.35);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; padding:40px 16px 80px;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+      radial-gradient(ellipse 900px 500px at 50% -10%, rgba(139,124,240,0.14), transparent 60%),
+      radial-gradient(ellipse 700px 400px at 90% 100%, rgba(79,227,232,0.08), transparent 60%),
+      var(--void);
+    background-size: 42px 42px, 42px 42px, auto, auto, auto;
+    font-family:'Inter', sans-serif; color:var(--text); line-height:1.6;
+  }
+  .wrap{ max-width:820px; margin:0 auto; }
+  a{ color:var(--cyan); }
+  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
+  .eyebrow{ font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:var(--cyan); margin-bottom:6px; }
+  h1{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:26px; margin:0; letter-spacing:-0.01em; }
+  .back-link{ font-family:'JetBrains Mono', monospace; font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+  .back-link:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  .panel{ position:relative; background:linear-gradient(180deg, var(--panel-raised), var(--panel)); border:1px solid var(--hairline); border-radius:10px; padding:24px; margin-bottom:20px; }
+  .corner{ position:absolute; width:16px; height:16px; border:1.5px solid var(--cyan); opacity:.7; }
+  .corner.tl{ top:-1px; left:-1px; border-right:none; border-bottom:none; border-radius:10px 0 0 0; }
+  .corner.tr{ top:-1px; right:-1px; border-left:none; border-bottom:none; border-radius:0 10px 0 0; }
+  .corner.bl{ bottom:-1px; left:-1px; border-right:none; border-top:none; border-radius:0 0 0 10px; }
+  .corner.br{ bottom:-1px; right:-1px; border-left:none; border-top:none; border-radius:0 0 10px 0; }
+
+  .field-label{ font-family:'JetBrains Mono', monospace; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  .field-label::before{ content:"›"; color:var(--cyan); font-weight:600; }
+  .step-num{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--cyan); color:var(--void); font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; margin-right:8px; flex-shrink:0; }
+
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:30px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:#0C1019; }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .icon{ font-size:30px; margin-bottom:10px; }
+  .dropzone .main{ font-size:13.5px; color:var(--text); margin-bottom:4px; }
+  .dropzone .sub{ font-family:'JetBrains Mono', monospace; font-size:10.5px; color:var(--text-faint); }
+  .file-chip{ display:none; align-items:center; gap:10px; margin-top:12px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:'JetBrains Mono', monospace; font-size:12px; }
+  .file-chip.show{ display:flex; }
+  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
+  .file-chip .x:hover{ color:var(--red); }
+
+  select, input[type=number]{ font-family:'JetBrains Mono', monospace; font-size:13px; color:var(--text); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
+  select:focus, input[type=number]:focus{ border-color:var(--cyan); }
+
+  .yr-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .yr-preset{ font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.04em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:20px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
+  .yr-preset:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .yr-preset.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
+  .yr-sep{ width:1px; height:18px; background:var(--hairline); margin:0 2px; }
+  .yr-custom{ display:flex; align-items:center; gap:6px; }
+  .yr-custom label{ font-family:'JetBrains Mono', monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); }
+  .yr-input{ width:76px; }
+
+  .row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); margin-top:14px; }
+  .checkbox-row input{ accent-color:var(--cyan); width:15px; height:15px; }
+
+  button.primary{ font-family:'JetBrains Mono', monospace; font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
+  button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
+  button.primary:active{ transform:translateY(1px); }
+  button.primary:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+  button.ghost{ font-family:'JetBrains Mono', monospace; font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; cursor:pointer; transition:all .15s ease; }
+  button.ghost:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  .status{ font-family:'JetBrains Mono', monospace; font-size:11.5px; margin-top:12px; line-height:1.7; }
+  .status.info{ color:var(--text-dim); } .status.ok{ color:var(--green); } .status.err{ color:var(--red); } .status.warn{ color:var(--amber); }
+
+  .spinner{ width:16px; height:16px; border:2px solid var(--hairline); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:-3px; margin-right:6px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .manual-fix{ display:none; margin-top:16px; }
+  .manual-fix.show{ display:block; }
+  textarea{ width:100%; min-height:160px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:12px; color:var(--text); font-family:'JetBrains Mono', monospace; font-size:12px; line-height:1.7; resize:vertical; outline:none; }
+  textarea:focus{ border-color:var(--cyan); }
+
+  .results{ display:none; }
+  .results.active{ display:block; }
+  .summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; margin-bottom:18px; }
+  .sum-card{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center; }
+  .sum-card .n{ font-family:'Space Grotesk', sans-serif; font-size:22px; font-weight:700; }
+  .sum-card .l{ font-family:'JetBrains Mono', monospace; font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:2px; }
+  .sum-card.err .n{ color:var(--red); } .sum-card.warn .n{ color:var(--amber); } .sum-card.sugg .n{ color:var(--cyan); }
+  .sum-card.ok .n{ color:var(--green); } .sum-card.fmt .n{ font-size:13px; color:var(--violet); }
+
+  .yr-bar{ width:100%; height:14px; border-radius:7px; overflow:hidden; display:flex; background:var(--hairline); margin:14px 0 10px; }
+  .yr-seg{ height:100%; }
+  .yr-seg.in{ background:linear-gradient(90deg, var(--green), var(--cyan)); }
+  .yr-seg.out{ background:var(--red); opacity:.75; }
+  .yr-seg.unk{ background:var(--text-faint); }
+  .yr-legend{ display:flex; gap:18px; flex-wrap:wrap; margin-bottom:6px; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); }
+  .yr-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .yr-legend .d{ width:9px; height:9px; border-radius:3px; }
+  .yr-legend .d.in{ background:var(--cyan); } .yr-legend .d.out{ background:var(--red); } .yr-legend .d.unk{ background:var(--text-faint); }
+
+  .privacy-note{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+  .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
+      <h1>Upload &amp; Ekspor Laporan Sitasi</h1>
+    </div>
+    <a href="index.html" class="back-link">← Kembali ke Validator Utama</a>
+  </header>
+
+  <div class="panel">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+
+    <div class="field-label"><span class="step-num">1</span>Unggah Naskah (.docx atau .txt)</div>
+    <div class="dropzone" id="dropzone">
+      <div class="icon">📄</div>
+      <div class="main">Klik untuk pilih file, atau seret &amp; lepas di sini</div>
+      <div class="sub">.DOCX / .TXT — DIPROSES SEPENUHNYA DI BROWSER ANDA, TIDAK DIUNGGAH KE SERVER MANA PUN</div>
+      <input type="file" id="fileInput" accept=".docx,.txt" style="display:none;">
+    </div>
+    <div class="file-chip" id="fileChip">
+      <span id="fileIcon">📄</span>
+      <span id="fileName"></span>
+      <span id="fileSize" style="color:var(--text-dim);"></span>
+      <span class="x" id="fileRemove">✕</span>
+    </div>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">2</span>Gaya Sitasi</div>
+    <select id="styleSelect">
+      <option value="auto">🔍 Auto-detect</option>
+      <option value="apa7">APA 7th Edition</option>
+      <option value="mla9">MLA 9th Edition</option>
+      <option value="chicago">Chicago (Author-Date)</option>
+      <option value="harvard">Harvard</option>
+      <option value="ieee">IEEE</option>
+      <option value="vancouver">Vancouver</option>
+    </select>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">3</span>Rentang Tahun yang Diperiksa <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(pilih satu — dipakai untuk highlight referensi usang di laporan)</span></div>
+    <div class="yr-controls">
+      <button class="yr-preset active" data-years="5" type="button">5 Tahun Terakhir</button>
+      <button class="yr-preset" data-years="3" type="button">3 Tahun Terakhir</button>
+      <button class="yr-preset" data-years="10" type="button">10 Tahun Terakhir</button>
+      <span class="yr-sep"></span>
+      <div class="yr-custom">
+        <label for="yrFrom">Dari</label>
+        <input type="number" id="yrFrom" class="yr-input" placeholder="mis. 2018">
+        <label for="yrTo">Sampai</label>
+        <input type="number" id="yrTo" class="yr-input" placeholder="mis. 2026">
+        <button class="ghost" id="yrApplyCustom" type="button">Pakai Custom</button>
+      </div>
+    </div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="includeDoi">
+      <label for="includeDoi">Sertakan pengecekan DOI via CrossRef (butuh koneksi internet, proses sedikit lebih lama)</label>
+    </div>
+
+    <div class="row" style="margin-top:24px;">
+      <button class="primary" id="processBtn" disabled>⚙️ Proses &amp; Buat Laporan</button>
+      <span class="status info" id="statusMsg"></span>
+    </div>
+
+    <div class="manual-fix" id="manualFix">
+      <div class="field-label" style="margin-top:4px;">Heading referensi tidak terdeteksi otomatis — periksa/potong manual di bawah</div>
+      <textarea id="manualArticle" placeholder="Teks artikel (Introduction — sebelum daftar referensi)..."></textarea>
+      <div style="height:10px;"></div>
+      <textarea id="manualReferences" placeholder="Daftar referensi, satu per baris..."></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button class="ghost" id="manualProcessBtn" type="button">✅ Proses dari Teks Manual</button>
+      </div>
+    </div>
+
+    <div class="privacy-note">🔒 File Anda tidak pernah dikirim ke server — parsing (.docx via Mammoth.js) dan seluruh analisis sitasi berjalan langsung di browser Anda. Laporan .docx dibuat juga di sisi klien lalu diunduh langsung ke perangkat Anda.</div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="panel">
+      <div class="field-label">Ringkasan Hasil</div>
+      <div class="summary-grid" id="summaryGrid"></div>
+      <div id="yearRangeSummary"></div>
+      <button class="primary" id="downloadBtn" style="margin-top:10px;">⬇️ Unduh Laporan (.docx)</button>
+      <span class="status info" id="downloadStatus"></span>
+      <div class="disclaimer">Laporan mengikuti format tetap: Ringkasan → Rentang Tahun (referensi bermasalah di-highlight merah/kuning seperti penanda Turnitin) → Detail Error/Warning/Saran → (opsional) Validasi DOI. Selalu periksa ulang sebelum submit ke jurnal.</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.js"></script>
+<script src="engine.js"></script>
+<script src="upload.js"></script>
+</body>
+</html>

@@ -970,6 +970,33 @@ var DOIChecker = {
   }
 };
 
+var YearRange = {
+  getRefYear: function(r) {
+    if (!r || !r.year) return null;
+    var m = String(r.year).match(/(\d{4})/);
+    return m ? parseInt(m[1], 10) : null;
+  },
+  compute: function(references, from, to) {
+    var inRange = [], outRange = [], unknown = [];
+    references.forEach(function(r) {
+      var y = YearRange.getRefYear(r);
+      if (y == null) unknown.push(r);
+      else if (y >= from && y <= to) inRange.push({ ref: r, y: y });
+      else outRange.push({ ref: r, y: y });
+    });
+    outRange.sort(function(a, b) { return b.y - a.y; });
+    var total = references.length;
+    var knownTotal = inRange.length + outRange.length;
+    var pctOfKnown = knownTotal > 0 ? Math.round((inRange.length / knownTotal) * 100) : 0;
+    var pctOfAll = total > 0 ? Math.round((inRange.length / total) * 100) : 0;
+    return { inRange: inRange, outRange: outRange, unknown: unknown, total: total, pctOfKnown: pctOfKnown, pctOfAll: pctOfAll };
+  },
+  presetToRange: function(years) {
+    var nowYear = new Date().getFullYear();
+    return { from: nowYear - years + 1, to: nowYear, label: years + ' Tahun Terakhir (' + (nowYear - years + 1) + '\u2013' + nowYear + ')' };
+  }
+};
+
 var CitationEngine = {
   MultiFormatValidator: MultiFormatValidator,
   normalizeKeyName: normalizeKeyName,
@@ -996,6 +1023,7 @@ var CitationEngine = {
   DOIChecker: DOIChecker,
   splitDocumentByReferences: splitDocumentByReferences,
   findReferencesHeading: findReferencesHeading,
+  YearRange: YearRange,
 };
 if (typeof module !== 'undefined' && module.exports) { module.exports = CitationEngine; }
 if (typeof window !== 'undefined') { window.CitationEngine = CitationEngine; }
