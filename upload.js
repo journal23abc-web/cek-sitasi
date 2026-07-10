@@ -1,7 +1,6 @@
 (function() {
   var CE = window.CitationEngine;
   var STYLES = CE.STYLES;
-  var docxLib = window.docx;
 
   var els = {
     dropzone: document.getElementById('dropzone'),
@@ -25,6 +24,7 @@
     results: document.getElementById('results'),
     summaryGrid: document.getElementById('summaryGrid'),
     yearRangeSummary: document.getElementById('yearRangeSummary'),
+    reportPreview: document.getElementById('reportPreview'),
     downloadBtn: document.getElementById('downloadBtn'),
     downloadStatus: document.getElementById('downloadStatus'),
   };
@@ -129,6 +129,7 @@
       state.yearRange = CE.YearRange.presetToRange(years);
       els.yrFrom.value = ''; els.yrTo.value = '';
       setActivePreset(years);
+      if (state.lastResult) renderResults(state.lastResult, state.lastDoiIssues);
     });
   });
   els.yrApplyCustom.addEventListener('click', function() {
@@ -138,6 +139,7 @@
     if (from > to) { var t = from; from = to; to = t; }
     state.yearRange = { from: from, to: to, label: 'Custom (' + from + '\u2013' + to + ')' };
     setActivePreset(null);
+    if (state.lastResult) renderResults(state.lastResult, state.lastDoiIssues);
   });
 
   // ---------- Processing ----------
@@ -271,153 +273,107 @@
     } else {
       els.yearRangeSummary.innerHTML = '';
     }
+
+    renderReportPreview(result, doiIssues);
   }
 
-  // ---------- DOCX report export ----------
-  els.downloadBtn.addEventListener('click', function() {
-    if (!state.lastResult) return;
-    els.downloadBtn.disabled = true;
-    els.downloadStatus.textContent = 'Menyusun dokumen .docx...';
-    els.downloadStatus.className = 'status info';
-    buildReportDocx(state.lastResult, state.lastDoiIssues, state.yearRange, state.lastStyleId, state.lastConfidence, state.fileName)
-      .then(function(blob) {
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-        var dateStr = new Date().toISOString().slice(0, 10);
-        a.href = url;
-        a.download = 'Laporan-Validasi-Sitasi-' + STYLES[state.lastStyleId].name.replace(/[^\w]+/g, '-') + '-' + dateStr + '.docx';
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
-        els.downloadStatus.textContent = '✅ Laporan berhasil diunduh.';
-        els.downloadStatus.className = 'status ok';
-        els.downloadBtn.disabled = false;
-      })
-      .catch(function(err) {
-        els.downloadStatus.textContent = '⚠️ Gagal membuat laporan: ' + err.message;
-        els.downloadStatus.className = 'status err';
-        els.downloadBtn.disabled = false;
-      });
-  });
+  // ---------- HTML report preview + print-to-PDF export ----------
+  function renderReportPreview(result, doiIssues) {
+    var style = STYLES[result.styleId];
+    var stats = CE.YearRange.compute(result.references, state.yearRange.from, state.yearRange.to);
+    var confidence = state.lastConfidence;
+    var html = '';
 
-  function buildReportDocx(result, doiIssues, yearRange, styleId, confidence, sourceFileName) {
-    var D = docxLib;
-    var style = STYLES[styleId];
-    var stats = CE.YearRange.compute(result.references, yearRange.from, yearRange.to);
-    var children = [];
+    html += '<h1>Laporan Validasi Sitasi</h1>';
+    html += '<div class="rp-meta">Gaya sitasi: <b>' + esc(style.name) + '</b>' + (confidence != null ? ' (auto-detect, keyakinan ' + confidence + '%)' : '') + '</div>';
+    html += '<div class="rp-meta">Sumber dokumen: ' + esc(state.fileName || '-') + '  |  Dibuat: ' + esc(new Date().toLocaleString('id-ID')) + '</div>';
 
-    children.push(new D.Paragraph({ text: 'LAPORAN VALIDASI SITASI', heading: D.HeadingLevel.TITLE }));
-    children.push(new D.Paragraph({
-      children: [
-        new D.TextRun({ text: 'Gaya sitasi: ' + style.name + (confidence != null ? ' (auto-detect, keyakinan ' + confidence + '%)' : ''), italics: true }),
-      ]
-    }));
-    children.push(new D.Paragraph({
-      children: [
-        new D.TextRun({ text: 'Sumber dokumen: ' + (sourceFileName || '-') + '  |  Dibuat: ' + new Date().toLocaleString('id-ID'), italics: true, color: '6B7690' }),
-      ]
-    }));
+    // Ringkasan
+    html += '<h2>Ringkasan</h2><table>';
+    html += row('Total sitasi terdeteksi', countCitations(result.citations));
+    html += row('Total referensi terdeteksi', result.references.length);
+    html += row('Error / Warning / Saran', result.errors.length + ' / ' + result.warnings.length + ' / ' + result.suggestions.length);
+    html += row('Rentang tahun diperiksa', state.yearRange.label);
+    html += row('Dalam rentang / Di luar rentang / Tahun tak diketahui', stats.inRange.length + ' / ' + stats.outRange.length + ' / ' + stats.unknown.length);
+    html += row('Persentase dalam rentang (dari yang bertahun jelas)', stats.pctOfKnown + '%');
+    html += '</table>';
 
-    // ---- Ringkasan ----
-    children.push(new D.Paragraph({ text: 'Ringkasan', heading: D.HeadingLevel.HEADING_1, spacing: { before: 300 } }));
-    var summaryLines = [
-      'Total sitasi terdeteksi: ' + countCitations(result.citations),
-      'Total referensi terdeteksi: ' + result.references.length,
-      'Error: ' + result.errors.length + '   |   Warning: ' + result.warnings.length + '   |   Saran: ' + result.suggestions.length,
-      'Rentang tahun diperiksa: ' + yearRange.label,
-      'Referensi dalam rentang: ' + stats.inRange.length + '   |   Di luar rentang: ' + stats.outRange.length + '   |   Tahun tidak diketahui: ' + stats.unknown.length,
-      'Persentase dalam rentang (dari referensi bertahun jelas): ' + stats.pctOfKnown + '%',
-    ];
-    summaryLines.forEach(function(line) {
-      children.push(new D.Paragraph({ text: line, bullet: { level: 0 } }));
-    });
-
-    // ---- Rentang tahun referensi (highlighted) ----
-    children.push(new D.Paragraph({ text: 'Analisis Rentang Tahun Referensi', heading: D.HeadingLevel.HEADING_1, spacing: { before: 300 } }));
-    children.push(new D.Paragraph({
-      children: [
-        new D.TextRun('Referensi yang '),
-        new D.TextRun({ text: 'berada di luar rentang ' + yearRange.label, highlight: 'red' }),
-        new D.TextRun(' atau '),
-        new D.TextRun({ text: 'tidak terdeteksi tahunnya', highlight: 'yellow' }),
-        new D.TextRun(' ditandai di bawah ini, sisanya berada dalam rentang yang wajar.'),
-      ],
-      spacing: { after: 150 },
-    }));
+    // Rentang tahun
+    html += '<h2>Analisis Rentang Tahun Referensi</h2>';
+    var inW = stats.total ? (stats.inRange.length / stats.total * 100) : 0;
+    var outW = stats.total ? (stats.outRange.length / stats.total * 100) : 0;
+    var unkW = stats.total ? (stats.unknown.length / stats.total * 100) : 0;
+    html += '<div class="rp-bar"><div class="rp-seg in" style="width:' + inW + '%"></div><div class="rp-seg out" style="width:' + outW + '%"></div><div class="rp-seg unk" style="width:' + unkW + '%"></div></div>';
+    html += '<div class="rp-legend">🟩 Dalam rentang &nbsp; 🟥 Di luar rentang (' + esc(state.yearRange.label) + ') &nbsp; ⬜ Tahun tidak diketahui</div>';
     if (result.references.length === 0) {
-      children.push(new D.Paragraph({ text: 'Tidak ada referensi terdeteksi.' }));
+      html += '<p class="rp-empty">Tidak ada referensi terdeteksi.</p>';
     } else {
+      html += '<ul>';
       result.references.forEach(function(r) {
         var y = CE.YearRange.getRefYear(r);
-        var outOfRange = y != null && (y < yearRange.from || y > yearRange.to);
+        var outOfRange = y != null && (y < state.yearRange.from || y > state.yearRange.to);
         var unknown = y == null;
-        var yearRun;
-        if (outOfRange) yearRun = new D.TextRun({ text: ' (' + (r.year || '-') + ')', highlight: 'red', bold: true });
-        else if (unknown) yearRun = new D.TextRun({ text: ' (tahun tidak terdeteksi)', highlight: 'yellow', bold: true });
-        else yearRun = new D.TextRun({ text: ' (' + r.year + ')' });
-        children.push(new D.Paragraph({
-          bullet: { level: 0 },
-          children: [
-            new D.TextRun({ text: (r.firstAuthor || '-'), bold: true }),
-            yearRun,
-            new D.TextRun(r.title ? ' — ' + r.title : ''),
-          ],
-        }));
+        var yearHtml;
+        if (outOfRange) yearHtml = ' <mark class="hl-red">(' + esc(r.year || '-') + ')</mark>';
+        else if (unknown) yearHtml = ' <mark class="hl-yellow">(tahun tidak terdeteksi)</mark>';
+        else yearHtml = ' (' + esc(r.year) + ')';
+        html += '<li><b>' + esc(r.firstAuthor || '-') + '</b>' + yearHtml + (r.title ? ' — ' + esc(r.title) : '') + '</li>';
       });
+      html += '</ul>';
     }
 
-    // ---- Issues ----
-    function addIssueSection(title, issues, codeHighlight) {
-      children.push(new D.Paragraph({ text: title + ' (' + issues.length + ')', heading: D.HeadingLevel.HEADING_1, spacing: { before: 300 } }));
-      if (issues.length === 0) {
-        children.push(new D.Paragraph({ text: 'Tidak ada masalah pada kategori ini.' }));
-        return;
-      }
-      issues.forEach(function(issue, i) {
-        children.push(new D.Paragraph({ text: (i + 1) + '. ' + issue.title, heading: D.HeadingLevel.HEADING_3, spacing: { before: 150 } }));
-        children.push(new D.Paragraph({ text: issue.description }));
-        if (issue.code) {
-          children.push(new D.Paragraph({
-            children: [new D.TextRun('Ditemukan: '), new D.TextRun({ text: issue.code, highlight: codeHighlight })],
-          }));
-        }
-        if (issue.correction) {
-          children.push(new D.Paragraph({
-            children: [new D.TextRun('Saran perbaikan: '), new D.TextRun({ text: issue.correction, highlight: 'green' })],
-          }));
-        }
-      });
-    }
-    addIssueSection('Error', result.errors, 'red');
-    addIssueSection('Warning', result.warnings, 'yellow');
-    addIssueSection('Saran', result.suggestions, 'cyan');
+    // Issues
+    html += issueSection('Error', result.errors, 'error', 'hl-red');
+    html += issueSection('Warning', result.warnings, 'warning', 'hl-yellow');
+    html += issueSection('Saran', result.suggestions, 'suggestion', 'hl-cyan');
 
-    // ---- DOI (optional) ----
+    // DOI
     if (doiIssues && doiIssues.length > 0) {
-      children.push(new D.Paragraph({ text: 'Validasi DOI (CrossRef)', heading: D.HeadingLevel.HEADING_1, spacing: { before: 300 } }));
+      html += '<h2>Validasi DOI (CrossRef)</h2><ul>';
       doiIssues.forEach(function(d) {
-        var hl = d.status === 'fake' ? 'red' : d.status === 'mismatch' || d.status === 'unverified' ? 'yellow' : d.status === 'valid' ? 'green' : undefined;
-        children.push(new D.Paragraph({
-          bullet: { level: 0 },
-          children: [
-            new D.TextRun({ text: '[' + d.status.toUpperCase() + '] ', bold: true, highlight: hl }),
-            new D.TextRun(d.title + ' — ' + d.description),
-          ],
-        }));
+        var cls = d.status === 'fake' ? 'hl-red' : (d.status === 'mismatch' || d.status === 'unverified') ? 'hl-yellow' : d.status === 'valid' ? 'hl-green' : null;
+        html += '<li>' + (cls ? '<mark class="' + cls + '">[' + esc(d.status.toUpperCase()) + ']</mark>' : '[' + esc(d.status.toUpperCase()) + ']') + ' ' + esc(d.title) + ' — ' + esc(d.description) + '</li>';
       });
+      html += '</ul>';
     }
 
-    // ---- Disclaimer ----
-    children.push(new D.Paragraph({ text: 'Catatan', heading: D.HeadingLevel.HEADING_1, spacing: { before: 300 } }));
-    children.push(new D.Paragraph({
-      children: [new D.TextRun({
-        text: 'Laporan ini dihasilkan otomatis berdasarkan pola teks (heuristik), bukan pemeriksaan tata bahasa penuh atau penilaian editorial. Bagian yang di-highlight menandai hal yang perlu diperiksa ulang secara manual, bukan kesalahan pasti. Selalu tinjau kembali sebelum mengirimkan naskah ke jurnal.',
-        italics: true, color: '6B7690', size: 18,
-      })],
-    }));
+    html += '<div class="rp-foot">Laporan ini dihasilkan otomatis berdasarkan pola teks (heuristik), bukan pemeriksaan tata bahasa penuh atau penilaian editorial. Bagian yang di-highlight menandai hal yang perlu diperiksa ulang secara manual, bukan kesalahan pasti. Selalu tinjau kembali sebelum mengirimkan naskah ke jurnal.</div>';
 
-    var doc = new D.Document({
-      sections: [{ properties: {}, children: children }],
-    });
-    return D.Packer.toBlob(doc);
+    els.reportPreview.innerHTML = html;
   }
+
+  function row(k, v) {
+    return '<tr><td class="k">' + esc(String(k)) + '</td><td class="v">' + esc(String(v)) + '</td></tr>';
+  }
+
+  function issueSection(title, issues, sevClass, codeHl) {
+    var html = '<h2>' + esc(title) + ' (' + issues.length + ')</h2>';
+    if (issues.length === 0) {
+      html += '<p class="rp-empty">Tidak ada masalah pada kategori ini.</p>';
+      return html;
+    }
+    issues.forEach(function(issue, i) {
+      html += '<div class="rp-issue ' + sevClass + '">';
+      html += '<div class="t">' + (i + 1) + '. ' + esc(issue.title) + '</div>';
+      html += '<div class="d">' + esc(issue.description) + '</div>';
+      if (issue.code) html += '<div>Ditemukan: <mark class="' + codeHl + '">' + esc(issue.code) + '</mark></div>';
+      if (issue.correction) html += '<div>Saran perbaikan: <mark class="hl-green">' + esc(issue.correction) + '</mark></div>';
+      html += '</div>';
+    });
+    return html;
+  }
+
+  els.downloadBtn.addEventListener('click', function() {
+    if (!state.lastResult) return;
+    var style = STYLES[state.lastStyleId];
+    var dateStr = new Date().toISOString().slice(0, 10);
+    var suggestedName = 'Laporan-Validasi-Sitasi-' + style.name.replace(/[^\w]+/g, '-') + '-' + dateStr;
+    var originalTitle = document.title;
+    document.title = suggestedName;
+    setStatus('', 'info');
+    els.downloadStatus.textContent = 'Membuka dialog cetak... pilih tujuan "Simpan sebagai PDF".';
+    els.downloadStatus.className = 'status info';
+    window.print();
+    setTimeout(function() { document.title = originalTitle; }, 1000);
+  });
 })();
