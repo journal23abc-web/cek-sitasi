@@ -109,7 +109,7 @@ function extractAuthorDateCitations(text) {
   var m;
   while ((m = parenRegex.exec(text)) !== null) {
     var content = m[1].trim();
-    if (!/\b\d{4}[a-z]?\b/.test(content) && !/\bn\.d\.\b/i.test(content)) continue;
+    if (!/\b\d{4}[a-z]?\b/.test(content) && !/\bn\.d\./i.test(content)) continue;
     if (/^[\d\s,.\-–:;]+$/.test(content)) continue;
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
@@ -119,6 +119,15 @@ function extractAuthorDateCitations(text) {
   while ((m = narrativeRegex.exec(text)) !== null) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
     var year = m[2].trim();
+    if (!authors) continue;
+    // Strip a leading discourse/transition word so it isn't glued onto the real author
+    // list, e.g. "However, Riand and Radil (2022)" -> "Riand and Radil (2022)". Without
+    // this, the whole match gets discarded by the skipWords check below and the citation
+    // is lost entirely (shows up as a false "not cited in text" warning instead).
+    var leadMatch = authors.match(/^([A-Za-zÀ-ÿ]+),?\s+/);
+    if (leadMatch && skipWords.has(leadMatch[1].toLowerCase())) {
+      authors = authors.slice(leadMatch[0].length).trim();
+    }
     if (!authors) continue;
     var tokens = authors.split(/\s+/);
     if (tokens[0] && tokens[0].replace(/\./g, '').length <= 1) {
@@ -139,11 +148,15 @@ function extractAuthorDateCitations(text) {
 
 function parseParentheticalAuthorDate(content) {
   var parts = [];
+  function addParsed(p) {
+    if (!p) return;
+    if (Array.isArray(p)) parts = parts.concat(p);
+    else parts.push(p);
+  }
   if (content.includes(';')) {
-    content.split(';').forEach(function(s) { var p = parseSingleAuthorDate(s.trim()); if (p) parts.push(p); });
+    content.split(';').forEach(function(s) { addParsed(parseSingleAuthorDate(s.trim())); });
   } else {
-    var p = parseSingleAuthorDate(content);
-    if (p) parts.push(p);
+    addParsed(parseSingleAuthorDate(content));
   }
   return parts;
 }
@@ -154,9 +167,22 @@ function parseSingleAuthorDate(text) {
   var yearMatch = text.match(/,?\s*(\d{4}[a-z]?|n\.d\.)(?:\s*[,:]\s*(.+))?$/);
   if (!yearMatch) return null;
   var year = yearMatch[1];
-  var pageInfo = yearMatch[2] ? yearMatch[2].trim() : null;
+  var tail = yearMatch[2] ? yearMatch[2].trim() : null;
   var authorPart = text.substring(0, yearMatch.index).replace(/,\s*$/, '').trim();
   if (!authorPart) return null;
+
+  // Detect a grouped multi-year citation for the SAME author, e.g. "APA, 2023a, 2023b"
+  // or "Smith, 2019, 2021" — several works by one author cited together — instead of
+  // misreading the extra year(s) as page/location info.
+  var years = [year];
+  var pageInfo = null;
+  if (tail) {
+    var tailTokens = tail.split(/\s*,\s*/);
+    var allYears = tailTokens.length > 0 && tailTokens.every(function(t) { return /^\d{4}[a-z]?$/.test(t) || /^n\.d\.$/i.test(t); });
+    if (allYears) years = years.concat(tailTokens);
+    else pageInfo = tail;
+  }
+
   var hasEtAl = /et\s+al\.?/i.test(authorPart);
   var cleanAuthorPart = authorPart.replace(/\s*,?\s*et\s+al\.?/i, '').trim();
   var usedAmp = /&/.test(authorPart);
@@ -165,6 +191,12 @@ function parseSingleAuthorDate(text) {
   var authorCount = authors.length;
   if (hasEtAl) authorCount = Math.max(authorCount, 3);
   var firstAuthor = authors[0] || null;
+
+  if (years.length > 1) {
+    return years.map(function(y) {
+      return { raw: text, authors: authors, authorCount: authorCount, year: y, pageInfo: null, hasEtAl: hasEtAl, firstAuthor: firstAuthor, usedAmp: usedAmp, usedAnd: usedAnd, groupedSameAuthor: true };
+    });
+  }
   return { raw: text, authors: authors, authorCount: authorCount, year: year, pageInfo: pageInfo, hasEtAl: hasEtAl, firstAuthor: firstAuthor, usedAmp: usedAmp, usedAnd: usedAnd };
 }
 
@@ -194,7 +226,10 @@ function extractAuthorPageCitations(text) {
 }
 
 function buildSkipWordSet() {
-  return new Set(['the','this','that','these','those','according','see','also','however','therefore','furthermore','additionally','although','despite','while','when','where','which','what','how','why','if','then','but','for','with','from','into','after','before','during','between','through','about','above','below','under','over','chapter','table','figure','section','part','page','volume','issue','article','book','report','study','research','data','result','analysis','method','model','system','process','program','project','case','based','related','compared','combined','integrated','developed','proposed','presented','discussed','examined','investigated','observed','found','showed','demonstrated','indicated','suggested','reported','published','available','retrieved','accessed','and','or','not','all','any','both','each','few','many','most','other','some','such','only','own','same','so','than','too','very','just','because','until','against','among','around','along','across','it','its','he','she','they','we','you','is','are','was','were','has','have','had','do','does','did','will','would','could','should','may','must','can','in','on','at','by','to','of','as','be','been','being','per','via','versus','vs','etc','e.g','i.e','cf','al','et','selanjutnya','kemudian','selain','meskipun','walaupun','oleh','karena','sehingga','dengan','pada','dari','dalam','untuk','yang','adalah','merupakan','menurut','berdasarkan','sebagai','turut','serta','bahwa','tidak','sudah','masih','juga','bahkan','hanya','saja']);
+  return new Set(['the','this','that','these','those','according','see','also','however','therefore','furthermore','additionally','although','despite','while','when','where','which','what','how','why','if','then','but','for','with','from','into','after','before','during','between','through','about','above','below','under','over','chapter','table','figure','section','part','page','volume','issue','article','book','report','study','research','data','result','analysis','method','model','system','process','program','project','case','based','related','compared','combined','integrated','developed','proposed','presented','discussed','examined','investigated','observed','found','showed','demonstrated','indicated','suggested','reported','published','available','retrieved','accessed','and','or','not','all','any','both','each','few','many','most','other','some','such','only','own','same','so','than','too','very','just','because','until','against','among','around','along','across','it','its','he','she','they','we','you','is','are','was','were','has','have','had','do','does','did','will','would','could','should','may','must','can','in','on','at','by','to','of','as','be','been','being','per','via','versus','vs','etc','e.g','i.e','cf','al','et',
+    'moreover','meanwhile','consequently','hence','thus','similarly','conversely','nonetheless','nevertheless','accordingly','subsequently','specifically','notably','overall','finally','importantly','interestingly','surprisingly','unfortunately','fortunately','clearly','indeed','certainly','likewise','regardless','instead','otherwise','still','yet','besides','elsewhere','first','second','third','next','last','lastly','initially','ultimately','thereafter','therein','herein','conversely',
+    'selanjutnya','kemudian','selain','meskipun','walaupun','oleh','karena','sehingga','dengan','pada','dari','dalam','untuk','yang','adalah','merupakan','menurut','berdasarkan','sebagai','turut','serta','bahwa','tidak','sudah','masih','juga','bahkan','hanya','saja',
+    'namun','sementara','sedangkan','akibatnya','demikian','singkatnya','secara','tentu','pasti','selain itu','di sisi lain','sebaliknya','pertama','kedua','ketiga','terakhir','akhirnya']);
 }
 
 var STYLES = {
