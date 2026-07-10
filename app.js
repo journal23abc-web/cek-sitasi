@@ -165,9 +165,10 @@
             var crYear = null;
             if (res.data.published && res.data.published['date-parts'] && res.data.published['date-parts'][0]) crYear = String(res.data.published['date-parts'][0][0]);
             if (cmp.mismatches.length > 0) {
+              var noteTexts = cmp.mismatches.map(function(m){ return m.note; }).filter(Boolean);
               doiIssues.push({
                 ref: ref, doi: ref.doi, status: 'mismatch', severity: 'warning', title: 'DOI valid, metadata tidak sesuai',
-                description: 'DOI ada, tetapi ' + cmp.mismatches.map(function(m){return m.field;}).join(', ') + ' tidak cocok dengan data CrossRef.', code: ref.doi,
+                description: 'DOI ada, tetapi ' + cmp.mismatches.map(function(m){return m.field + ' (referensi: ' + m.ref + ', CrossRef: ' + m.cr + ')';}).join('; ') + ' tidak cocok dengan data CrossRef.' + (noteTexts.length ? ' ' + noteTexts.join(' ') : ''), code: ref.doi,
                 metadata: { ref: { title: ref.title, authors: (ref.authors||[]).join(', '), year: ref.year }, crossref: { title: crTitle, authors: crAuthors, year: crYear }, mismatches: cmp.mismatches, matches: cmp.matches }
               });
             } else {

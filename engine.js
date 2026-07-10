@@ -981,16 +981,41 @@ var DOIChecker = {
       if (sim > 0.6) matches.push({ field: 'Judul', ref: ref.title, cr: crTitle, similarity: Math.round(sim * 100) });
       else mismatches.push({ field: 'Judul', ref: ref.title, cr: crTitle, similarity: Math.round(sim * 100) });
     }
-    var crYear = null;
-    if (crossRefData.published && crossRefData.published['date-parts'] && crossRefData.published['date-parts'][0]) crYear = String(crossRefData.published['date-parts'][0][0]);
-    else if (crossRefData['published-print'] && crossRefData['published-print']['date-parts']) crYear = String(crossRefData['published-print']['date-parts'][0][0]);
-    else if (crossRefData['published-online'] && crossRefData['published-online']['date-parts']) crYear = String(crossRefData['published-online']['date-parts'][0][0]);
-    else if (crossRefData.created && crossRefData.created['date-parts'] && crossRefData.created['date-parts'][0]) crYear = String(crossRefData.created['date-parts'][0][0]);
-    if (crYear && ref.year) {
-      var refYear = ref.year.replace(/[a-z]$/, '');
-      if (crYear === refYear) matches.push({ field: 'Tahun', ref: ref.year, cr: crYear });
-      else mismatches.push({ field: 'Tahun', ref: ref.year, cr: crYear });
+
+    // CrossRef records several dates that can legitimately differ from each other by a year
+    // or more (e.g. "published-online" ahead-of-print vs. "published-print" for the actual
+    // issue/volume the author cites). Checking only one of them causes false "mismatch"
+    // flags. Instead, collect every date CrossRef has and accept the reference year if it
+    // matches ANY of them.
+    function extractYear(dateObj) {
+      if (dateObj && dateObj['date-parts'] && dateObj['date-parts'][0] && dateObj['date-parts'][0][0]) {
+        return String(dateObj['date-parts'][0][0]);
+      }
+      return null;
     }
+    var yearFields = [
+      extractYear(crossRefData.issued),
+      extractYear(crossRefData.published),
+      extractYear(crossRefData['published-print']),
+      extractYear(crossRefData['published-online']),
+      extractYear(crossRefData.created),
+    ].filter(Boolean);
+
+    if (yearFields.length > 0 && ref.year) {
+      var refYear = ref.year.replace(/[a-z]$/, '');
+      var distinctYears = yearFields.filter(function(y, i) { return yearFields.indexOf(y) === i; });
+      if (distinctYears.indexOf(refYear) !== -1) {
+        matches.push({ field: 'Tahun', ref: ref.year, cr: refYear });
+      } else {
+        mismatches.push({
+          field: 'Tahun', ref: ref.year, cr: distinctYears.join(' / '),
+          note: distinctYears.length > 1
+            ? 'CrossRef mencatat beberapa tanggal berbeda (kemungkinan online-first vs. edisi cetak/volume resmi) dan tidak satu pun cocok persis dengan tahun di referensi — periksa manual, kemungkinan besar bukan DOI yang salah.'
+            : 'Bisa jadi tanggal terbit online CrossRef berbeda dari edisi cetak/volume resmi yang dikutip — periksa manual sebelum dianggap salah.'
+        });
+      }
+    }
+
     var crAuthors = crossRefData.author || [];
     if (crAuthors.length > 0 && ref.firstAuthor && !ref.isInstitutional) {
       var crFirst = (crAuthors[0].family || '').toLowerCase();
