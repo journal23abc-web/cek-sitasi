@@ -448,36 +448,88 @@
 
   // Applies a set of {start,end,color} matches (in the index's coordinate space) onto the
   // live XML DOM, splitting/cloning runs as needed so every OTHER run/formatting stays untouched.
-  function applyHighlightsToXml(xmlDoc, index, matches) {
-    var bySegment = new Map();
-    index.segments.forEach(function(seg) {
-      matches.forEach(function(m) {
-        var s = Math.max(m.start, seg.start);
-        var e = Math.min(m.end, seg.end);
-        if (s < e) {
-          if (!bySegment.has(seg)) bySegment.set(seg, []);
-          bySegment.get(seg).push({ color: m.color, locStart: s - seg.start, locEnd: e - seg.start });
+  function escapeXml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  }
+
+  // Applies highlight AND inserts real Word review-comment anchors (commentRangeStart/End +
+  // commentReference) around each match, so the "why" shows up in Word's Comments pane
+  // instead of being a mystery-colored highlight. Matches must be pre-sorted & non-overlapping.
+  function applyHighlightsAndComments(xmlDoc, index, matches) {
+    var comments = [];
+    var nextId = 0;
+    matches.forEach(function(m) {
+      var touched = index.segments.filter(function(seg) { return seg.start < m.end && seg.end > m.start; });
+      if (touched.length === 0) return;
+      var firstHlRun = null, lastHlRun = null, ok = true;
+      touched.forEach(function(seg) {
+        var runEl = seg.node.parentNode;
+        if (!runEl || !runEl.parentNode) { ok = false; return; }
+        var fullText = seg.node.textContent;
+        var s = Math.max(m.start, seg.start) - seg.start;
+        var e = Math.min(m.end, seg.end) - seg.start;
+        var before = fullText.slice(0, s), mid = fullText.slice(s, e), after = fullText.slice(e);
+        var beforeRun = makeRun(xmlDoc, runEl, before, null);
+        var hlRun = makeRun(xmlDoc, runEl, mid, m.color);
+        var afterRun = makeRun(xmlDoc, runEl, after, null);
+        var parent = runEl.parentNode;
+        if (beforeRun) parent.insertBefore(beforeRun, runEl);
+        parent.insertBefore(hlRun, runEl);
+        if (afterRun) parent.insertBefore(afterRun, runEl);
+        parent.removeChild(runEl);
+        if (!firstHlRun) firstHlRun = hlRun;
+        lastHlRun = hlRun;
+      });
+      if (!ok || !firstHlRun || !m.comment) return;
+      var id = nextId++;
+      var startEl = xmlDoc.createElementNS(W_NS, 'w:commentRangeStart'); startEl.setAttributeNS(W_NS, 'w:id', String(id));
+      var endEl = xmlDoc.createElementNS(W_NS, 'w:commentRangeEnd'); endEl.setAttributeNS(W_NS, 'w:id', String(id));
+      var refRun = xmlDoc.createElementNS(W_NS, 'w:r');
+      var refRPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+      var rStyle = xmlDoc.createElementNS(W_NS, 'w:rStyle'); rStyle.setAttributeNS(W_NS, 'w:val', 'CommentReference');
+      refRPr.appendChild(rStyle);
+      refRun.appendChild(refRPr);
+      var refEl = xmlDoc.createElementNS(W_NS, 'w:commentReference'); refEl.setAttributeNS(W_NS, 'w:id', String(id));
+      refRun.appendChild(refEl);
+
+      firstHlRun.parentNode.insertBefore(startEl, firstHlRun);
+      var insertPoint = lastHlRun.nextSibling;
+      lastHlRun.parentNode.insertBefore(endEl, insertPoint);
+      lastHlRun.parentNode.insertBefore(refRun, insertPoint);
+
+      comments.push({ id: id, text: m.comment });
+    });
+    return comments;
+  }
+
+  function buildCommentsXml(comments) {
+    var body = comments.map(function(c) {
+      return '<w:comment w:id="' + c.id + '" w:author="Validator Sitasi" w:initials="VS" w:date="' + new Date().toISOString() + '"><w:p><w:r><w:t xml:space="preserve">' + escapeXml(c.text) + '</w:t></w:r></w:p></w:comment>';
+    }).join('');
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<w:comments xmlns:w="' + W_NS + '">' + body + '</w:comments>';
+  }
+
+  // Registers word/comments.xml with the package if it isn't already wired up
+  // ([Content_Types].xml override + word/_rels/document.xml.rels relationship).
+  function ensureCommentsInfrastructure(zip) {
+    var ctPath = '[Content_Types].xml';
+    return zip.file(ctPath).async('string').then(function(ctXml) {
+      if (!/PartName="\/word\/comments\.xml"/.test(ctXml)) {
+        ctXml = ctXml.replace('</Types>', '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/></Types>');
+        zip.file(ctPath, ctXml);
+      }
+      var relsPath = 'word/_rels/document.xml.rels';
+      var relsFile = zip.file(relsPath);
+      var relsPromise = relsFile ? relsFile.async('string') : Promise.resolve('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>');
+      return relsPromise.then(function(relsXml) {
+        if (!/Target="comments\.xml"/.test(relsXml)) {
+          var ids = (relsXml.match(/Id="rId(\d+)"/g) || []).map(function(s) { return parseInt(s.replace(/\D/g, ''), 10); });
+          var nextNum = (ids.length ? Math.max.apply(null, ids) : 0) + 1;
+          var relId = 'rId' + nextNum;
+          relsXml = relsXml.replace('</Relationships>', '<Relationship Id="' + relId + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>');
+          zip.file(relsPath, relsXml);
         }
       });
-    });
-    bySegment.forEach(function(pieces, seg) {
-      pieces.sort(function(a, b) { return a.locStart - b.locStart; });
-      var runEl = seg.node.parentNode;
-      if (!runEl || !runEl.parentNode) return;
-      var fullText = seg.node.textContent;
-      var cursor = 0;
-      var newRuns = [];
-      pieces.forEach(function(p) {
-        if (p.locStart > cursor) newRuns.push(makeRun(xmlDoc, runEl, fullText.slice(cursor, p.locStart), null));
-        newRuns.push(makeRun(xmlDoc, runEl, fullText.slice(p.locStart, p.locEnd), p.color));
-        cursor = p.locEnd;
-      });
-      if (cursor < fullText.length) newRuns.push(makeRun(xmlDoc, runEl, fullText.slice(cursor), null));
-      newRuns = newRuns.filter(Boolean);
-      if (newRuns.length > 0) {
-        newRuns.forEach(function(r) { runEl.parentNode.insertBefore(r, runEl); });
-        runEl.parentNode.removeChild(runEl);
-      }
     });
   }
 
@@ -527,7 +579,6 @@
             var anchorTerm = (r.raw || r.firstAuthor || '').split(/\s+/).slice(0, 8).join(' ');
             var anchorRe = flexiblePattern(anchorTerm, 'i');
             if (!anchorRe) return;
-            anchorRe.lastIndex = cursor;
             var slice = fullText.slice(cursor);
             var localMatch = slice.match(anchorRe);
             if (!localMatch) return;
@@ -546,12 +597,18 @@
               var ym = yearRe ? window_.match(yearRe) : null;
               if (ym) {
                 var ys = anchorStart + ym.index;
-                matches.push({ start: ys, end: ys + ym[0].length, color: 'red' });
+                matches.push({
+                  start: ys, end: ys + ym[0].length, color: 'red',
+                  comment: '⚠ Tahun referensi ' + ym[0] + ' berada di LUAR rentang yang diperiksa (' + yearRange.label + '). Pertimbangkan mengganti dengan sumber yang lebih baru, atau abaikan jika memang sengaja mengacu pada sumber lama (mis. teori dasar/klasik).'
+                });
                 return;
               }
             }
             // Unknown year, or year token not found near the anchor: flag the anchor itself.
-            matches.push({ start: anchorStart, end: anchorEnd, color: 'yellow' });
+            matches.push({
+              start: anchorStart, end: anchorEnd, color: 'yellow',
+              comment: '❔ Tahun untuk referensi ini tidak dapat dideteksi otomatis oleh sistem. Mohon periksa manual apakah masih dalam rentang ' + yearRange.label + '.'
+            });
           });
 
           // 2) In-text issues (errors/warnings/suggestions) with a findable "code" snippet
@@ -561,6 +618,8 @@
               var re = flexiblePattern(issue.code, 'gi');
               if (!re) return;
               var found = findAllMatches(fullText.slice(0, refZoneStart), 0, re, color);
+              var commentText = issue.title + ' — ' + issue.description + (issue.correction ? ' | Saran perbaikan: ' + issue.correction : '');
+              found.forEach(function(f) { f.comment = commentText; });
               matches = matches.concat(found);
             });
           }
@@ -578,15 +637,20 @@
 
           if (clean.length === 0) return { blob: null, count: 0 };
 
-          applyHighlightsToXml(xmlDoc, index, clean);
+          var comments = applyHighlightsAndComments(xmlDoc, index, clean);
           // Serialize the root element (not the whole Document) — serializing a full XML
           // Document in some browsers auto-prepends its own <?xml ...?> declaration, and
           // adding ours on top produces two declarations, which Word refuses to open.
           var newXml = new XMLSerializer().serializeToString(xmlDoc.documentElement);
           if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
           zip.file(docPath, newXml);
-          return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-            .then(function(blob) { return { blob: blob, count: clean.length }; });
+
+          var infraPromise = comments.length > 0 ? ensureCommentsInfrastructure(zip) : Promise.resolve();
+          return infraPromise.then(function() {
+            if (comments.length > 0) zip.file('word/comments.xml', buildCommentsXml(comments));
+            return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
+              .then(function(blob) { return { blob: blob, count: clean.length, commentCount: comments.length }; });
+          });
         });
       });
   }
@@ -616,7 +680,7 @@
         a.download = (state.fileName || 'naskah').replace(/\.docx$/i, '') + '-HIGHLIGHT-' + dateStr + '.docx';
         document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(function() { URL.revokeObjectURL(url); }, 4000);
-        els.downloadOriginalStatus.textContent = '✅ Berhasil — ' + res.count + ' bagian di-highlight. Format asli dipertahankan.';
+        els.downloadOriginalStatus.textContent = '✅ Berhasil — ' + res.count + ' bagian di-highlight, ' + res.commentCount + ' komentar Word ditambahkan (buka panel Review > Comments di Word untuk membaca alasannya). Format asli dipertahankan.';
         els.downloadOriginalStatus.className = 'status ok';
       })
       .catch(function(err) {
