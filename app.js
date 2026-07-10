@@ -22,6 +22,11 @@
     doiFill: document.getElementById('doiFill'),
     results: document.getElementById('results'),
     summaryGrid: document.getElementById('summaryGrid'),
+    yearRangePanel: document.getElementById('yearRangePanel'),
+    yearRangeBody: document.getElementById('yearRangeBody'),
+    yrFrom: document.getElementById('yrFrom'),
+    yrTo: document.getElementById('yrTo'),
+    yrApplyCustom: document.getElementById('yrApplyCustom'),
     citationMapPanel: document.getElementById('citationMapPanel'),
     detectedContent: document.getElementById('detectedContent'),
     toast: document.getElementById('toast'),
@@ -34,6 +39,7 @@
   var lastDoiIssues = [];
   var lastStyleId = 'apa7';
   var lastConfidence = null;
+  var currentYearRange = null; // { from: number, to: number, label: string }
 
   els.exampleToggle.addEventListener('click', function() {
     els.exampleBox.classList.toggle('show');
@@ -180,6 +186,7 @@
 
   function renderAll(result, doiIssues) {
     renderSummary(result, doiIssues);
+    renderYearRange(result);
     renderCitationMap(result);
     renderDetected(result);
     renderIssueList('list-errors', result.errors);
@@ -212,6 +219,116 @@
       else n += 1;
     });
     return n;
+  }
+
+  // ---------- Year-range recency analysis ----------
+  function getRefYearNum(r) {
+    if (!r || !r.year) return null;
+    var m = String(r.year).match(/(\d{4})/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function computeYearRange(references, from, to) {
+    var inRange = [], outRange = [], unknown = [];
+    references.forEach(function(r) {
+      var y = getRefYearNum(r);
+      if (y == null) unknown.push(r);
+      else if (y >= from && y <= to) inRange.push({ ref: r, y: y });
+      else outRange.push({ ref: r, y: y });
+    });
+    outRange.sort(function(a, b) { return b.y - a.y; });
+    var total = references.length;
+    var knownTotal = inRange.length + outRange.length;
+    var pctOfKnown = knownTotal > 0 ? Math.round((inRange.length / knownTotal) * 100) : 0;
+    var pctOfAll = total > 0 ? Math.round((inRange.length / total) * 100) : 0;
+    return { inRange: inRange, outRange: outRange, unknown: unknown, total: total, pctOfKnown: pctOfKnown, pctOfAll: pctOfAll };
+  }
+
+  function setActivePreset(years) {
+    document.querySelectorAll('.yr-preset').forEach(function(btn) {
+      btn.classList.toggle('active', years != null && parseInt(btn.dataset.years, 10) === years);
+    });
+  }
+
+  function applyYearPreset(years) {
+    var nowYear = new Date().getFullYear();
+    currentYearRange = { from: nowYear - years + 1, to: nowYear, label: years + ' Tahun Terakhir (' + (nowYear - years + 1) + '–' + nowYear + ')' };
+    els.yrFrom.value = ''; els.yrTo.value = '';
+    setActivePreset(years);
+    if (lastResult) renderYearRange(lastResult);
+  }
+
+  document.querySelectorAll('.yr-preset').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      applyYearPreset(parseInt(btn.dataset.years, 10));
+    });
+  });
+
+  els.yrApplyCustom.addEventListener('click', function() {
+    var from = parseInt(els.yrFrom.value, 10);
+    var to = parseInt(els.yrTo.value, 10);
+    if (!from || !to) { showToast('Isi kedua tahun (dari & sampai)'); return; }
+    if (from > to) { var t = from; from = to; to = t; }
+    currentYearRange = { from: from, to: to, label: 'Custom (' + from + '–' + to + ')' };
+    setActivePreset(null);
+    if (lastResult) renderYearRange(lastResult);
+  });
+
+  function renderYearRange(result) {
+    if (!result.references || result.references.length === 0) {
+      els.yearRangePanel.style.display = 'none';
+      return;
+    }
+    els.yearRangePanel.style.display = '';
+    if (!currentYearRange) {
+      applyYearPreset(5); // default: 5 tahun terakhir (this call re-invokes renderYearRange)
+      return;
+    }
+    var stats = computeYearRange(result.references, currentYearRange.from, currentYearRange.to);
+    var pctClass = stats.pctOfKnown >= 70 ? '' : stats.pctOfKnown >= 40 ? 'mid' : 'low';
+    var inW = stats.total ? (stats.inRange.length / stats.total * 100) : 0;
+    var outW = stats.total ? (stats.outRange.length / stats.total * 100) : 0;
+    var unkW = stats.total ? (stats.unknown.length / stats.total * 100) : 0;
+
+    var html = '';
+    html += '<div class="yr-summary">' +
+      '<span class="yr-pct ' + pctClass + '">' + stats.pctOfKnown + '%</span>' +
+      '<span class="yr-range-label">referensi (dengan tahun diketahui) berada dalam rentang <b style="color:var(--text);">' + currentYearRange.label + '</b> — ' +
+      stats.inRange.length + ' dari ' + (stats.inRange.length + stats.outRange.length) + ' referensi bertahun jelas' +
+      (stats.unknown.length ? ' (' + stats.unknown.length + ' tanpa tahun terdeteksi)' : '') + '</span>' +
+      '</div>';
+    html += '<div class="yr-bar">' +
+      '<div class="yr-seg in" style="width:' + inW + '%"></div>' +
+      '<div class="yr-seg out" style="width:' + outW + '%"></div>' +
+      '<div class="yr-seg unk" style="width:' + unkW + '%"></div>' +
+      '</div>';
+    html += '<div class="yr-legend">' +
+      '<span><span class="d in"></span>Dalam rentang (' + stats.inRange.length + ')</span>' +
+      '<span><span class="d out"></span>Di luar rentang (' + stats.outRange.length + ')</span>' +
+      '<span><span class="d unk"></span>Tahun tidak diketahui (' + stats.unknown.length + ')</span>' +
+      '</div>';
+
+    html += '<div class="yr-list-wrap">';
+    html += '<div><h4>⛔ Di Luar Rentang (' + stats.outRange.length + ')</h4>';
+    if (stats.outRange.length === 0) {
+      html += '<p style="color:var(--text-dim);font-size:11.5px;">Tidak ada — semua referensi bertahun berada dalam rentang.</p>';
+    } else {
+      stats.outRange.forEach(function(item) {
+        html += '<div class="yr-ref-item out"><span>' + esc(item.ref.firstAuthor || '-') + '</span><span class="yr-tag">' + esc(String(item.y)) + '</span></div>';
+      });
+    }
+    html += '</div>';
+    html += '<div><h4>❔ Tahun Tidak Diketahui (' + stats.unknown.length + ')</h4>';
+    if (stats.unknown.length === 0) {
+      html += '<p style="color:var(--text-dim);font-size:11.5px;">Tidak ada.</p>';
+    } else {
+      stats.unknown.forEach(function(r) {
+        html += '<div class="yr-ref-item unk"><span>' + esc(r.firstAuthor || '-') + '</span><span class="yr-tag">' + esc(r.year || 'n/a') + '</span></div>';
+      });
+    }
+    html += '</div></div>';
+
+    els.yearRangeBody.innerHTML = html;
   }
 
   function esc(t) { return CE.esc(t); }
@@ -396,6 +513,10 @@
     var style = STYLES[r.styleId];
     var rpt = '========================================\n  LAPORAN VALIDASI SITASI — ' + style.name.toUpperCase() + '\n========================================\n\n';
     rpt += 'RINGKASAN:\n  Error: ' + r.errors.length + '\n  Warning: ' + r.warnings.length + '\n  Saran: ' + r.suggestions.length + '\n  Referensi: ' + r.references.length + '\n\n';
+    if (currentYearRange && r.references.length) {
+      var yrStats = computeYearRange(r.references, currentYearRange.from, currentYearRange.to);
+      rpt += 'RENTANG TAHUN REFERENSI (' + currentYearRange.label + '):\n  Dalam rentang: ' + yrStats.inRange.length + '\n  Di luar rentang: ' + yrStats.outRange.length + '\n  Tahun tidak diketahui: ' + yrStats.unknown.length + '\n  Persentase dalam rentang (dari yang bertahun jelas): ' + yrStats.pctOfKnown + '%\n\n';
+    }
     rpt += '----------------------------------------\nREFERENSI TERDETEKSI:\n----------------------------------------\n';
     r.references.forEach(function(ref) {
       rpt += '  • ' + (ref.numLabel!=null?'['+ref.numLabel+'] ':'') + (ref.firstAuthor||'-') + (ref.year?' ('+ref.year+')':'') + (ref.isInstitutional?' [INSTITUSI]':'') + '\n';

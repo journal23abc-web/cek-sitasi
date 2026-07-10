@@ -142,6 +142,39 @@
   .toast{ position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--panel-raised); border:1px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'JetBrains Mono', monospace; font-size:12px; z-index:1000; transition:transform .3s ease; }
   .toast.show{ transform:translateX(-50%) translateY(0); }
 
+  /* Year-range recency panel */
+  .yr-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .yr-preset{ font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.04em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:20px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
+  .yr-preset:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .yr-preset.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
+  .yr-sep{ width:1px; height:18px; background:var(--hairline); margin:0 2px; }
+  .yr-custom{ display:flex; align-items:center; gap:6px; }
+  .yr-custom label{ font-family:'JetBrains Mono', monospace; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); }
+  .yr-input{ width:76px; font-family:'JetBrains Mono', monospace; font-size:12.5px; color:var(--text); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:7px 9px; outline:none; }
+  .yr-input:focus{ border-color:var(--cyan); }
+  .yr-apply{ font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.06em; color:var(--void); background:linear-gradient(135deg, var(--amber), var(--cyan)); border:none; border-radius:6px; padding:8px 14px; cursor:pointer; font-weight:600; }
+  .yr-summary{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .yr-pct{ font-family:'Space Grotesk', sans-serif; font-size:30px; font-weight:700; color:var(--green); }
+  .yr-pct.low{ color:var(--red); }
+  .yr-pct.mid{ color:var(--amber); }
+  .yr-range-label{ font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); }
+  .yr-bar{ width:100%; height:14px; border-radius:7px; overflow:hidden; display:flex; background:var(--hairline); margin-bottom:12px; }
+  .yr-seg{ height:100%; transition:width .3s ease; }
+  .yr-seg.in{ background:linear-gradient(90deg, var(--green), var(--cyan)); }
+  .yr-seg.out{ background:var(--red); opacity:.75; }
+  .yr-seg.unk{ background:var(--text-faint); }
+  .yr-legend{ display:flex; gap:18px; flex-wrap:wrap; margin-bottom:16px; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); }
+  .yr-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .yr-legend .d{ width:9px; height:9px; border-radius:3px; }
+  .yr-legend .d.in{ background:var(--cyan); } .yr-legend .d.out{ background:var(--red); } .yr-legend .d.unk{ background:var(--text-faint); }
+  .yr-list-wrap{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:700px){ .yr-list-wrap{ grid-template-columns:1fr; } }
+  .yr-list-wrap h4{ font-family:'JetBrains Mono', monospace; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin:0 0 10px; }
+  .yr-ref-item{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; border-radius:6px; font-size:12px; font-family:'JetBrains Mono', monospace; margin-bottom:4px; background:var(--panel); border-left:3px solid; }
+  .yr-ref-item.out{ border-left-color:var(--red); color:var(--text); }
+  .yr-ref-item.unk{ border-left-color:var(--text-faint); color:var(--text-dim); }
+  .yr-ref-item .yr-tag{ font-family:'JetBrains Mono', monospace; font-size:10px; color:var(--text-dim); flex-shrink:0; }
+
   .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
 </style>
 </head>
@@ -228,6 +261,24 @@
     <div class="actions">
       <button class="ghost" id="btnCopyReport">📋 Copy Full Report</button>
       <button class="ghost" id="btnCopyFixes">✅ Copy Semua Koreksi</button>
+    </div>
+
+    <div class="panel" id="yearRangePanel" style="display:none;">
+      <div class="field-label">Analisis Rentang Tahun Referensi</div>
+      <div class="yr-controls">
+        <button class="yr-preset" data-years="3">3 Tahun Terakhir</button>
+        <button class="yr-preset" data-years="5">5 Tahun Terakhir</button>
+        <button class="yr-preset" data-years="10">10 Tahun Terakhir</button>
+        <span class="yr-sep"></span>
+        <div class="yr-custom">
+          <label for="yrFrom">Dari</label>
+          <input type="number" id="yrFrom" class="yr-input" placeholder="mis. 2018">
+          <label for="yrTo">Sampai</label>
+          <input type="number" id="yrTo" class="yr-input" placeholder="mis. 2026">
+          <button class="yr-apply" id="yrApplyCustom">Terapkan</button>
+        </div>
+      </div>
+      <div id="yearRangeBody"></div>
     </div>
 
     <div class="panel" id="citationMapPanel"></div>
