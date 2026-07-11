@@ -59,14 +59,6 @@
   textarea:focus{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(79,227,232,.12); }
   textarea::placeholder{ color:var(--text-faint); }
 
-  .rich-input{ width:100%; min-height:260px; max-height:520px; overflow-y:auto; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:14px; color:var(--text); font-family:'JetBrains Mono', monospace; font-size:12.5px; line-height:1.7; outline:none; transition:border-color .15s ease, box-shadow .15s ease; white-space:pre-wrap; word-wrap:break-word; }
-  .rich-input:focus{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(79,227,232,.12); }
-  .rich-input.is-empty::before{ content:attr(data-placeholder); color:var(--text-faint); pointer-events:none; }
-  .rich-input i, .rich-input em{ color:var(--violet); font-style:italic; }
-  #fullDocText.rich-input{ min-height:140px; }
-  .italic-hint{ font-family:'JetBrains Mono', monospace; font-size:10px; color:var(--text-faint); margin-top:6px; display:flex; align-items:center; gap:5px; }
-  .italic-hint b{ color:var(--violet); font-style:italic; }
-
   .example-toggle{ font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--violet); cursor:pointer; margin:10px 0; display:inline-block; }
   .example-box{ display:none; margin-top:10px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:14px; font-family:'JetBrains Mono', monospace; font-size:11.5px; color:var(--text-dim); line-height:1.8; }
   .example-box.show{ display:block; }
@@ -233,7 +225,7 @@
     </div>
 
     <div class="field-label" style="margin-top:18px;">Tempel Dokumen Lengkap (Introduction — References), lalu klik Pisahkan</div>
-    <div id="fullDocText" class="rich-input" data-placeholder="Tempel seluruh naskah di sini, dari Introduction sampai daftar Referensi/Daftar Pustaka. Format italic dari Word/Google Docs akan otomatis dipertahankan. Sistem akan otomatis mendeteksi heading referensi dan memisahkannya ke dua kolom di bawah."></div>
+    <textarea id="fullDocText" style="min-height:140px;" placeholder="Tempel seluruh naskah di sini, dari Introduction sampai daftar Referensi/Daftar Pustaka. Sistem akan otomatis mendeteksi heading referensi dan memisahkannya ke dua kolom di bawah."></textarea>
     <div class="actions" style="margin:10px 0 4px;">
       <button class="ghost" id="btnAutoSplit">✂️ Pisahkan Otomatis</button>
       <span id="splitStatus" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);"></span>
@@ -243,12 +235,12 @@
     <div class="input-grid" style="margin-top:10px;">
       <div>
         <div class="field-label">Teks Artikel (In-Text Citations)</div>
-        <div id="articleText" class="rich-input" data-placeholder="Tempel seluruh teks artikel Anda di sini..."></div>
+        <textarea id="articleText" placeholder="Tempel seluruh teks artikel Anda di sini..."></textarea>
       </div>
       <div>
         <div class="field-label">Daftar Referensi (satu entri per baris)</div>
-        <div id="referenceText" class="rich-input" data-placeholder="Tempel daftar referensi Anda di sini, satu per baris..."></div>
-        <div class="italic-hint">🖋️ Paste dari Word/Google Docs mempertahankan <b>italic</b> — dipakai untuk cek format nama jurnal/judul buku. Blok teks &amp; Ctrl+I untuk menandai italic manual.</div>
+        <textarea id="referenceText" placeholder="Tempel daftar referensi Anda di sini, satu per baris..."></textarea>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);margin-top:6px;">💡 Mau sekalian cek format italic &amp; huruf besar/kecil pada judul jurnal/buku? Gunakan menu <b>📤 Upload File</b> di atas — cek format itu dibaca langsung dari file .docx asli, jauh lebih akurat daripada dari copy-paste.</div>
       </div>
     </div>
 
@@ -318,7 +310,6 @@
 <div class="toast" id="toast"></div>
 
 <script src="engine.js?v=9"></script>
-<script src="richtext.js?v=2"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

@@ -41,38 +41,27 @@
   var lastConfidence = null;
   var currentYearRange = null; // { from: number, to: number, label: string }
 
-  RichEditable.init(els.fullDocText);
-  RichEditable.init(els.articleText);
-  RichEditable.init(els.referenceText);
-
   els.exampleToggle.addEventListener('click', function() {
     els.exampleBox.classList.toggle('show');
   });
 
   els.btnAutoSplit.addEventListener('click', function() {
-    var fullText = RichEditable.getText(els.fullDocText);
+    var fullText = els.fullDocText.value;
     if (!fullText.trim()) {
       els.splitStatus.textContent = 'Tempel dokumennya dulu di kotak atas.';
       els.splitStatus.style.color = 'var(--red)';
       return;
     }
-    var richLines = RichEditable.getRichLines(els.fullDocText);
-    var split = RichEditable.splitRichByReferences(richLines);
+    var split = CE.splitDocumentByReferences(fullText);
     if (!split) {
       els.splitStatus.textContent = '⚠️ Heading referensi tidak terdeteksi (coba beri heading eksplisit seperti "References" atau "Daftar Pustaka" di baris tersendiri, atau isi manual di bawah).';
       els.splitStatus.style.color = 'var(--amber)';
       return;
     }
-    RichEditable.setRichLines(els.articleText, split.article);
-    RichEditable.setRichLines(els.referenceText, split.references);
-    var refCharCount = split.references.reduce(function(n, line) { return n + line.reduce(function(m, seg) { return m + seg.text.length; }, 0); }, 0);
-    if (refCharCount < 20) {
-      els.splitStatus.textContent = '⚠️ Heading "' + split.headingText + '" ketemu, tapi hampir tidak ada isi referensi di baliknya (' + refCharCount + ' karakter) — kemungkinan paste dari browser Anda tidak membawa seluruh isi dokumen, atau heading yang ketemu bukan yang benar. Coba isi/tempel manual kolom "Daftar Referensi" di bawah, atau gunakan menu Upload File untuk unggah .docx langsung (lebih andal untuk dokumen panjang).';
-      els.splitStatus.style.color = 'var(--amber)';
-    } else {
-      els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" (' + split.references.length + ' baris referensi) — format italic ikut dipertahankan. Silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
-      els.splitStatus.style.color = 'var(--green)';
-    }
+    els.articleText.value = split.article;
+    els.referenceText.value = split.references;
+    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
+    els.splitStatus.style.color = 'var(--green)';
     if (els.articleText.scrollIntoView) els.articleText.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 
@@ -99,8 +88,8 @@
   }
 
   els.validateBtn.addEventListener('click', function() {
-    var articleText = RichEditable.getText(els.articleText).trim();
-    var referenceText = RichEditable.getText(els.referenceText).trim();
+    var articleText = els.articleText.value.trim();
+    var referenceText = els.referenceText.value.trim();
     if (!articleText) { alert('Silakan masukkan teks artikel.'); return; }
 
     els.loading.classList.add('active');
@@ -127,21 +116,6 @@
 
       var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
       var result = validator.validate();
-
-      // Reference FORMATTING check (italic placement + sentence/title case) — uses the rich
-      // (italic-preserving) content of the reference box, aligned 1:1 with result.references
-      // by dropping blank lines the same way CE.parseReferenceList does.
-      var richRefLines = RichEditable.getRichLines(els.referenceText).filter(function(line) {
-        return line.some(function(seg) { return seg.text.trim(); });
-      });
-      var fmtIssues = CE.checkReferenceFormatting(richRefLines, result.references, styleId);
-      fmtIssues.forEach(function(fi) {
-        result.suggestions.push({
-          title: fi.field === 'italic' ? 'Format italic referensi' : 'Format huruf besar/kecil judul',
-          description: fi.message,
-          code: fi.ref.raw.substring(0, 150),
-        });
-      });
 
       lastResult = result;
       lastValidator = validator;

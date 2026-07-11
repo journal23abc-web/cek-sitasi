@@ -199,6 +199,19 @@
     els.results.classList.add('active');
     renderResults(result, []);
 
+    if (state.originalFile) {
+      checkDocxReferenceFormatting(styleId).then(function(fmtIssues) {
+        fmtIssues.forEach(function(fi) {
+          result.suggestions.push({
+            title: fi.field === 'italic' ? 'Format italic referensi' : 'Format huruf besar/kecil judul',
+            description: fi.message,
+            code: fi.ref.raw.substring(0, 150),
+          });
+        });
+        if (fmtIssues.length > 0) renderResults(result, state.lastDoiIssues);
+      });
+    }
+
     if (els.includeDoi.checked && result.references.length > 0) {
       setStatus('Memvalidasi DOI via CrossRef (' + result.references.length + ' referensi)...', 'info');
       runDoiChecks(result.references).then(function(doiIssues) {
@@ -551,6 +564,59 @@
     var num = String(yearRaw).match(/(\d{4})/);
     if (!num) return null;
     return new RegExp('\\(?\\b' + num[1] + '[a-z]?\\b\\)?', 'i');
+  }
+
+  // Extracts reference-list paragraphs directly from the uploaded .docx's own XML (with
+  // real italic info per run), independent of mammoth's plain-text extraction — this is
+  // what makes the italic/case format check accurate: it reads the actual OOXML formatting
+  // instead of relying on clipboard paste fidelity.
+  function checkDocxReferenceFormatting(styleId) {
+    if (!state.originalFile) return Promise.resolve([]);
+    return state.originalFile.arrayBuffer()
+      .then(function(buf) { return JSZip.loadAsync(buf); })
+      .then(function(zip) {
+        var docPath = 'word/document.xml';
+        if (!zip.file(docPath)) return [];
+        return zip.file(docPath).async('string').then(function(xmlString) {
+          var xmlDoc = new DOMParser().parseFromString(xmlString, 'application/xml');
+          var paragraphs = xmlDoc.getElementsByTagName('w:p');
+          var richLines = [];
+          for (var p = 0; p < paragraphs.length; p++) {
+            var runs = paragraphs[p].getElementsByTagName('w:r');
+            var segs = [];
+            for (var r = 0; r < runs.length; r++) {
+              var run = runs[r];
+              var rPrList = run.getElementsByTagName('w:rPr');
+              var rPr = rPrList.length > 0 ? rPrList[0] : null;
+              var italic = false;
+              if (rPr) {
+                var iList = rPr.getElementsByTagName('w:i');
+                if (iList.length > 0) {
+                  var val = iList[0].getAttribute('w:val');
+                  italic = (val === null || val === '' || val === '1' || val === 'true' || val === 'on');
+                }
+              }
+              var tNodes = run.getElementsByTagName('w:t');
+              var text = '';
+              for (var t = 0; t < tNodes.length; t++) text += tNodes[t].textContent;
+              if (!text) continue;
+              var last = segs[segs.length - 1];
+              if (last && last.italic === italic) last.text += text;
+              else segs.push({ text: text, italic: italic });
+            }
+            richLines.push(segs);
+          }
+          function toPlain(l) { return l.map(function(s) { return s.text; }).join(''); }
+          var fullText = richLines.map(toPlain).join('\n');
+          var heading = CE.findReferencesHeading(fullText);
+          if (!heading) return [];
+          var refRichLines = richLines.slice(heading.lineIndex + 1).filter(function(l) { return toPlain(l).trim(); });
+          var refText = refRichLines.map(toPlain).join('\n');
+          var references = CE.parseReferenceList(refText, styleId);
+          return CE.checkReferenceFormatting(refRichLines, references, styleId);
+        });
+      })
+      .catch(function(err) { console.error('Formatting check failed:', err); return []; });
   }
 
   function buildHighlightedOriginalDocx(result, doiIssues, yearRange) {
