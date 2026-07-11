@@ -663,7 +663,7 @@ MultiFormatValidator.prototype.validateNumeric = function() {
   this.references.forEach(function(r) { if (r.numLabel != null) refByNumber[r.numLabel] = r; });
 
   if (this.references.length > 0 && Object.keys(refByNumber).length === 0) {
-    this.warnings.push({ title: 'Nomor referensi tidak terdeteksi', description: 'Baris referensi tidak diawali format nomor yang dikenali (' + (this.style.refPrefix === 'bracket' ? '[1]' : '1.') + ') untuk gaya ' + this.style.name + '.', severity: 'warning' });
+    this.errors.push({ title: 'Nomor referensi tidak terdeteksi', description: 'Baris referensi tidak diawali format nomor yang dikenali (' + (this.style.refPrefix === 'bracket' ? '[1]' : '1.') + ') untuk gaya ' + this.style.name + '.', severity: 'error' });
   }
 
   // first-appearance order of each cited number
@@ -683,7 +683,7 @@ MultiFormatValidator.prototype.validateNumeric = function() {
   var actualCitationOrderOfRefNumbers = this.references.map(function(r){return r.numLabel;}).filter(function(n){return n!=null;});
   var isSequential = actualCitationOrderOfRefNumbers.every(function(n, i){ return n === i + 1; });
   if (!isSequential && actualCitationOrderOfRefNumbers.length > 1) {
-    this.warnings.push({ title: 'Penomoran referensi tidak berurutan', description: 'Daftar referensi ' + this.style.name + ' seharusnya diberi nomor urut 1, 2, 3, … tanpa lompat/duplikat.', severity: 'warning' });
+    this.errors.push({ title: 'Penomoran referensi tidak berurutan', description: 'Daftar referensi ' + this.style.name + ' seharusnya diberi nomor urut 1, 2, 3, … tanpa lompat/duplikat.', severity: 'error' });
   }
   var mismatchOrder = false;
   for (var i = 0; i < firstSeenOrder.length; i++) {
@@ -696,7 +696,7 @@ MultiFormatValidator.prototype.validateNumeric = function() {
   // uncited references
   this.references.forEach(function(r) {
     if (r.numLabel != null && !seenNums.has(r.numLabel)) {
-      self.warnings.push({ title: 'Referensi tidak pernah disitasi', description: 'Referensi nomor ' + r.numLabel + ' (' + (r.firstAuthor || '-') + ') ada di daftar pustaka tapi tidak dirujuk di teks.', code: r.raw.substring(0, 120), severity: 'warning' });
+      self.errors.push({ title: 'Referensi tidak pernah disitasi', description: 'Referensi nomor ' + r.numLabel + ' (' + (r.firstAuthor || '-') + ') ada di daftar pustaka tapi tidak dirujuk di teks.', code: r.raw.substring(0, 120), severity: 'error' });
     }
   });
 
@@ -778,7 +778,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       if (!fuzzy) {
         self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '" tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error' });
       } else {
-        self.warnings.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '" mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'warning' });
+        self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '" mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'suggestion' });
       }
     } else {
       var refs = refMap.get(d.key);
@@ -795,7 +795,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     if (!citedKeys.has(key)) {
       var found = false;
       for (var ck of citedKeys) { if (self.isFuzzyMatch(key, ck)) { found = true; break; } }
-      if (!found) self.warnings.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'warning' });
+      if (!found) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'error' });
     }
   });
 };
@@ -831,7 +831,7 @@ MultiFormatValidator.prototype.validateAuthorPage = function() {
   this.references.forEach(function(r) {
     var key = self.keyFromRefAuthor(r);
     if (!citedKeys.has(key)) {
-      self.warnings.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + '" ada di Works Cited tapi tidak disitasi (dengan nomor halaman) dalam teks.', code: r.raw.substring(0, 120), severity: 'warning' });
+      self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + '" ada di Works Cited tapi tidak disitasi (dengan nomor halaman) dalam teks.', code: r.raw.substring(0, 120), severity: 'error' });
     }
   });
 };
@@ -934,7 +934,7 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
     var trimmedName = r.firstAuthor.trim();
     var isAcronymOnly = ACRONYM_PATTERN.test(trimmedName);
     if (isAcronymOnly) {
-      self.warnings.push({ title: 'Referensi institusi hanya berupa singkatan', description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya.', code: r.raw.substring(0, 120), severity: 'warning' });
+      self.errors.push({ title: 'Referensi institusi hanya berupa singkatan', description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya.', code: r.raw.substring(0, 120), severity: 'error' });
       return;
     }
 
@@ -1140,14 +1140,14 @@ function checkReferenceFormatting(richLines, references, styleId) {
       if (journalSpan && italicExpected) {
         var jCov = italicCoverage(richLine, journalSpan.start, journalSpan.end);
         if (jCov < 0.6) {
-          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+          issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
             message: 'Nama jurnal "' + journalSpan.text + '" seharusnya dicetak miring (italic), tapi tidak terdeteksi miring pada referensi ini.' });
         }
       }
       if (titleSpan) {
         var tCov = italicCoverage(richLine, titleSpan.start, titleSpan.end);
         if (tCov > 0.4) {
-          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+          issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
             message: 'Judul artikel "' + ref.title + '" terdeteksi miring — untuk artikel jurnal, yang seharusnya miring adalah nama jurnalnya, bukan judul artikelnya.' });
         }
         if (caseMode === 'sentence' && isLikelyTitleCase(ref.title)) {
@@ -1162,7 +1162,7 @@ function checkReferenceFormatting(richLines, references, styleId) {
       if (titleSpan && italicExpected) {
         var bCov = italicCoverage(richLine, titleSpan.start, titleSpan.end);
         if (bCov < 0.6) {
-          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+          issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
             message: 'Judul buku "' + ref.title + '" seharusnya dicetak miring (italic), tapi tidak terdeteksi miring pada referensi ini.' });
         }
       }
@@ -1180,14 +1180,14 @@ function checkReferenceFormatting(richLines, references, styleId) {
       if (containerSpan && italicExpected) {
         var cCov = italicCoverage(richLine, containerSpan.start, containerSpan.end);
         if (cCov < 0.6) {
-          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+          issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
             message: 'Judul buku induk "' + containerSpan.text + '" seharusnya dicetak miring (italic).' });
         }
       }
       if (titleSpan) {
         var chCov = italicCoverage(richLine, titleSpan.start, titleSpan.end);
         if (chCov > 0.4) {
-          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+          issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
             message: 'Judul bab "' + ref.title + '" terdeteksi miring — yang seharusnya miring adalah judul buku induknya, bukan judul babnya.' });
         }
       }

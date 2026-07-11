@@ -130,13 +130,11 @@
       });
       var fmtIssues = CE.checkReferenceFormatting(richRefLines, result.references, styleId);
       fmtIssues.forEach(function(fi) {
-        var obj = {
+        result.suggestions.push({
           title: fi.field === 'italic' ? 'Format italic referensi' : 'Format huruf besar/kecil judul',
           description: fi.message,
           code: fi.ref.raw.substring(0, 150),
-        };
-        if (fi.severity === 'warning') result.warnings.push(obj);
-        else result.suggestions.push(obj);
+        });
       });
 
       lastResult = result;
@@ -215,10 +213,9 @@
     renderCitationMap(result);
     renderDetected(result);
     renderIssueList('list-errors', result.errors);
-    renderIssueList('list-warnings', result.warnings);
     renderIssueList('list-suggestions', result.suggestions);
     renderDoiList(doiIssues);
-    renderIssueList('list-all', result.errors.concat(result.warnings).concat(result.suggestions));
+    renderIssueList('list-all', result.errors.concat(result.suggestions));
   }
 
   function renderSummary(result, doiIssues) {
@@ -228,8 +225,7 @@
     var style = STYLES[result.styleId];
     els.summaryGrid.innerHTML =
       '<div class="sum-card fmt"><div class="n">' + esc(style.name) + '</div><div class="l">Gaya' + (lastConfidence!=null ? ' ('+lastConfidence+'%)' : '') + '</div></div>' +
-      '<div class="sum-card err"><div class="n">' + result.errors.length + '</div><div class="l">Error</div></div>' +
-      '<div class="sum-card warn"><div class="n">' + result.warnings.length + '</div><div class="l">Warning</div></div>' +
+      '<div class="sum-card err"><div class="n">' + result.errors.length + '</div><div class="l">Perlu Diperbaiki</div></div>' +
       '<div class="sum-card sugg"><div class="n">' + result.suggestions.length + '</div><div class="l">Saran</div></div>' +
       '<div class="sum-card ok"><div class="n">' + totalCitations + '</div><div class="l">Sitasi</div></div>' +
       '<div class="sum-card ok"><div class="n">' + result.references.length + '</div><div class="l">Referensi</div></div>' +
@@ -446,7 +442,7 @@
     var html = '';
     issues.forEach(function(issue) {
       var sc = issue.severity || 'error';
-      var sl = sc === 'error' ? 'ERROR' : sc === 'warning' ? 'WARNING' : 'SARAN';
+      var sl = sc === 'error' ? 'PERLU DIPERBAIKI' : sc === 'warning' ? 'WARNING' : 'SARAN';
       html += '<div class="issue-item ' + sc + '">';
       html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(issue.title) + '</span></div>';
       html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
@@ -518,7 +514,7 @@
     var r = lastResult;
     var style = STYLES[r.styleId];
     var rpt = '========================================\n  LAPORAN VALIDASI SITASI — ' + style.name.toUpperCase() + '\n========================================\n\n';
-    rpt += 'RINGKASAN:\n  Error: ' + r.errors.length + '\n  Warning: ' + r.warnings.length + '\n  Saran: ' + r.suggestions.length + '\n  Referensi: ' + r.references.length + '\n\n';
+    rpt += 'RINGKASAN:\n  Perlu Diperbaiki: ' + r.errors.length + '\n  Saran: ' + r.suggestions.length + '\n  Referensi: ' + r.references.length + '\n\n';
     if (currentYearRange && r.references.length) {
       var yrStats = computeYearRange(r.references, currentYearRange.from, currentYearRange.to);
       rpt += 'RENTANG TAHUN REFERENSI (' + currentYearRange.label + '):\n  Dalam rentang: ' + yrStats.inRange.length + '\n  Di luar rentang: ' + yrStats.outRange.length + '\n  Tahun tidak diketahui: ' + yrStats.unknown.length + '\n  Persentase dalam rentang (dari yang bertahun jelas): ' + yrStats.pctOfKnown + '%\n\n';
@@ -528,11 +524,10 @@
       rpt += '  • ' + (ref.numLabel!=null?'['+ref.numLabel+'] ':'') + (ref.firstAuthor||'-') + (ref.year?' ('+ref.year+')':'') + (ref.isInstitutional?' [INSTITUSI]':'') + '\n';
       rpt += '    Judul: ' + (ref.title||'-') + '\n';
     });
-    var allIssues = r.errors.concat(r.warnings).concat(r.suggestions);
+    var allIssues = r.errors.concat(r.suggestions);
     if (allIssues.length > 0) {
       rpt += '\n----------------------------------------\nDETAIL MASALAH:\n----------------------------------------\n\n';
-      if (r.errors.length) { rpt += '🔴 ERROR (' + r.errors.length + '):\n'; r.errors.forEach(function(e,i){ rpt += '  ' + (i+1) + '. ' + e.title + '\n     ' + e.description + '\n'; if(e.code) rpt += '     Ditemukan: ' + e.code + '\n'; if(e.correction) rpt += '     Saran: ' + e.correction + '\n'; rpt += '\n'; }); }
-      if (r.warnings.length) { rpt += '🟡 WARNING (' + r.warnings.length + '):\n'; r.warnings.forEach(function(w,i){ rpt += '  ' + (i+1) + '. ' + w.title + '\n     ' + w.description + '\n\n'; }); }
+      if (r.errors.length) { rpt += '🔴 PERLU DIPERBAIKI (' + r.errors.length + '):\n'; r.errors.forEach(function(e,i){ rpt += '  ' + (i+1) + '. ' + e.title + '\n     ' + e.description + '\n'; if(e.code) rpt += '     Ditemukan: ' + e.code + '\n'; if(e.correction) rpt += '     Saran: ' + e.correction + '\n'; rpt += '\n'; }); }
       if (r.suggestions.length) { rpt += '🔵 SARAN (' + r.suggestions.length + '):\n'; r.suggestions.forEach(function(s,i){ rpt += '  ' + (i+1) + '. ' + s.title + '\n     ' + s.description + '\n\n'; }); }
     }
     if (lastDoiIssues.length) {
@@ -549,7 +544,7 @@
 
   els.btnCopyFixes.addEventListener('click', function() {
     if (!lastResult) return;
-    var all = lastResult.errors.concat(lastResult.warnings).concat(lastResult.suggestions).filter(function(i){return i.correction;});
+    var all = lastResult.errors.concat(lastResult.suggestions).filter(function(i){return i.correction;});
     if (all.length === 0) { showToast('Tidak ada koreksi tersedia'); return; }
     var text = 'KOREKSI SITASI — ' + new Date().toLocaleDateString('id-ID') + '\n========================================\n\n';
     all.forEach(function(item, i) {

@@ -231,7 +231,7 @@
         <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
         <span class="status info" id="downloadStatus"></span>
       </div>
-      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah adalah tampilan persis yang akan tercetak/tersimpan — laporan mengikuti format tetap: Ringkasan → Rentang Tahun (referensi bermasalah di-highlight merah/kuning seperti penanda Turnitin) → Detail Error/Warning/Saran (temuan &amp; koreksi di-highlight) → (opsional) Validasi DOI.</div>
+      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah adalah tampilan persis yang akan tercetak/tersimpan — laporan mengikuti format tetap: Ringkasan → Rentang Tahun (referensi bermasalah di-highlight merah/kuning seperti penanda Turnitin) → Detail Perlu Diperbaiki/Saran (temuan &amp; koreksi di-highlight) → (opsional) Validasi DOI.</div>
     </div>
 
     <div class="preview-shell">
@@ -249,8 +249,8 @@
         <span class="status info" id="downloadOriginalStatus"></span>
       </div>
       <div class="yr-legend" style="margin-top:12px;">
-        <span><span class="d out" style="background:var(--red);"></span>Error / tahun di luar rentang</span>
-        <span><span class="d" style="background:var(--amber);"></span>Warning / tahun tidak diketahui</span>
+        <span><span class="d out" style="background:var(--red);"></span>Perlu diperbaiki / tahun di luar rentang</span>
+        <span><span class="d" style="background:var(--amber);"></span>Tahun tidak diketahui</span>
         <span><span class="d" style="background:var(--cyan);"></span>Saran</span>
       </div>
     </div>
@@ -259,8 +259,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
-<script src="engine.js?v=7"></script>
-<script src="upload.js?v=5"></script>
+<script src="engine.js?v=8"></script>
+<script src="upload.js?v=6"></script>
 </body>
 </html>
 

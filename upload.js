@@ -258,8 +258,7 @@
     var doiTotal = doiIssues.filter(function(d){return d.status!=='no_doi';}).length;
     els.summaryGrid.innerHTML =
       '<div class="sum-card fmt"><div class="n">' + esc(style.name) + '</div><div class="l">Gaya' + (state.lastConfidence!=null ? ' ('+state.lastConfidence+'%)' : '') + '</div></div>' +
-      '<div class="sum-card err"><div class="n">' + result.errors.length + '</div><div class="l">Error</div></div>' +
-      '<div class="sum-card warn"><div class="n">' + result.warnings.length + '</div><div class="l">Warning</div></div>' +
+      '<div class="sum-card err"><div class="n">' + result.errors.length + '</div><div class="l">Perlu Diperbaiki</div></div>' +
       '<div class="sum-card sugg"><div class="n">' + result.suggestions.length + '</div><div class="l">Saran</div></div>' +
       '<div class="sum-card ok"><div class="n">' + countCitations(result.citations) + '</div><div class="l">Sitasi</div></div>' +
       '<div class="sum-card ok"><div class="n">' + result.references.length + '</div><div class="l">Referensi</div></div>' +
@@ -302,7 +301,7 @@
     html += '<h2>Ringkasan</h2><table>';
     html += row('Total sitasi terdeteksi', countCitations(result.citations));
     html += row('Total referensi terdeteksi', result.references.length);
-    html += row('Error / Warning / Saran', result.errors.length + ' / ' + result.warnings.length + ' / ' + result.suggestions.length);
+    html += row('Perlu Diperbaiki / Saran', result.errors.length + ' / ' + result.suggestions.length);
     html += row('Rentang tahun diperiksa', state.yearRange.label);
     html += row('Dalam rentang / Di luar rentang / Tahun tak diketahui', stats.inRange.length + ' / ' + stats.outRange.length + ' / ' + stats.unknown.length);
     html += row('Persentase dalam rentang (dari yang bertahun jelas)', stats.pctOfKnown + '%');
@@ -333,8 +332,7 @@
     }
 
     // Issues
-    html += issueSection('Error', result.errors, 'error', 'hl-red');
-    html += issueSection('Warning', result.warnings, 'warning', 'hl-yellow');
+    html += issueSection('Perlu Diperbaiki', result.errors, 'error', 'hl-red');
     html += issueSection('Saran', result.suggestions, 'suggestion', 'hl-cyan');
 
     // DOI
@@ -613,7 +611,7 @@
             });
           });
 
-          // 2) In-text issues (errors/warnings/suggestions) with a findable "code" snippet
+          // 2) In-text issues (errors/suggestions) with a findable "code" snippet
           function collectIssueMatches(issues, color) {
             issues.forEach(function(issue) {
               if (!issue.code) return;
@@ -626,7 +624,6 @@
             });
           }
           collectIssueMatches(result.errors, 'red');
-          collectIssueMatches(result.warnings, 'yellow');
           collectIssueMatches(result.suggestions, 'cyan');
 
           // Sort and drop overlaps (keep the first-encountered match).
