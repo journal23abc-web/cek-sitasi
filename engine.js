@@ -454,6 +454,52 @@ function extractDOI(refLine) {
   return null;
 }
 
+// Heuristically classifies a reference by source type, mainly so DOI-related checks can
+// tell apart source types that rarely/never carry a DOI (books, theses, reports, plain
+// websites) from journal articles and conference papers, where a missing DOI is worth
+// flagging. This is pattern-based on the reference string's shape — not perfect, but good
+// enough to stop books from being reported as if a missing DOI were a problem.
+function detectSourceType(raw) {
+  var s = raw || '';
+
+  // Thesis / dissertation — rarely carry a DOI unless deposited with one by the repository.
+  if (/\b(skripsi|tesis|disertasi|thesis|dissertation)\b/i.test(s)) return 'thesis';
+
+  // Explicit ISBN mention is a strong, unambiguous book signal.
+  if (/\bISBN\b/i.test(s)) return 'book';
+
+  // Journal-article pattern: "..., 12(3), 45-67" (vol(issue), pages) or an explicit journal-ish word.
+  var journalPattern = /\b\d{1,4}\s*\(\s*[\w-]+\s*\)\s*,\s*\d+[-–]\d+/;
+  var journalNameHint = /\b(journal|jurnal|review|quarterly|annals?|transactions|majalah\s+ilmiah)\b/i;
+  if (journalPattern.test(s) || journalNameHint.test(s)) return 'journal-article';
+
+  // Conference / proceedings.
+  if (/\b(prosiding|proceedings|conference|seminar\s+nasional|konferensi|symposium)\b/i.test(s)) return 'conference';
+
+  // Book chapter: "In X (Ed./Eds.), Book Title (pp. 1-20)."
+  if (/\bIn\s+[^()]+\(Eds?\.?\)/i.test(s) || /\(pp\.\s*\d+/i.test(s) || /\bDalam\s+[^()]+\(Ed\.?\)/i.test(s)) return 'book-chapter';
+
+  // Website / online source without DOI.
+  if (/\b(retrieved from|diakses dari|diakses pada|accessed on)\b/i.test(s) || (/https?:\/\//i.test(s) && !/doi\.org/i.test(s))) return 'website';
+
+  // Government/institutional report or working paper.
+  if (/\b(laporan\s+(tahunan|penelitian)?|working\s+paper|policy\s+brief)\b/i.test(s)) return 'report';
+
+  // Book publisher-ending heuristic: the final ". Segment." clause has no digits and
+  // doesn't look like a journal name — typical of "Author. (Year). Title. Publisher." books.
+  var tailMatch = s.match(/\.\s*([^.]+)\.\s*$/);
+  if (tailMatch) {
+    var tail = tailMatch[1].trim();
+    var looksLikePublisher = tail.length > 0 && tail.length < 60 && !/\d/.test(tail) && !journalNameHint.test(tail) && !/^https?:\/\//i.test(tail);
+    if (looksLikePublisher) return 'book';
+  }
+
+  return 'unknown';
+}
+
+// Source types where a missing DOI is normal/expected, not a red flag.
+var DOI_NOT_EXPECTED_TYPES = { book: true, 'book-chapter': true, thesis: true, report: true, website: true };
+
 function extractTitle(line, style, authorEndIdx) {
   var after = line.substring(authorEndIdx).trim();
   if (style.titleQuote === 'double') {
@@ -500,7 +546,7 @@ function parseReferenceLine(line, styleId) {
     return {
       raw: raw, numLabel: numLabel, authors: parsedAuthors.authors, isInstitutional: parsedAuthors.isInstitutional,
       authorCount: parsedAuthors.authors.length, firstAuthor: parsedAuthors.authors[0] || null,
-      year: year, title: title, doi: doi, styleId: styleId,
+      year: year, title: title, doi: doi, styleId: styleId, sourceType: detectSourceType(raw),
     };
   }
 
@@ -530,7 +576,7 @@ function parseReferenceLine(line, styleId) {
   return {
     raw: raw, authors: parsedAuthors2.authors, isInstitutional: parsedAuthors2.isInstitutional,
     authorCount: parsedAuthors2.authors.length, firstAuthor: parsedAuthors2.authors[0] || null,
-    year: year2, title: title2, doi: doi2, styleId: styleId,
+    year: year2, title: title2, doi: doi2, styleId: styleId, sourceType: detectSourceType(raw),
   };
 }
 
@@ -1084,6 +1130,8 @@ var CitationEngine = {
   splitDocumentByReferences: splitDocumentByReferences,
   findReferencesHeading: findReferencesHeading,
   YearRange: YearRange,
+  detectSourceType: detectSourceType,
+  DOI_NOT_EXPECTED_TYPES: DOI_NOT_EXPECTED_TYPES,
 };
 if (typeof module !== 'undefined' && module.exports) { module.exports = CitationEngine; }
 if (typeof window !== 'undefined') { window.CitationEngine = CitationEngine; }

@@ -150,6 +150,7 @@
         els.doiFill.style.width = pct + '%';
         els.doiLabel.textContent = 'Memvalidasi DOI... (' + done + '/' + total + ')';
         if (!ref.doi) {
+          if (CE.DOI_NOT_EXPECTED_TYPES[ref.sourceType]) return; // book/thesis/report/website — DOI normally absent, not a problem
           doiIssues.push({ ref: ref, status: 'no_doi', severity: 'info', title: 'Tanpa DOI', description: '"' + (ref.firstAuthor || '-') + (ref.year ? ' (' + ref.year + ')' : '') + '" tidak memiliki DOI yang terdeteksi.', code: ref.raw.substring(0, 150) });
           return;
         }
