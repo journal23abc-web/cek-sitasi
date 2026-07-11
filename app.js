@@ -41,26 +41,31 @@
   var lastConfidence = null;
   var currentYearRange = null; // { from: number, to: number, label: string }
 
+  RichEditable.init(els.fullDocText);
+  RichEditable.init(els.articleText);
+  RichEditable.init(els.referenceText);
+
   els.exampleToggle.addEventListener('click', function() {
     els.exampleBox.classList.toggle('show');
   });
 
   els.btnAutoSplit.addEventListener('click', function() {
-    var fullText = els.fullDocText.value;
+    var fullText = RichEditable.getText(els.fullDocText);
     if (!fullText.trim()) {
       els.splitStatus.textContent = 'Tempel dokumennya dulu di kotak atas.';
       els.splitStatus.style.color = 'var(--red)';
       return;
     }
-    var split = CE.splitDocumentByReferences(fullText);
+    var richLines = RichEditable.getRichLines(els.fullDocText);
+    var split = RichEditable.splitRichByReferences(richLines);
     if (!split) {
       els.splitStatus.textContent = '⚠️ Heading referensi tidak terdeteksi (coba beri heading eksplisit seperti "References" atau "Daftar Pustaka" di baris tersendiri, atau isi manual di bawah).';
       els.splitStatus.style.color = 'var(--amber)';
       return;
     }
-    els.articleText.value = split.article;
-    els.referenceText.value = split.references;
-    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
+    RichEditable.setRichLines(els.articleText, split.article);
+    RichEditable.setRichLines(els.referenceText, split.references);
+    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — format italic ikut dipertahankan. Silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
     els.splitStatus.style.color = 'var(--green)';
     if (els.articleText.scrollIntoView) els.articleText.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
@@ -88,8 +93,8 @@
   }
 
   els.validateBtn.addEventListener('click', function() {
-    var articleText = els.articleText.value.trim();
-    var referenceText = els.referenceText.value.trim();
+    var articleText = RichEditable.getText(els.articleText).trim();
+    var referenceText = RichEditable.getText(els.referenceText).trim();
     if (!articleText) { alert('Silakan masukkan teks artikel.'); return; }
 
     els.loading.classList.add('active');
@@ -116,6 +121,24 @@
 
       var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
       var result = validator.validate();
+
+      // Reference FORMATTING check (italic placement + sentence/title case) — uses the rich
+      // (italic-preserving) content of the reference box, aligned 1:1 with result.references
+      // by dropping blank lines the same way CE.parseReferenceList does.
+      var richRefLines = RichEditable.getRichLines(els.referenceText).filter(function(line) {
+        return line.some(function(seg) { return seg.text.trim(); });
+      });
+      var fmtIssues = CE.checkReferenceFormatting(richRefLines, result.references, styleId);
+      fmtIssues.forEach(function(fi) {
+        var obj = {
+          title: fi.field === 'italic' ? 'Format italic referensi' : 'Format huruf besar/kecil judul',
+          description: fi.message,
+          code: fi.ref.raw.substring(0, 150),
+        };
+        if (fi.severity === 'warning') result.warnings.push(obj);
+        else result.suggestions.push(obj);
+      });
+
       lastResult = result;
       lastValidator = validator;
       lastDoiIssues = [];

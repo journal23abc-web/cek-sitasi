@@ -998,6 +998,197 @@ function splitDocumentByReferences(fullText) {
 }
 
 
+// ---------- Reference FORMATTING checker (italic placement + sentence/title case) ----------
+// richLine: array of {text, italic} segments, in document order, joined = the raw reference line.
+// Requires a rich-text input (contenteditable paste) upstream — plain textareas carry no
+// italic info, so every segment will just be italic:false and only italic-missing warnings
+// (never false "wrongly italicized" warnings) can fire, which is the safe default.
+
+function richLineToText(richLine) {
+  return richLine.map(function(s) { return s.text; }).join('');
+}
+
+function italicCoverage(richLine, start, end) {
+  if (end <= start) return 0;
+  var pos = 0, italicChars = 0, totalChars = 0;
+  for (var i = 0; i < richLine.length; i++) {
+    var seg = richLine[i];
+    var segStart = pos, segEnd = pos + seg.text.length;
+    var overlapStart = Math.max(start, segStart), overlapEnd = Math.min(end, segEnd);
+    if (overlapEnd > overlapStart) {
+      var len = overlapEnd - overlapStart;
+      totalChars += len;
+      if (seg.italic) italicChars += len;
+    }
+    pos = segEnd;
+  }
+  return totalChars > 0 ? italicChars / totalChars : 0;
+}
+
+function findSpan(raw, needle) {
+  if (!needle) return null;
+  var idx = raw.indexOf(needle);
+  if (idx === -1) return null;
+  return { start: idx, end: idx + needle.length };
+}
+
+// Heuristic: "Title. Journal Name, 12(3), 45-60." -> extracts "Journal Name" span.
+function extractJournalNameSpan(raw, title) {
+  var titleSpan = findSpan(raw, title);
+  if (!titleSpan) return null;
+  var rest = raw.slice(titleSpan.end);
+  var skip = rest.match(/^[.\s]+/);
+  var restStart = titleSpan.end + (skip ? skip[0].length : 0);
+  var restText = raw.slice(restStart);
+  var m = restText.match(/^([^,]+),\s*\d/);
+  if (!m) return null;
+  var journalName = m[1].trim();
+  var localStart = restText.indexOf(journalName);
+  if (localStart === -1) return null;
+  return { text: journalName, start: restStart + localStart, end: restStart + localStart + journalName.length };
+}
+
+// Heuristic: "In A. Editor (Ed.), Book Title (pp. 1-20). Publisher." -> extracts "Book Title" span.
+function extractContainerBookSpan(raw) {
+  var m = raw.match(/\(Eds?\.\)\s*,\s*/i) || raw.match(/\(Ed\.\)\s*,\s*/i);
+  if (!m) return null;
+  var afterEditor = m.index + m[0].length;
+  var restText = raw.slice(afterEditor);
+  var end = restText.search(/\(pp\.\s*\d/i);
+  if (end === -1) end = restText.length;
+  var bookTitle = restText.slice(0, end).replace(/[,.\s]+$/, '').trim();
+  if (!bookTitle) return null;
+  var localStart = restText.indexOf(bookTitle);
+  return { text: bookTitle, start: afterEditor + localStart, end: afterEditor + localStart + bookTitle.length };
+}
+
+var CASE_STOPWORDS = new Set(['a','an','the','and','or','but','nor','for','of','in','on','at','to','by','with','as','is','it','vs','via','dan','di','ke','dari','yang','untuk','pada','dengan','atau']);
+
+function isLikelyTitleCase(text) {
+  var words = (text || '').split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+  var capCount = 0, judged = 0;
+  words.forEach(function(w, i) {
+    var clean = w.replace(/^[^A-Za-zÀ-ÿ]+|[^A-Za-zÀ-ÿ]+$/g, '');
+    if (!clean) return;
+    if (i === 0) return;
+    if (CASE_STOPWORDS.has(clean.toLowerCase())) return;
+    judged++;
+    if (/^[A-ZÀ-Ÿ]/.test(clean)) capCount++;
+  });
+  if (judged === 0) return false;
+  return (capCount / judged) > 0.6;
+}
+
+function isLikelySentenceCaseViolationForTitleCaseStyle(text) {
+  var words = (text || '').split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+  var capCount = 0, judged = 0;
+  words.forEach(function(w, i) {
+    var clean = w.replace(/^[^A-Za-zÀ-ÿ]+|[^A-Za-zÀ-ÿ]+$/g, '');
+    if (!clean) return;
+    if (i === 0) return;
+    if (CASE_STOPWORDS.has(clean.toLowerCase())) return;
+    judged++;
+    if (/^[A-ZÀ-Ÿ]/.test(clean)) capCount++;
+  });
+  if (judged === 0) return false;
+  return (capCount / judged) < 0.15;
+}
+
+var ITALIC_ON = { apa7: true, harvard: true, chicago: true, mla9: true, ieee: true, vancouver: false };
+var CASE_MODE = { apa7: 'sentence', harvard: 'sentence', chicago: 'sentence', mla9: 'title', ieee: null, vancouver: 'sentence' };
+
+function checkReferenceFormatting(richLines, references, styleId) {
+  var issues = [];
+  var italicExpected = ITALIC_ON[styleId];
+  var caseMode = CASE_MODE[styleId];
+
+  references.forEach(function(ref, i) {
+    var richLine = richLines[i];
+    if (!richLine) return;
+    var raw = ref.raw;
+    var lineText = richLineToText(richLine);
+    if (lineText.trim().length === 0) return;
+
+    var titleSpan = ref.title ? findSpan(raw, ref.title) : null;
+
+    if (styleId === 'vancouver') {
+      var wholeCov = italicCoverage(richLine, 0, raw.length);
+      if (wholeCov > 0.04) {
+        issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
+          message: 'Gaya Vancouver umumnya tidak memakai huruf miring sama sekali, tapi referensi ini terdeteksi sebagian huruf miring.' });
+      }
+      if (titleSpan && caseMode === 'sentence' && isLikelyTitleCase(ref.title)) {
+        issues.push({ ref: ref, severity: 'suggestion', field: 'case',
+          message: 'Judul tampak memakai Title Case ("' + ref.title + '"), gaya ini biasanya memakai sentence case.' });
+      }
+      return;
+    }
+
+    if (ref.sourceType === 'journal-article') {
+      var journalSpan = extractJournalNameSpan(raw, ref.title || '');
+      if (journalSpan && italicExpected) {
+        var jCov = italicCoverage(richLine, journalSpan.start, journalSpan.end);
+        if (jCov < 0.6) {
+          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+            message: 'Nama jurnal "' + journalSpan.text + '" seharusnya dicetak miring (italic), tapi tidak terdeteksi miring pada referensi ini.' });
+        }
+      }
+      if (titleSpan) {
+        var tCov = italicCoverage(richLine, titleSpan.start, titleSpan.end);
+        if (tCov > 0.4) {
+          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+            message: 'Judul artikel "' + ref.title + '" terdeteksi miring — untuk artikel jurnal, yang seharusnya miring adalah nama jurnalnya, bukan judul artikelnya.' });
+        }
+        if (caseMode === 'sentence' && isLikelyTitleCase(ref.title)) {
+          issues.push({ ref: ref, severity: 'suggestion', field: 'case',
+            message: 'Judul artikel tampak memakai Title Case ("' + ref.title + '"), gaya ini mensyaratkan sentence case (hanya kata pertama & nama diri yang kapital).' });
+        } else if (caseMode === 'title' && isLikelySentenceCaseViolationForTitleCaseStyle(ref.title)) {
+          issues.push({ ref: ref, severity: 'suggestion', field: 'case',
+            message: 'Judul artikel tampak memakai sentence case ("' + ref.title + '"), gaya ini mensyaratkan title case (huruf besar di awal tiap kata penting).' });
+        }
+      }
+    } else if (ref.sourceType === 'book') {
+      if (titleSpan && italicExpected) {
+        var bCov = italicCoverage(richLine, titleSpan.start, titleSpan.end);
+        if (bCov < 0.6) {
+          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+            message: 'Judul buku "' + ref.title + '" seharusnya dicetak miring (italic), tapi tidak terdeteksi miring pada referensi ini.' });
+        }
+      }
+      if (titleSpan) {
+        if (caseMode === 'sentence' && isLikelyTitleCase(ref.title)) {
+          issues.push({ ref: ref, severity: 'suggestion', field: 'case',
+            message: 'Judul buku tampak memakai Title Case ("' + ref.title + '"), gaya ini mensyaratkan sentence case.' });
+        } else if (caseMode === 'title' && isLikelySentenceCaseViolationForTitleCaseStyle(ref.title)) {
+          issues.push({ ref: ref, severity: 'suggestion', field: 'case',
+            message: 'Judul buku tampak memakai sentence case ("' + ref.title + '"), gaya ini mensyaratkan title case.' });
+        }
+      }
+    } else if (ref.sourceType === 'book-chapter') {
+      var containerSpan = extractContainerBookSpan(raw);
+      if (containerSpan && italicExpected) {
+        var cCov = italicCoverage(richLine, containerSpan.start, containerSpan.end);
+        if (cCov < 0.6) {
+          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+            message: 'Judul buku induk "' + containerSpan.text + '" seharusnya dicetak miring (italic).' });
+        }
+      }
+      if (titleSpan) {
+        var chCov = italicCoverage(richLine, titleSpan.start, titleSpan.end);
+        if (chCov > 0.4) {
+          issues.push({ ref: ref, severity: 'warning', field: 'italic',
+            message: 'Judul bab "' + ref.title + '" terdeteksi miring — yang seharusnya miring adalah judul buku induknya, bukan judul babnya.' });
+        }
+      }
+    }
+    // thesis / report / website / conference / unknown: formatting too variable to check reliably, skip.
+  });
+
+  return issues;
+}
+
 var DOIChecker = {
   validateViaCrossRef: function(doi) {
     var url = 'https://api.crossref.org/works/' + encodeURIComponent(doi);
@@ -1132,6 +1323,7 @@ var CitationEngine = {
   YearRange: YearRange,
   detectSourceType: detectSourceType,
   DOI_NOT_EXPECTED_TYPES: DOI_NOT_EXPECTED_TYPES,
+  checkReferenceFormatting: checkReferenceFormatting,
 };
 if (typeof module !== 'undefined' && module.exports) { module.exports = CitationEngine; }
 if (typeof window !== 'undefined') { window.CitationEngine = CitationEngine; }
