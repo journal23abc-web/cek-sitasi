@@ -65,8 +65,14 @@
     }
     RichEditable.setRichLines(els.articleText, split.article);
     RichEditable.setRichLines(els.referenceText, split.references);
-    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — format italic ikut dipertahankan. Silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
-    els.splitStatus.style.color = 'var(--green)';
+    var refCharCount = split.references.reduce(function(n, line) { return n + line.reduce(function(m, seg) { return m + seg.text.length; }, 0); }, 0);
+    if (refCharCount < 20) {
+      els.splitStatus.textContent = '⚠️ Heading "' + split.headingText + '" ketemu, tapi hampir tidak ada isi referensi di baliknya (' + refCharCount + ' karakter) — kemungkinan paste dari browser Anda tidak membawa seluruh isi dokumen, atau heading yang ketemu bukan yang benar. Coba isi/tempel manual kolom "Daftar Referensi" di bawah, atau gunakan menu Upload File untuk unggah .docx langsung (lebih andal untuk dokumen panjang).';
+      els.splitStatus.style.color = 'var(--amber)';
+    } else {
+      els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" (' + split.references.length + ' baris referensi) — format italic ikut dipertahankan. Silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
+      els.splitStatus.style.color = 'var(--green)';
+    }
     if (els.articleText.scrollIntoView) els.articleText.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 

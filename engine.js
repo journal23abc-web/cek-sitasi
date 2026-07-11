@@ -993,8 +993,16 @@ function findReferencesHeading(fullText) {
     offset += line.length + 1;
   }
   if (candidates.length === 0) return null;
-  // prefer the LAST matching heading (a real heading near the end of the doc,
-  // not an earlier in-text mention like "...see references below...")
+  // Prefer the LAST matching heading that is actually followed by substantial content —
+  // guards against picking a spurious short "References"-looking line near the very end of
+  // the document (e.g. a stray running header/footer line or ToC entry that slipped into the
+  // pasted text) which would otherwise leave the "after heading" portion empty.
+  for (var c = candidates.length - 1; c >= 0; c--) {
+    var afterOffset = candidates[c].offset + candidates[c].lineLength;
+    var afterText = fullText.slice(afterOffset).trim();
+    if (afterText.length >= 30) return candidates[c];
+  }
+  // Nothing had substantial trailing content (unusual) — fall back to the last candidate.
   return candidates[candidates.length - 1];
 }
 
