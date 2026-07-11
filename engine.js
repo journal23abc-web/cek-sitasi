@@ -403,20 +403,29 @@ var FormatDetector = {
     // --- Reference list signals ---
     var lines = referenceText.split('\n').map(function(l){return l.trim();}).filter(Boolean);
     var refCount = lines.length || 1;
+    var anyQuotedTitle = false;
     lines.forEach(function(line) {
       if (/^\[\d+\]/.test(line)) { scores.ieee += 4; }
       if (/^\d+\.\s/.test(line)) { scores.vancouver += 3; scores.mla9 -= 0.5; }
       if (/\(\d{4}[a-z]?\)/.test(line)) { scores.apa7 += 1; scores.harvard += 1; }
       if (/^\S[^()]*\.\s*\d{4}\.\s/.test(line)) { scores.chicago += 3; } // Author. Year. "Title."
       if (/["""][^"""]+["""]/.test(line)) { scores.chicago += 1; scores.ieee += 1; scores.mla9 += 1; }
-      if (/'[^']+'/.test(line)) { scores.harvard += 2; }
+      if (/'[^']+'/.test(line)) { scores.harvard += 2; anyQuotedTitle = true; }
+      if (/["""][^"""]+["""]/.test(line)) { anyQuotedTitle = true; }
       if (/\bvol\.\s*\d+/i.test(line)) { scores.mla9 += 2; scores.ieee += 1; }
       if (/\bno\.\s*\d+/i.test(line)) { scores.mla9 += 1; scores.ieee += 1; }
       if (/\bpp\.\s*\d+/i.test(line)) { scores.mla9 += 1; scores.chicago += 0.5; scores.harvard += 0.5; }
+      // The clearest APA7-vs-Harvard fingerprint: how the volume(issue)+pages segment is
+      // written. APA7: "12(1), 45-60" (no "pp."). Harvard: "12(1), pp. 45-60" (with "pp.").
+      if (/\d+\s*\(\s*\d+\s*\)\s*,\s*pp\.\s*\d+/i.test(line)) { scores.harvard += 2.5; }
+      else if (/\d+\s*\(\s*\d+\s*\)\s*,\s*\d+[-–]\d+/.test(line)) { scores.apa7 += 2.5; }
       if (/\d{4};\d+(\(\d+\))?:\d+/.test(line)) { scores.vancouver += 4; } // Year;Vol(Issue):Pages
       if (/^[A-ZÀ-Ÿ][a-zà-ÿ'\-]+\s+[A-Z]{1,3}[,.]/.test(line)) { scores.vancouver += 2; } // Last FM,
       if (/^[A-Z]\.\s*[A-Z]?\.?\s*[A-ZÀ-Ÿ][a-zà-ÿ'\-]+,/.test(line)) { scores.ieee += 2; } // F. M. Last,
     });
+    // APA7 never quotes titles at all — if nothing in the whole reference list is quoted,
+    // that absence is itself informative (Harvard/Chicago/MLA/IEEE all quote titles).
+    if (!anyQuotedTitle && lines.length > 0) { scores.apa7 += 1.5; }
 
     var best = 'apa7', bestScore = -Infinity;
     Object.keys(scores).forEach(function(k) { if (scores[k] > bestScore) { bestScore = scores[k]; best = k; } });

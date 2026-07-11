@@ -28,7 +28,7 @@
           if (tag === 'BR') {
             lines.push(current); current = [];
           } else if (tag === 'DIV' || tag === 'P' || tag === 'LI') {
-            if (lines.length > 0 || current.length > 0) { lines.push(current); current = []; }
+            if (current.length > 0) { lines.push(current); current = []; }
             var style = (n.getAttribute('style') || '');
             var childItalic = italic || tag === 'I' || tag === 'EM' || /font-style:\s*italic/i.test(style);
             walk(n, childItalic);
@@ -102,11 +102,24 @@
   }
 
   // ---- Paste handling ----
+  function unwrap(n, before) {
+    if (before) n.parentNode.insertBefore(before, n);
+    while (n.firstChild) n.parentNode.insertBefore(n.firstChild, n);
+    n.parentNode.removeChild(n);
+  }
+
   function sanitizeClipboardHtml(html) {
     var tmp = document.createElement('div');
     tmp.innerHTML = html;
-    // Drop obviously non-content elements Word/Docs sometimes include.
-    tmp.querySelectorAll('script,style,meta,link,img,table').forEach(function(n) { n.remove(); });
+    // These never carry visible reference/article text — safe to delete outright.
+    tmp.querySelectorAll('script,style,meta,link,img,head,title,xml').forEach(function(n) { n.remove(); });
+    // Tables are common in Word documents (journal templates, PDF-to-Word conversions,
+    // author/affiliation blocks, sometimes even whole reference lists). Deleting them would
+    // silently drop real content — unwrap the structure instead, keeping the text, and add
+    // line/space breaks so cells and rows don't get glued together.
+    tmp.querySelectorAll('tr').forEach(function(n, idx) { unwrap(n, idx > 0 ? document.createElement('br') : null); });
+    tmp.querySelectorAll('td,th').forEach(function(n) { unwrap(n, document.createTextNode(' ')); });
+    tmp.querySelectorAll('table,tbody,thead,tfoot').forEach(function(n) { unwrap(n); });
     return walkToRichLines(tmp);
   }
 
@@ -193,5 +206,6 @@
     getRichLines: getRichLines,
     setRichLines: setRichLines,
     splitRichByReferences: splitRichByReferences,
+    _debug: { walkToRichLines: walkToRichLines, sanitizeClipboardHtml: sanitizeClipboardHtml },
   };
 })();
