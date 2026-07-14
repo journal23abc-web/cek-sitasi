@@ -23,6 +23,7 @@
     manualProcessBtn: document.getElementById('manualProcessBtn'),
     results: document.getElementById('results'),
     summaryGrid: document.getElementById('summaryGrid'),
+    parseStatusBanner: document.getElementById('parseStatusBanner'),
     yearRangeSummary: document.getElementById('yearRangeSummary'),
     reportPreview: document.getElementById('reportPreview'),
     downloadBtn: document.getElementById('downloadBtn'),
@@ -265,7 +266,28 @@
     return n;
   }
 
+  function renderParseStatus(result) {
+    var stats = result.parseStats || { totalFound: result.references.length, succeededCount: result.references.length, failedCount: 0 };
+    var failed = result.failedLines || [];
+    var el = els.parseStatusBanner;
+    if (!el) return;
+    if (stats.failedCount === 0) {
+      el.innerHTML = '<div class="parse-banner ok"><div class="pb-title">✅ Semua baris referensi berhasil dianalisis</div><div class="pb-stats">Ditemukan: ' + stats.totalFound + ' · Berhasil dianalisis: ' + stats.succeededCount + ' · Gagal: 0</div></div>';
+      return;
+    }
+    var html = '<div class="parse-banner fail">';
+    html += '<div class="pb-title">⚠️ ' + stats.failedCount + ' baris referensi GAGAL dianalisis — hasil di bawah ini belum lengkap</div>';
+    html += '<div class="pb-stats">Ditemukan: ' + stats.totalFound + ' · Berhasil dianalisis: ' + stats.succeededCount + ' · Gagal: ' + stats.failedCount + '</div>';
+    html += '<div>Baris berikut tidak dikenali polanya dan <b>tidak ikut divalidasi sama sekali</b>:</div><div class="pb-failed-list">';
+    failed.forEach(function(f) {
+      html += '<div class="pb-failed-item"><b>Baris ' + f.lineNumber + ':</b> ' + esc(f.text.slice(0, 160)) + (f.text.length > 160 ? '…' : '') + '<br><span style="color:var(--text-faint);">↳ ' + esc(f.reason) + '</span></div>';
+    });
+    html += '</div></div>';
+    el.innerHTML = html;
+  }
+
   function renderResults(result, doiIssues) {
+    renderParseStatus(result);
     var style = STYLES[result.styleId];
     var doiValid = doiIssues.filter(function(d){return d.status==='valid';}).length;
     var doiTotal = doiIssues.filter(function(d){return d.status!=='no_doi';}).length;

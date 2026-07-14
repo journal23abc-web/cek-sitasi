@@ -110,6 +110,16 @@
   .privacy-note{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
   .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
 
+  .parse-banner{ border-radius:8px; padding:14px 16px; margin-bottom:16px; font-family:'JetBrains Mono', monospace; font-size:12px; line-height:1.7; }
+  .parse-banner.ok{ background:rgba(62,217,143,.08); border:1px solid rgba(62,217,143,.3); color:var(--green); }
+  .parse-banner.fail{ background:rgba(242,109,109,.08); border:1px solid rgba(242,109,109,.35); color:var(--text); }
+  .parse-banner .pb-title{ font-weight:700; font-size:13px; margin-bottom:6px; }
+  .parse-banner.fail .pb-title{ color:var(--red); }
+  .parse-banner .pb-stats{ color:var(--text-dim); margin-bottom:8px; }
+  .parse-banner .pb-failed-list{ margin-top:8px; }
+  .parse-banner .pb-failed-item{ background:#0C1019; border-left:3px solid var(--red); border-radius:0 6px 6px 0; padding:8px 10px; margin-bottom:6px; font-size:11.5px; color:var(--text-dim); }
+  .parse-banner .pb-failed-item b{ color:var(--text); }
+
   /* ---- Report preview (white "paper" look, screen only) ---- */
   .preview-shell{ background:var(--panel); border:1px solid var(--hairline); border-radius:10px; padding:0; margin-bottom:20px; overflow:hidden; }
   .preview-toolbar{ display:flex; align-items:center; justify-content:space-between; padding:10px 16px; font-family:'JetBrains Mono', monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); border-bottom:1px solid var(--hairline); }
@@ -225,6 +235,7 @@
   <div class="results" id="results">
     <div class="panel">
       <div class="field-label">Ringkasan Hasil</div>
+      <div id="parseStatusBanner"></div>
       <div class="summary-grid" id="summaryGrid"></div>
       <div id="yearRangeSummary"></div>
       <div class="row" style="margin-top:14px;">
@@ -259,8 +270,8 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
-<script src="engine.js?v=9"></script>
-<script src="upload.js?v=7"></script>
+<script src="engine.js?v=11"></script>
+<script src="upload.js?v=8"></script>
 </body>
 </html>
 

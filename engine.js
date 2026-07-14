@@ -18,7 +18,7 @@ function stripNameParticles(name) {
 
 function normalizeTitle(title) {
   if (!title) return '';
-  return title.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+  return title.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
 }
 
 function bigramSimilarity(s1, s2) {
@@ -41,10 +41,10 @@ var ACRONYM_PATTERN = /^[A-Z]{2,8}$/;
 function looksLikePersonalName(str) {
   // "Last, F. M." or "Last, First" or "F. M. Last" personal-name shapes
   var s = str.trim();
-  if (/^[A-ZÀ-Ÿ][a-zà-ÿ'\-]+,\s*([A-Z]\.\s*)+$/.test(s)) return true; // Last, F. M.
-  if (/^[A-ZÀ-Ÿ][a-zà-ÿ'\-]+,\s*[A-ZÀ-Ÿ][a-zà-ÿ'\-]+(\s+[A-ZÀ-Ÿ][a-zà-ÿ'\-]+)?$/.test(s)) return true; // Last, First Middle
-  if (/^([A-Z]\.\s*)+[A-ZÀ-Ÿ][a-zà-ÿ'\-]+$/.test(s)) return true; // F. M. Last
-  if (/^[A-ZÀ-Ÿ][a-zà-ÿ'\-]+\s+[A-Z]{1,3}$/.test(s)) return true; // Vancouver: Last FM
+  if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+,\s*(\p{Lu}\.\s*)+$/u.test(s)) return true; // Last, F. M.
+  if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+,\s*[\p{Lu}\p{Lo}][\p{L}'\-]+(\s+[\p{Lu}\p{Lo}][\p{L}'\-]+)?$/u.test(s)) return true; // Last, First Middle
+  if (/^(\p{Lu}\.\s*)+[\p{Lu}\p{Lo}][\p{L}'\-]+$/u.test(s)) return true; // F. M. Last
+  if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+\s+\p{Lu}{1,3}$/u.test(s)) return true; // Vancouver: Last FM
   return false;
 }
 
@@ -56,7 +56,7 @@ function isInstitutionalAuthor(str) {
   if (looksLikePersonalName(s)) return false;
   // Multi-word title-case string with 3+ words and no comma, no personal-name shape -> likely org
   var words = s.split(/\s+/);
-  if (words.length >= 2 && !s.includes(',') && words.every(function(w){ return /^[A-ZÀ-Ÿ]/.test(w) || /^(of|the|and|dan|untuk|bagi)$/i.test(w); })) {
+  if (words.length >= 2 && !s.includes(',') && words.every(function(w){ return /^[\p{Lu}\p{Lo}]/u.test(w) || /^(of|the|and|dan|untuk|bagi)$/i.test(w); })) {
     return true;
   }
   return false;
@@ -114,7 +114,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?:[A-ZÀ-Ÿ][\w'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan)\s+|\s+)(?:[A-ZÀ-Ÿ][\w'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/g;
+  var narrativeRegex = /((?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   while ((m = narrativeRegex.exec(text)) !== null) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
@@ -129,12 +129,6 @@ function extractAuthorDateCitations(text) {
       authors = authors.slice(leadMatch[0].length).trim();
     }
     if (!authors) continue;
-    var tokens = authors.split(/\s+/);
-    if (tokens[0] && tokens[0].replace(/\./g, '').length <= 1) {
-      tokens.shift();
-      if (tokens[0] && /^(and|dan)$/i.test(tokens[0])) tokens.shift();
-      authors = tokens.join(' ').replace(/^,\s*/, '');
-    }
     if (!authors || authors.split(/\s+/).length > 8) continue;
     var before = text.substring(0, m.index);
     var openP = (before.match(/\(/g) || []).length, closeP = (before.match(/\)/g) || []).length;
@@ -364,6 +358,64 @@ function parseAuthorsForStyle(authorStr, styleId) {
   return { authors: authors, isInstitutional: false };
 }
 
+function looksLikeInitialToken(t) {
+  return /^\p{Lu}\.$/u.test(t) || /^\p{Lu}$/u.test(t) || /^\p{Lu}{2,4}$/u.test(t);
+}
+
+// In-text citation tokens are written "Surname" or "H. Surname" (initial(s) then surname) —
+// never "Surname, Initial". Strips a leading initial block so the key matches the reference
+// list's surname exactly, e.g. "H. Zhang" and "Zhang, H." both key to "zhang". Real short
+// multi-word surnames ("Le Guin", "Van Der Berg") are untouched because a genuine name
+// particle/word is never all-uppercase like a true initial is.
+function surnameFromCitationToken(token) {
+  var s = (token || '').trim();
+  if (!s) return '';
+  var toks = s.split(/\s+/);
+  if (toks.length === 1) return s;
+  var leading = toks.slice(0, -1);
+  if (leading.every(looksLikeInitialToken)) return toks[toks.length - 1];
+  return s;
+}
+
+// Extracts the given-name initial from an in-text citation token, e.g. "H. Zhang" -> "H".
+// Returns null if the citation has no initial (the normal, unambiguous case).
+function initialFromCitationToken(token) {
+  var s = (token || '').trim();
+  var toks = s.split(/\s+/);
+  if (toks.length < 2) return null;
+  var leading = toks.slice(0, -1);
+  if (!leading.every(looksLikeInitialToken)) return null;
+  var first = leading[0].replace(/\./g, '');
+  return first ? first[0].toUpperCase() : null;
+}
+
+// Extracts the given-name initial from a REFERENCE's author fragment, accounting for the
+// author-name shape used by each citation style family.
+function initialFromRefAuthor(authorFragment, styleId) {
+  var style = STYLES[styleId];
+  var s = (authorFragment || '').trim();
+  if (!s) return null;
+  if (style.authorForm === 'non-inverted') {
+    var toks = s.split(/\s+/);
+    if (toks.length < 2) return null;
+    var f = toks[0].replace(/\./g, '');
+    return f ? f[0].toUpperCase() : null;
+  }
+  if (style.authorForm === 'vancouver') {
+    var m = s.match(/^(.+?)\s+(\p{Lu}{1,3})$/u);
+    return m ? m[2][0] : null;
+  }
+  if (s.includes(',')) {
+    var given = s.split(',')[1];
+    if (!given) return null;
+    var gtoks = given.trim().split(/\s+/).filter(Boolean);
+    if (!gtoks.length) return null;
+    var g0 = gtoks[0].replace(/\./g, '');
+    return g0 ? g0[0].toUpperCase() : null;
+  }
+  return null;
+}
+
 function surnameOf(authorFragment, styleId) {
   var style = STYLES[styleId];
   var s = (authorFragment || '').trim();
@@ -392,8 +444,8 @@ var FormatDetector = {
     // --- In-text signals ---
     var numericBracket = (articleText.match(/\[\d+(?:\s*[,\-–]\s*\d+)*\]/g) || []).length;
     var numericParen = (articleText.match(/\(\d+(?:\s*[,\-–]\s*\d+)*\)/g) || []).length;
-    var authorPageIntext = (articleText.match(/\([A-ZÀ-Ÿ][a-zà-ÿ'\-]+\s+\d+(?:[-–]\d+)?\)/g) || []).length;
-    var authorYearIntext = (articleText.match(/\([A-ZÀ-Ÿ][^()]*?,?\s*\d{4}[a-z]?\)/g) || []).length;
+    var authorPageIntext = (articleText.match(/\([\p{Lu}\p{Lo}][\p{L}'\-]+\s+\d+(?:[-–]\d+)?\)/gu) || []).length;
+    var authorYearIntext = (articleText.match(/\([\p{Lu}\p{Lo}][^()]*?,?\s*\d{4}[a-z]?\)/gu) || []).length;
 
     if (numericBracket > 0) { scores.ieee += 3; scores.vancouver += 3; signals.push('In-text pakai [angka] → gaya numerik'); }
     if (numericBracket === 0 && numericParen > 2 && authorYearIntext === 0) { scores.vancouver += 1; }
@@ -420,8 +472,8 @@ var FormatDetector = {
       if (/\d+\s*\(\s*\d+\s*\)\s*,\s*pp\.\s*\d+/i.test(line)) { scores.harvard += 2.5; }
       else if (/\d+\s*\(\s*\d+\s*\)\s*,\s*\d+[-–]\d+/.test(line)) { scores.apa7 += 2.5; }
       if (/\d{4};\d+(\(\d+\))?:\d+/.test(line)) { scores.vancouver += 4; } // Year;Vol(Issue):Pages
-      if (/^[A-ZÀ-Ÿ][a-zà-ÿ'\-]+\s+[A-Z]{1,3}[,.]/.test(line)) { scores.vancouver += 2; } // Last FM,
-      if (/^[A-Z]\.\s*[A-Z]?\.?\s*[A-ZÀ-Ÿ][a-zà-ÿ'\-]+,/.test(line)) { scores.ieee += 2; } // F. M. Last,
+      if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+\s+[A-Z]{1,3}[,.]/u.test(line)) { scores.vancouver += 2; } // Last FM,
+      if (/^[A-Z]\.\s*[A-Z]?\.?\s*[\p{Lu}\p{Lo}][\p{L}'\-]+,/u.test(line)) { scores.ieee += 2; } // F. M. Last,
     });
     // APA7 never quotes titles at all — if nothing in the whole reference list is quoted,
     // that absence is itself informative (Harvard/Chicago/MLA/IEEE all quote titles).
@@ -589,14 +641,33 @@ function parseReferenceLine(line, styleId) {
   };
 }
 
-function parseReferenceList(referenceText, styleId) {
-  var lines = referenceText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
-  var refs = [];
-  lines.forEach(function(line) {
-    var r = parseReferenceLine(line, styleId);
-    if (r) refs.push(r);
+function parseReferenceListDetailed(referenceText, styleId) {
+  var rawLines = (referenceText || '').split('\n');
+  var references = [];
+  var failedLines = [];
+  var totalFound = 0;
+  rawLines.forEach(function(rawLine, idx) {
+    var trimmed = rawLine.trim();
+    if (!trimmed) return;
+    totalFound++;
+    var lineNumber = idx + 1;
+    var r = parseReferenceLine(trimmed, styleId);
+    var weak = r && !r.year && !r.title; // numeric family "succeeds" even with nothing useful extracted
+    if (!r || weak) {
+      failedLines.push({
+        lineNumber: lineNumber, text: trimmed,
+        reason: !r ? 'Pola penulis/tahun tidak dikenali untuk gaya ini' : 'Tidak ada tahun maupun judul yang terbaca',
+      });
+      return;
+    }
+    r.lineNumber = lineNumber;
+    references.push(r);
   });
-  return refs;
+  return { references: references, failedLines: failedLines, totalFound: totalFound, succeededCount: references.length, failedCount: failedLines.length };
+}
+
+function parseReferenceList(referenceText, styleId) {
+  return parseReferenceListDetailed(referenceText, styleId).references;
 }
 
 // ---------- MATCH KEY HELPERS ----------
@@ -605,9 +676,9 @@ function normalizeKeyName(name, isInstitutional) {
   if (isInstitutional) {
     var pairing = extractAcronymPairing(name);
     var base = pairing ? pairing.full : name;
-    return base.toLowerCase().replace(/^(the|a|an)\s+/i, '').replace(/[^\w]/g, '');
+    return base.toLowerCase().replace(/^(the|a|an)\s+/i, '').replace(/[^\p{L}\p{N}]/gu, '');
   }
-  return stripNameParticles(name).toLowerCase().replace(/[^\w]/g, '');
+  return stripNameParticles(name).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
 function acronymOf(name) {
@@ -633,7 +704,10 @@ function MultiFormatValidator(articleText, referenceText, styleId) {
 
 MultiFormatValidator.prototype.validate = function() {
   this.buildAcronymMap();
-  this.references = parseReferenceList(this.referenceText, this.styleId);
+  var parsed = parseReferenceListDetailed(this.referenceText, this.styleId);
+  this.references = parsed.references;
+  this.parseStats = { totalFound: parsed.totalFound, succeededCount: parsed.succeededCount, failedCount: parsed.failedCount };
+  this.failedLines = parsed.failedLines;
   var family = this.style.family;
 
   if (family === 'numeric') {
@@ -649,10 +723,13 @@ MultiFormatValidator.prototype.validate = function() {
 
   this.validateInstitutionalConsistency();
   this.validateReferenceOrdering();
+  this.detectDuplicateReferences();
+  this.detectMixedCitationStyles();
 
   return {
     errors: this.errors, warnings: this.warnings, suggestions: this.suggestions,
     citations: this.citations, references: this.references, styleId: this.styleId,
+    parseStats: this.parseStats, failedLines: this.failedLines,
   };
 };
 
@@ -721,6 +798,35 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
   });
   this.refMap = refMap;
 
+  // ----- Same-surname + same-year collisions (e.g. "H. Zhang, 2023" vs "F. Zhang, 2023") -----
+  // Two different keys can still legitimately collide once we key only by surname+year.
+  // Figure out, per colliding group, whether it looks like the SAME author with two works
+  // (same/no initial, different titles -> suggest 2023a/2023b) or DIFFERENT people who just
+  // share a surname (different initials -> citations need the initial to disambiguate).
+  var matchedRefs = new Set(); // resolved specific reference objects (used for collision groups)
+  var collisionGroups = [];
+  refMap.forEach(function(refs, key) {
+    if (refs.length < 2) return;
+    var withInitial = refs.map(function(r) { return { ref: r, initial: initialFromRefAuthor(r.firstAuthor, self.styleId) }; });
+    var initials = withInitial.map(function(x) { return x.initial; }).filter(Boolean);
+    var distinctInitials = initials.filter(function(v, i) { return initials.indexOf(v) === i; });
+    var differentPeople = distinctInitials.length >= 2 && distinctInitials.length === initials.length;
+    collisionGroups.push({ key: key, refs: refs, differentPeople: differentPeople, firstInitial: withInitial[0].initial });
+    if (!differentPeople) {
+      // same/missing initials -> likely the same author with 2+ works published the same year.
+      // This is a reference-list formatting issue independent of how citations turn out, so
+      // it's reported unconditionally (unlike the "different people" case below).
+      var namesList = refs.map(function(r) { return '"' + (r.firstAuthor || '-') + ' (' + r.year + ')"'; }).join(', ');
+      var suffixLetters = 'abcdefghij';
+      var suggestion = refs.map(function(r, i) { return (r.year || '') + suffixLetters[i]; }).join(' / ');
+      self.errors.push({
+        title: 'Nama belakang & tahun sama, kemungkinan penulis sama', severity: 'error',
+        description: refs.length + ' referensi punya nama belakang dan tahun yang sama (' + namesList + '). Jika ini penulis yang sama dengan ' + refs.length + ' karya di tahun itu, beri akhiran huruf pada tahun (di referensi maupun sitasi): ' + suggestion + '.',
+        code: refs.map(function(r){return r.raw.substring(0,100);}).join(' | '),
+      });
+    }
+  });
+
   var citedKeys = new Set();
   var citationDetails = [];
   this.citedKeys = citedKeys;
@@ -755,7 +861,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         if (p.firstAuthor) {
           var key = self.keyFromCitationToken(p.firstAuthor) + '_' + p.year;
           citedKeys.add(key);
-          citationDetails.push({ key: key, part: p, raw: c.raw });
+          citationDetails.push({ key: key, part: p, raw: c.raw, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
         }
       });
     } else {
@@ -765,7 +871,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       if (authors.length > 0) {
         var key2 = self.keyFromCitationToken(authors[0]) + '_' + c.year;
         citedKeys.add(key2);
-        citationDetails.push({ key: key2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw });
+        citationDetails.push({ key: key2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, initial: initialFromCitationToken(authors[0]), position: c.position });
         if (authors.length >= style.etAlThreshold && !hasEtAl) {
           self.errors.push({ title: 'Sitasi naratif ' + style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi naratif "' + c.raw + '" menulis ' + authors.length + ' nama.', code: c.raw, correction: authors[0] + ' et al. (' + c.year + ')', severity: 'error' });
         }
@@ -784,21 +890,59 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       }
     } else {
       var refs = refMap.get(d.key);
-      refs.forEach(function(ref) {
-        if (ref.authorCount <= 2 && d.part.hasEtAl) {
-          self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
+      if (refs.length > 1) {
+        // Collision group: try to resolve to ONE specific reference via the citation's initial.
+        var candidates = refs.filter(function(ref) {
+          var ri = initialFromRefAuthor(ref.firstAuthor, self.styleId);
+          return d.initial && ri ? ri === d.initial : true;
+        });
+        if (d.initial && candidates.length === 1) {
+          matchedRefs.add(candidates[0]);
+          if (candidates[0].authorCount <= 2 && d.part.hasEtAl) {
+            self.errors.push({ title: '"et al." untuk sumber hanya ' + candidates[0].authorCount + ' penulis', description: 'Referensi "' + candidates[0].firstAuthor + ' (' + candidates[0].year + ')" hanya punya ' + candidates[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
+          }
+        } else {
+          self.errors.push({ title: 'Sitasi ambigu', description: 'Sitasi "' + d.raw + '" bisa merujuk ke ' + refs.length + ' referensi berbeda yang nama belakang & tahunnya sama (' + refs.map(function(r){return r.firstAuthor;}).join(' / ') + '). Tambahkan inisial pada sitasi untuk memperjelas.', code: d.raw, severity: 'error' });
         }
-      });
+      } else {
+        refs.forEach(function(ref) {
+          matchedRefs.add(ref);
+          if (ref.authorCount <= 2 && d.part.hasEtAl) {
+            self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
+          }
+        });
+      }
     }
   });
 
   this.references.forEach(function(r) {
     var key = self.keyFromRefAuthor(r) + '_' + (r.year || '');
+    var refs = refMap.get(key) || [];
+    if (refs.length > 1) {
+      // Collision group: this specific reference counts as cited only if a citation resolved to it.
+      if (!matchedRefs.has(r)) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak ada sitasi yang jelas merujuk ke sini (perlu inisial untuk memastikan).', code: r.raw.substring(0, 120), severity: 'error' });
+      return;
+    }
     if (!citedKeys.has(key)) {
       var found = false;
       for (var ck of citedKeys) { if (self.isFuzzyMatch(key, ck)) { found = true; break; } }
       if (!found) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'error' });
     }
+  });
+
+  // "Different people, same surname+year" is only worth flagging if disambiguation is still
+  // incomplete somewhere — if every reference in the group already got cleanly resolved to a
+  // specific citation (via initials), the document is already handling it correctly.
+  collisionGroups.forEach(function(g) {
+    if (!g.differentPeople) return;
+    var allResolved = g.refs.every(function(r) { return matchedRefs.has(r); });
+    if (allResolved) return;
+    var namesList = g.refs.map(function(r) { return '"' + (r.firstAuthor || '-') + ' (' + r.year + ')"'; }).join(', ');
+    self.errors.push({
+      title: 'Nama belakang & tahun sama, penulis berbeda', severity: 'error',
+      description: g.refs.length + ' referensi punya nama belakang dan tahun yang sama (' + namesList + ') tapi tampaknya orang berbeda, dan belum semua sitasi ke sini menyertakan inisial pembeda. Gunakan format "(' + (g.firstInitial || 'X') + '. ' + surnameOf(g.refs[0].firstAuthor, self.styleId) + ', ' + g.refs[0].year + ')" di setiap sitasi ke grup ini.',
+      code: g.refs.map(function(r){return r.raw.substring(0,100);}).join(' | '),
+    });
   });
 };
 
@@ -841,7 +985,7 @@ MultiFormatValidator.prototype.validateAuthorPage = function() {
 MultiFormatValidator.prototype.buildAcronymMap = function() {
   var map = {};
   var combined = this.articleText + '\n' + this.referenceText;
-  var re = /((?:[A-ZÀ-Ÿ][a-zà-ÿ'’\-]*\s+){1,8}[A-ZÀ-Ÿ][a-zà-ÿ'’\-]*)\s*[\(\[]([A-Z]{2,8})[\)\]]/g;
+  var re = /((?:[\p{Lu}\p{Lo}][\p{L}'’\-]*\s+){1,8}[\p{Lu}\p{Lo}][\p{L}'’\-]*)\s*[\(\[]([A-Z]{2,8})[\)\]]/gu;
   var m;
   while ((m = re.exec(combined)) !== null) {
     map[m[2].toLowerCase()] = m[1].trim().replace(/[.,;:]$/, '');
@@ -867,7 +1011,7 @@ MultiFormatValidator.prototype.keyFromRefAuthor = function(r) {
 
 MultiFormatValidator.prototype.keyFromCitationToken = function(token) {
   if (isInstitutionalAuthor(token)) return normalizeKeyName(this.resolveInstitutionalName(token), true);
-  return normalizeKeyName(token, false);
+  return normalizeKeyName(surnameFromCitationToken(token), false);
 };
 
 // Public helpers for UI: determine whether a given in-text citation token/year
@@ -923,6 +1067,113 @@ MultiFormatValidator.prototype.validateReferenceOrdering = function() {
   if (!isSorted) {
     var order = sorted.map(function(s){return s.firstAuthor + (s.year ? ' (' + s.year + ')' : '');}).join(' → ');
     this.errors.push({ title: 'Daftar referensi tidak alfabetis', description: this.style.name + ' mengharuskan daftar referensi diurutkan alfabetis berdasarkan nama belakang penulis pertama (atau nama institusi).', correction: 'Urutan yang benar: ' + order, severity: 'error' });
+  }
+};
+
+// ----- DUPLICATE / NEAR-DUPLICATE REFERENCE DETECTION -----
+// Catches: identical DOI reused across entries, near-identical titles (likely the same work
+// pasted twice, or a preprint + published-version duplicate), and same-author-same-year
+// entries with DIFFERENT titles that aren't yet disambiguated with a/b suffixes (numeric and
+// author-page families don't go through validateAuthorDate's collision check, so this is
+// their only safety net for that case too).
+MultiFormatValidator.prototype.detectDuplicateReferences = function() {
+  var self = this;
+  var refs = this.references;
+  if (refs.length < 2) return;
+
+  // Same DOI
+  var byDoi = new Map();
+  refs.forEach(function(r) {
+    if (!r.doi) return;
+    var k = r.doi.toLowerCase().trim();
+    if (!byDoi.has(k)) byDoi.set(k, []);
+    byDoi.get(k).push(r);
+  });
+  byDoi.forEach(function(group) {
+    if (group.length < 2) return;
+    self.errors.push({
+      title: 'DOI duplikat', severity: 'error',
+      description: group.length + ' referensi memakai DOI yang sama (' + group[0].doi + '): ' + group.map(function(r){return '"'+(r.firstAuthor||'-')+' ('+(r.year||'-')+')"';}).join(', ') + '. Kemungkinan entri terduplikasi atau salah DOI.',
+      code: group.map(function(r){return r.raw.substring(0,100);}).join(' | '),
+    });
+  });
+
+  // Near-identical titles (bigram similarity) — O(n^2) but reference lists are small (dozens,
+  // not thousands), so this stays fast.
+  var reportedPairs = new Set();
+  for (var i = 0; i < refs.length; i++) {
+    for (var j = i + 1; j < refs.length; j++) {
+      var a = refs[i], b = refs[j];
+      if (!a.title || !b.title) continue;
+      if (a.title.length < 25 || b.title.length < 25) continue; // short titles: one word can differ a lot yet still look "similar" by bigram count
+      var sim = bigramSimilarity(a.title, b.title);
+      if (sim >= 0.88) {
+        var pairKey = i + '_' + j;
+        if (reportedPairs.has(pairKey)) continue;
+        reportedPairs.add(pairKey);
+        self.errors.push({
+          title: 'Referensi kemungkinan duplikat', severity: 'error',
+          description: 'Judul referensi "' + (a.firstAuthor||'-') + ' (' + (a.year||'-') + ')" dan "' + (b.firstAuthor||'-') + ' (' + (b.year||'-') + ')" sangat mirip (' + Math.round(sim*100) + '% kemiripan) — kemungkinan entri yang sama tertulis dua kali.',
+          code: a.raw.substring(0,90) + ' | ' + b.raw.substring(0,90),
+        });
+      }
+    }
+  }
+
+  // Same author+year, different title, not yet using a/b suffixes — general safety net for
+  // numeric/author-page families (author-date family already has a richer version of this
+  // check in validateAuthorDate with initial-based disambiguation).
+  if (this.style.family !== 'author-date') {
+    var byAuthorYear = new Map();
+    refs.forEach(function(r) {
+      if (!r.year || r.isInstitutional) return;
+      var k = normalizeKeyName(surnameOf(r.firstAuthor, self.styleId), false) + '_' + r.year.replace(/[a-z]$/, '');
+      if (!byAuthorYear.has(k)) byAuthorYear.set(k, []);
+      byAuthorYear.get(k).push(r);
+    });
+    byAuthorYear.forEach(function(group) {
+      if (group.length < 2) return;
+      var alreadySuffixed = group.every(function(r) { return /[a-z]$/.test(r.year || ''); });
+      if (alreadySuffixed) return;
+      var suffixLetters = 'abcdefghij';
+      var suggestion = group.map(function(r, idx) { return (r.year||'').replace(/[a-z]$/,'') + suffixLetters[idx]; }).join(' / ');
+      self.errors.push({
+        title: 'Tahun ambigu — penulis & tahun sama, judul berbeda', severity: 'error',
+        description: group.length + ' referensi oleh "' + (group[0].firstAuthor||'-') + '" tahun ' + (group[0].year||'-').replace(/[a-z]$/,'') + ' dengan judul berbeda. Beri akhiran huruf: ' + suggestion + '.',
+        code: group.map(function(r){return r.raw.substring(0,100);}).join(' | '),
+      });
+    });
+  }
+};
+
+// ----- MIXED CITATION STYLE DETECTION -----
+// Flags when the article body mixes incompatible in-text citation shapes, e.g. some numeric
+// "[1]", some numeric "(1)", and some author-date "(Smith, 2020)" all in the same document —
+// a strong sign of copy-pasting from sources with different citation styles.
+MultiFormatValidator.prototype.detectMixedCitationStyles = function() {
+  var text = this.articleText || '';
+  var bracket = (text.match(/\[\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\]/g) || []).length;
+  // Exclude 4-digit numbers here — those are years inside author-date citations like
+  // "(2020)", not numeric citation markers. Genuine numeric-style citations are 1-3 digits.
+  var parenNumeric = (text.match(/\(\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\)/g) || []).filter(function(m) { return !/^\(\d{4}\)$/.test(m); }).length;
+  var authorDate = (text.match(/\([\p{Lu}\p{Lo}][^()]*?,?\s*\d{4}[a-z]?\)/gu) || []).length;
+  var authorPage = (text.match(/\([\p{Lu}\p{Lo}][\p{L}'\-]+\s+\d+(?:[-–]\d+)?\)/gu) || []).length;
+
+  var present = [];
+  if (bracket > 0) present.push({ label: 'numerik "[1]"', count: bracket });
+  // A handful of "(1)"-shaped matches showing up alongside a mostly author-date document is
+  // very often just enumerated prose ("...covers (1) X, (2) Y, (3) Z...") rather than a
+  // genuine numeric citation style — require a meaningful volume before flagging it.
+  if (parenNumeric >= 5 && parenNumeric > authorDate * 0.3) present.push({ label: 'numerik "(1)"', count: parenNumeric });
+  if (authorDate > 0) present.push({ label: 'penulis-tahun "(Smith, 2020)"', count: authorDate });
+  if (authorPage > 0 && authorDate === 0) present.push({ label: 'penulis-halaman "(Smith 45)"', count: authorPage });
+
+  if (present.length >= 2) {
+    var desc = present.map(function(p) { return p.label + ' (' + p.count + 'x)'; }).join(', ');
+    this.errors.push({
+      title: 'Gaya sitasi tidak konsisten', severity: 'error',
+      description: 'Teks tampaknya mencampur beberapa bentuk sitasi berbeda: ' + desc + '. Pastikan hanya satu gaya yang dipakai di seluruh naskah.',
+    });
   }
 };
 
@@ -1088,12 +1339,12 @@ function isLikelyTitleCase(text) {
   if (words.length < 3) return false;
   var capCount = 0, judged = 0;
   words.forEach(function(w, i) {
-    var clean = w.replace(/^[^A-Za-zÀ-ÿ]+|[^A-Za-zÀ-ÿ]+$/g, '');
+    var clean = w.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '');
     if (!clean) return;
     if (i === 0) return;
     if (CASE_STOPWORDS.has(clean.toLowerCase())) return;
     judged++;
-    if (/^[A-ZÀ-Ÿ]/.test(clean)) capCount++;
+    if (/^\p{Lu}/u.test(clean)) capCount++;
   });
   if (judged === 0) return false;
   return (capCount / judged) > 0.6;
@@ -1104,12 +1355,12 @@ function isLikelySentenceCaseViolationForTitleCaseStyle(text) {
   if (words.length < 3) return false;
   var capCount = 0, judged = 0;
   words.forEach(function(w, i) {
-    var clean = w.replace(/^[^A-Za-zÀ-ÿ]+|[^A-Za-zÀ-ÿ]+$/g, '');
+    var clean = w.replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '');
     if (!clean) return;
     if (i === 0) return;
     if (CASE_STOPWORDS.has(clean.toLowerCase())) return;
     judged++;
-    if (/^[A-ZÀ-Ÿ]/.test(clean)) capCount++;
+    if (/^\p{Lu}/u.test(clean)) capCount++;
   });
   if (judged === 0) return false;
   return (capCount / judged) < 0.15;
@@ -1319,6 +1570,7 @@ var CitationEngine = {
   acronymOf: acronymOf,
   parseReferenceLine: parseReferenceLine,
   parseReferenceList: parseReferenceList,
+  parseReferenceListDetailed: parseReferenceListDetailed,
   extractDOI: extractDOI,
   STYLES: STYLES,
   FormatDetector: FormatDetector,

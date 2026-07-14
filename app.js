@@ -21,6 +21,7 @@
     doiLabel: document.getElementById('doiLabel'),
     doiFill: document.getElementById('doiFill'),
     results: document.getElementById('results'),
+    parseStatusBanner: document.getElementById('parseStatusBanner'),
     summaryGrid: document.getElementById('summaryGrid'),
     yearRangePanel: document.getElementById('yearRangePanel'),
     yearRangeBody: document.getElementById('yearRangeBody'),
@@ -200,6 +201,7 @@
   }
 
   function renderAll(result, doiIssues) {
+    renderParseStatus(result);
     renderSummary(result, doiIssues);
     renderYearRange(result);
     renderCitationMap(result);
@@ -208,6 +210,26 @@
     renderIssueList('list-suggestions', result.suggestions);
     renderDoiList(doiIssues);
     renderIssueList('list-all', result.errors.concat(result.suggestions));
+  }
+
+  function renderParseStatus(result) {
+    var stats = result.parseStats || { totalFound: result.references.length, succeededCount: result.references.length, failedCount: 0 };
+    var failed = result.failedLines || [];
+    var el = els.parseStatusBanner;
+    if (stats.failedCount === 0) {
+      el.innerHTML = '<div class="parse-banner ok"><div class="pb-title">✅ Semua baris referensi berhasil dianalisis</div><div class="pb-stats">Ditemukan: ' + stats.totalFound + ' · Berhasil dianalisis: ' + stats.succeededCount + ' · Gagal: 0</div></div>';
+      return;
+    }
+    var html = '<div class="parse-banner fail">';
+    html += '<div class="pb-title">⚠️ ' + stats.failedCount + ' baris referensi GAGAL dianalisis — hasil di bawah ini belum lengkap</div>';
+    html += '<div class="pb-stats">Ditemukan: ' + stats.totalFound + ' · Berhasil dianalisis: ' + stats.succeededCount + ' · Gagal: ' + stats.failedCount + '</div>';
+    html += '<div>Baris berikut tidak dikenali polanya (penulis/tahun tidak terbaca) dan <b>tidak ikut divalidasi sama sekali</b> — periksa &amp; perbaiki manual sebelum menganggap hasil ini lengkap:</div>';
+    html += '<div class="pb-failed-list">';
+    failed.forEach(function(f) {
+      html += '<div class="pb-failed-item"><b>Baris ' + f.lineNumber + ':</b> ' + esc(f.text.slice(0, 160)) + (f.text.length > 160 ? '…' : '') + '<br><span style="color:var(--text-faint);">↳ ' + esc(f.reason) + '</span></div>';
+    });
+    html += '</div></div>';
+    el.innerHTML = html;
   }
 
   function renderSummary(result, doiIssues) {
