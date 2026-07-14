@@ -45,6 +45,17 @@
     els.exampleBox.classList.toggle('show');
   });
 
+  function setInputMode(mode) {
+    document.querySelectorAll('.input-mode-tab').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+    document.getElementById('pane-paste').classList.toggle('active', mode === 'paste');
+    document.getElementById('pane-manual').classList.toggle('active', mode === 'manual');
+  }
+  document.querySelectorAll('.input-mode-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() { setInputMode(btn.dataset.mode); });
+  });
+
   els.btnAutoSplit.addEventListener('click', function() {
     var fullText = els.fullDocText.value;
     if (!fullText.trim()) {
@@ -54,14 +65,15 @@
     }
     var split = CE.splitDocumentByReferences(fullText);
     if (!split) {
-      els.splitStatus.textContent = '⚠️ Heading referensi tidak terdeteksi (coba beri heading eksplisit seperti "References" atau "Daftar Pustaka" di baris tersendiri, atau isi manual di bawah).';
+      els.splitStatus.textContent = '⚠️ Heading referensi tidak terdeteksi (coba beri heading eksplisit seperti "References" atau "Daftar Pustaka" di baris tersendiri, atau isi manual di tab sebelah).';
       els.splitStatus.style.color = 'var(--amber)';
       return;
     }
     els.articleText.value = split.article;
     els.referenceText.value = split.references;
-    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — silakan periksa hasilnya di dua kolom di bawah sebelum validasi.';
+    els.splitStatus.textContent = '✅ Terpisah pada heading "' + split.headingText + '" — dipindah ke tab "Isi Manual", silakan periksa hasilnya sebelum validasi.';
     els.splitStatus.style.color = 'var(--green)';
+    setInputMode('manual');
     if (els.articleText.scrollIntoView) els.articleText.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
 

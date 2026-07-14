@@ -130,12 +130,19 @@
   .map-item .d{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   .map-item.matched .d{ background:var(--green); } .map-item.unmatched .d{ background:var(--red); }
 
-  details.detected{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; margin-bottom:16px; }
-  details.detected summary{ padding:12px 16px; cursor:pointer; font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--cyan); list-style:none; }
-  details.detected summary::-webkit-details-marker{ display:none; }
-  details.detected summary::before{ content:'▶ '; font-size:9px; }
-  details.detected[open] summary::before{ content:'▼ '; }
-  .detected-content{ padding:0 16px 14px; }
+  details.detected, details.collapsible{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; margin-bottom:16px; }
+  details.detected summary, details.collapsible summary{ padding:12px 16px; cursor:pointer; font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--cyan); list-style:none; display:flex; align-items:center; justify-content:space-between; }
+  details.detected summary::-webkit-details-marker, details.collapsible summary::-webkit-details-marker{ display:none; }
+  details.detected summary::before, details.collapsible summary::before{ content:'▶ '; font-size:9px; }
+  details.detected[open] summary::before, details.collapsible[open] summary::before{ content:'▼ '; }
+  .detected-content, .collapsible-content{ padding:0 16px 14px; }
+
+  .input-mode-tabs{ display:flex; gap:6px; margin-bottom:14px; }
+  .input-mode-tab{ font-family:'JetBrains Mono', monospace; font-size:11.5px; letter-spacing:.04em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:7px; padding:8px 14px; cursor:pointer; transition:all .15s ease; }
+  .input-mode-tab:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .input-mode-tab.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
+  .input-mode-pane{ display:none; }
+  .input-mode-pane.active{ display:block; }
   .det-item{ font-family:'JetBrains Mono', monospace; font-size:11px; padding:8px 10px; background:#0C1019; border-radius:5px; margin-bottom:4px; color:var(--text); }
   .det-item .sub{ color:var(--text-dim); font-size:10px; margin-top:2px; }
   .type-tag{ font-size:9.5px; padding:1px 6px; border-radius:3px; margin-left:6px; }
@@ -224,23 +231,31 @@
       <b>Penulis institusi:</b> perkenalkan singkatan pada sitasi pertama: <code>World Health Organization [WHO] (2020)</code>, lalu <code>(WHO, 2020)</code> pada sitasi berikutnya.
     </div>
 
-    <div class="field-label" style="margin-top:18px;">Tempel Dokumen Lengkap (Introduction — References), lalu klik Pisahkan</div>
-    <textarea id="fullDocText" style="min-height:140px;" placeholder="Tempel seluruh naskah di sini, dari Introduction sampai daftar Referensi/Daftar Pustaka. Sistem akan otomatis mendeteksi heading referensi dan memisahkannya ke dua kolom di bawah."></textarea>
-    <div class="actions" style="margin:10px 0 4px;">
-      <button class="ghost" id="btnAutoSplit">✂️ Pisahkan Otomatis</button>
-      <span id="splitStatus" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);"></span>
+    <div class="input-mode-tabs">
+      <button class="input-mode-tab active" data-mode="paste">📋 Tempel Dokumen Lengkap</button>
+      <button class="input-mode-tab" data-mode="manual">✏️ Isi Manual (Artikel + Referensi)</button>
     </div>
 
-    <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-faint);margin-top:18px;letter-spacing:.06em;">— atau isi/edit manual per kolom di bawah —</div>
-    <div class="input-grid" style="margin-top:10px;">
-      <div>
-        <div class="field-label">Teks Artikel (In-Text Citations)</div>
-        <textarea id="articleText" placeholder="Tempel seluruh teks artikel Anda di sini..."></textarea>
+    <div class="input-mode-pane active" id="pane-paste">
+      <div class="field-label">Tempel Dokumen Lengkap (Introduction — References), lalu klik Pisahkan</div>
+      <textarea id="fullDocText" style="min-height:110px;" placeholder="Tempel seluruh naskah di sini, dari Introduction sampai daftar Referensi/Daftar Pustaka. Sistem akan otomatis mendeteksi heading referensi dan memisahkannya ke dua kolom di tab &quot;Isi Manual&quot;."></textarea>
+      <div class="actions" style="margin:10px 0 4px;">
+        <button class="ghost" id="btnAutoSplit">✂️ Pisahkan Otomatis</button>
+        <span id="splitStatus" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-dim);"></span>
       </div>
-      <div>
-        <div class="field-label">Daftar Referensi (satu entri per baris)</div>
-        <textarea id="referenceText" placeholder="Tempel daftar referensi Anda di sini, satu per baris..."></textarea>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);margin-top:6px;">💡 Mau sekalian cek format italic &amp; huruf besar/kecil pada judul jurnal/buku? Gunakan menu <b>📤 Upload File</b> di atas — cek format itu dibaca langsung dari file .docx asli, jauh lebih akurat daripada dari copy-paste.</div>
+    </div>
+
+    <div class="input-mode-pane" id="pane-manual">
+      <div class="input-grid">
+        <div>
+          <div class="field-label">Teks Artikel (In-Text Citations)</div>
+          <textarea id="articleText" style="min-height:200px;" placeholder="Tempel seluruh teks artikel Anda di sini..."></textarea>
+        </div>
+        <div>
+          <div class="field-label">Daftar Referensi (satu entri per baris)</div>
+          <textarea id="referenceText" style="min-height:200px;" placeholder="Tempel daftar referensi Anda di sini, satu per baris..."></textarea>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-faint);margin-top:6px;">💡 Mau sekalian cek format italic &amp; huruf besar/kecil pada judul jurnal/buku? Gunakan menu <b>📤 Upload File</b> di atas — cek format itu dibaca langsung dari file .docx asli, jauh lebih akurat daripada dari copy-paste.</div>
+        </div>
       </div>
     </div>
 
@@ -287,9 +302,12 @@
       <div id="yearRangeBody"></div>
     </div>
 
-    <div class="panel" id="citationMapPanel"></div>
+    <details class="collapsible">
+      <summary>🗺️ Peta Sitasi (Teks ↔ Referensi)</summary>
+      <div class="collapsible-content"><div id="citationMapPanel"></div></div>
+    </details>
 
-    <details class="detected" id="detectedSection" open>
+    <details class="detected" id="detectedSection">
       <summary>Data Terdeteksi — Sitasi &amp; Referensi</summary>
       <div class="detected-content" id="detectedContent"></div>
     </details>
@@ -309,7 +327,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="engine.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="engine.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

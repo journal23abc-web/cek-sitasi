@@ -743,10 +743,12 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         }
       } else {
         var fa = c.parts.map(function(p){return self.keyFromCitationToken(p.firstAuthor);});
-        var sorted = fa.slice().sort();
         var isAlpha = fa.every(function(v,i){return i===0 || fa[i-1] <= fa[i];});
         if (!isAlpha) {
-          self.errors.push({ title: 'Multiple citations tidak alfabetis', description: 'Beberapa sitasi dalam satu kurung harus diurutkan alfabetis berdasarkan penulis pertama.', code: c.raw, severity: 'error' });
+          var sortedParts = c.parts.map(function(p, i) { return { part: p, key: fa[i] }; })
+            .sort(function(a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; })
+            .map(function(x) { return x.part.raw; });
+          self.errors.push({ title: 'Multiple citations tidak alfabetis', description: 'Beberapa sitasi dalam satu kurung harus diurutkan alfabetis berdasarkan penulis pertama.', code: c.raw, correction: '(' + sortedParts.join('; ') + ')', severity: 'error' });
         }
       }
       c.parts.forEach(function(p) {
