@@ -49,7 +49,10 @@
 
   function setInputMode(mode) {
     document.querySelectorAll('.input-mode-tab').forEach(function(btn) {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
+      var active = btn.dataset.mode === mode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.tabIndex = active ? 0 : -1;
     });
     document.getElementById('pane-paste').classList.toggle('active', mode === 'paste');
     document.getElementById('pane-manual').classList.toggle('active', mode === 'manual');
@@ -57,6 +60,7 @@
   document.querySelectorAll('.input-mode-tab').forEach(function(btn) {
     btn.addEventListener('click', function() { setInputMode(btn.dataset.mode); });
   });
+  initTabKeyboardNav('.input-mode-tab');
 
   els.btnAutoSplit.addEventListener('click', function() {
     var fullText = els.fullDocText.value;
@@ -285,8 +289,9 @@
 
   document.querySelectorAll('.filter-chip').forEach(function(chip) {
     chip.addEventListener('click', function() {
-      document.querySelectorAll('.filter-chip').forEach(function(c) { c.classList.remove('active'); });
+      document.querySelectorAll('.filter-chip').forEach(function(c) { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
       chip.classList.add('active');
+      chip.setAttribute('aria-pressed', 'true');
       activeFilter = chip.getAttribute('data-filter');
       applyFilterAndRender();
     });
@@ -511,8 +516,8 @@
       }
       html += '</div>';
       html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
-      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline">📋</button></div>';
-      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline">📋</button></div>';
+      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
       html += '</div>';
     });
     el.innerHTML = html;
@@ -563,8 +568,8 @@
       html += '<div class="issue-item ' + (sc==='success'?'suggestion':sc) + '">';
       html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span>' + instTag + '<span class="issue-title">' + esc(issue.title) + '</span></div>';
       html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
-      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline">📋</button></div>';
-      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline">📋</button></div>';
+      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
       if (issue.metadata) {
         var m = issue.metadata;
         html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10.5px;color:var(--text-dim);margin-top:8px;line-height:1.8;">';
@@ -610,7 +615,7 @@
             html += '<div class="doi-cand-body">';
             html += '<div class="doi-cand-title">' + esc(c.title || '(tanpa judul)') + '</div>';
             html += '<div class="doi-cand-meta">' + esc(c.author || '-') + (c.year ? ' · ' + esc(c.year) : '') + '</div>';
-            if (c.doi) html += '<div class="code-block code-fix" data-copy="' + escAttr(c.doi) + '">' + esc(c.doi) + '<button class="copy-inline">📋</button></div>';
+            if (c.doi) html += '<div class="code-block code-fix" data-copy="' + escAttr(c.doi) + '">' + esc(c.doi) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
             html += '</div></div>';
           });
           resultsEl.innerHTML = html;
@@ -636,14 +641,40 @@
   }
 
   // Tabs
+  function initTabKeyboardNav(tabSelector) {
+    document.querySelectorAll(tabSelector).forEach(function(tab) {
+      tab.addEventListener('keydown', function(e) {
+        var tabs = Array.prototype.slice.call(document.querySelectorAll(tabSelector));
+        var idx = tabs.indexOf(document.activeElement);
+        if (idx === -1) return;
+        var newIdx = null;
+        if (e.key === 'ArrowRight') newIdx = (idx + 1) % tabs.length;
+        else if (e.key === 'ArrowLeft') newIdx = (idx - 1 + tabs.length) % tabs.length;
+        else if (e.key === 'Home') newIdx = 0;
+        else if (e.key === 'End') newIdx = tabs.length - 1;
+        if (newIdx !== null) {
+          e.preventDefault();
+          tabs[newIdx].focus();
+          tabs[newIdx].click();
+        }
+      });
+    });
+  }
   document.querySelectorAll('.tab-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.remove('active');});
+      document.querySelectorAll('.tab-btn').forEach(function(b) {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+        b.tabIndex = -1;
+      });
       btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+      btn.tabIndex = 0;
       document.querySelectorAll('.tab-content').forEach(function(c){c.classList.remove('active');});
       document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     });
   });
+  initTabKeyboardNav('.tab-btn');
 
   // Report generation
   els.btnCopyReport.addEventListener('click', function() {

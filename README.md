@@ -6,12 +6,14 @@ berjalan 100% di browser, tanpa backend, cocok untuk hosting statis (GitHub Page
 ## Struktur proyek
 
 ```
-index.html      Halaman utama — tempel/ketik teks, validasi langsung
-upload.html     Upload file .docx, ekspor laporan PDF / docx ber-highlight
-engine.js       Mesin inti: parsing referensi, deteksi gaya, validasi, matching
-app.js          UI logic untuk index.html
-upload.js       UI logic untuk upload.html (JSZip + Mammoth.js untuk baca .docx)
-tests/          Automated test suite (Node, tanpa dependency)
+index.html          Halaman utama — tempel/ketik teks, validasi langsung
+upload.html         Upload file .docx, ekspor laporan PDF / docx ber-highlight
+shared.css           Design tokens & komponen yang identik di kedua halaman
+engine.js            Mesin inti: parsing referensi, deteksi gaya, validasi, matching
+app.js                UI logic untuk index.html
+upload.js             UI logic untuk upload.html (JSZip + Mammoth.js untuk baca .docx)
+validator-worker.js  Web Worker — menjalankan validasi berat di background thread
+tests/               Automated test suite (Node, tanpa dependency)
 ```
 
 ## Menjalankan tes
@@ -74,3 +76,22 @@ Semua pemrosesan (parsing referensi, deteksi gaya, cek format) terjadi di browse
 Anda sendiri — tidak ada data yang dikirim ke server manapun, kecuali saat Anda
 sengaja mengaktifkan "Validasi DOI via CrossRef" (yang mengirim string DOI, bukan
 seluruh naskah, ke api.crossref.org).
+
+## Catatan teknis tambahan
+
+- **Font**: memakai font sistem (`-apple-system`/`Segoe UI`/Roboto/dst.) untuk teks,
+  dan `ui-monospace`/`SF Mono`/`Cascadia Code`/dst. untuk elemen kode — tidak ada
+  dependency Google Fonts, jadi tidak ada request tambahan saat halaman dibuka.
+- **Library eksternal** (JSZip, Mammoth.js di `upload.html`) dimuat dari jsDelivr
+  dengan Subresource Integrity (`integrity="sha384-..."`) — browser akan menolak
+  memuat file itu kalau isinya pernah berubah dari yang di-hash, jadi aman dari CDN
+  yang di-kompromikan. Kalau versi library di-upgrade, hash SRI-nya harus dihitung
+  ulang (`openssl dgst -sha384 -binary FILE | openssl base64 -A`).
+- **Web Worker**: dokumen besar (>50rb karakter gabungan artikel+referensi) di
+  `upload.html` otomatis diproses di background thread (`validator-worker.js`)
+  supaya tab browser tidak macet, dengan fallback otomatis ke main thread kalau
+  Worker gagal/timeout.
+- **Aksesibilitas**: tab (baik input mode maupun kategori hasil) pakai pola ARIA
+  tabs standar (`role="tab"`, `aria-selected`, navigasi panah kiri/kanan), status
+  proses punya `aria-live="polite"` supaya terbaca screen reader, dan tombol
+  ikon-saja (copy) punya `aria-label`.
