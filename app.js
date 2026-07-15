@@ -188,13 +188,13 @@
               var noteTexts = cmp.mismatches.map(function(m){ return m.note; }).filter(Boolean);
               doiIssues.push({
                 ref: ref, doi: ref.doi, status: 'mismatch', severity: 'warning', title: 'DOI valid, metadata tidak sesuai',
-                description: 'DOI ada, tetapi ' + cmp.mismatches.map(function(m){return m.field + ' (referensi: ' + m.ref + ', CrossRef: ' + m.cr + ')';}).join('; ') + ' tidak cocok dengan data CrossRef.' + (noteTexts.length ? ' ' + noteTexts.join(' ') : ''), code: ref.doi,
+                description: 'DOI ada, tetapi ' + cmp.mismatches.map(function(m){return m.field + ' (referensi: ' + m.ref + ', CrossRef: ' + m.cr + ')';}).join('; ') + ' tidak cocok dengan data CrossRef.' + (noteTexts.length ? ' ' + noteTexts.join(' ') : ''), code: 'https://doi.org/' + ref.doi,
                 metadata: { ref: { title: ref.title, authors: (ref.authors||[]).join(', '), year: ref.year }, crossref: { title: crTitle, authors: crAuthors, year: crYear }, mismatches: cmp.mismatches, matches: cmp.matches }
               });
             } else {
               doiIssues.push({
                 ref: ref, doi: ref.doi, status: 'valid', severity: 'success', title: 'DOI valid & metadata sesuai',
-                description: 'DOI "' + ref.doi + '" terverifikasi di CrossRef.', code: ref.doi,
+                description: 'DOI "' + ref.doi + '" terverifikasi di CrossRef.', code: 'https://doi.org/' + ref.doi,
                 metadata: { ref: { title: ref.title, authors: (ref.authors||[]).join(', '), year: ref.year }, crossref: { title: crTitle, authors: crAuthors, year: crYear }, mismatches: [], matches: cmp.matches }
               });
             }
@@ -493,7 +493,7 @@
       result.references.forEach(function(r) {
         var tag = r.isInstitutional ? '<span class="type-tag inst">INSTITUSI</span>' : '';
         html += '<div class="det-item">' + (r.numLabel!=null ? '['+r.numLabel+'] ' : '') + esc(r.firstAuthor||'-') + (r.year?' ('+r.year+')':'') + tag +
-          '<div class="sub">Judul: ' + esc(r.title||'-') + (r.doi ? ' | DOI: '+esc(r.doi) : '') + ' | ' + r.authorCount + ' penulis</div></div>';
+          '<div class="sub">Judul: ' + esc(r.title||'-') + (r.doi ? ' | DOI: '+esc('https://doi.org/'+r.doi) : '') + ' | ' + r.authorCount + ' penulis</div></div>';
       });
     }
     els.detectedContent.innerHTML = html;
@@ -615,7 +615,10 @@
             html += '<div class="doi-cand-body">';
             html += '<div class="doi-cand-title">' + esc(c.title || '(tanpa judul)') + '</div>';
             html += '<div class="doi-cand-meta">' + esc(c.author || '-') + (c.year ? ' · ' + esc(c.year) : '') + '</div>';
-            if (c.doi) html += '<div class="code-block code-fix" data-copy="' + escAttr(c.doi) + '">' + esc(c.doi) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+            if (c.doi) {
+              var doiUrl = 'https://doi.org/' + c.doi;
+              html += '<div class="code-block code-fix" data-copy="' + escAttr(doiUrl) + '">' + esc(doiUrl) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+            }
             html += '</div></div>';
           });
           resultsEl.innerHTML = html;

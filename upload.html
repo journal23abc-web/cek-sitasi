@@ -4,7 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Upload &amp; Ekspor Laporan — Validator Sitasi</title>
-<link rel="stylesheet" href="shared.css?v=1">
+<script>
+(function(){
+  try {
+    var saved = localStorage.getItem('citationValidatorTheme');
+    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="shared.css?v=2">
 <style>
 
   
@@ -13,7 +22,7 @@
   header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
   
   h1{ font-family:var(--font-display); font-weight:700; font-size:26px; margin:0; letter-spacing:-0.01em; }
-  .back-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+  .back-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
   .back-link:hover{ border-color:var(--cyan); color:var(--cyan); }
 
   
@@ -24,21 +33,21 @@
   
   .step-num{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--cyan); color:var(--void); font-family:var(--font-mono); font-size:11px; font-weight:700; margin-right:8px; flex-shrink:0; }
 
-  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:30px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:#0C1019; }
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:30px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); }
   .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
   .dropzone .icon{ font-size:30px; margin-bottom:10px; }
   .dropzone .main{ font-size:13.5px; color:var(--text); margin-bottom:4px; }
   .dropzone .sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); }
-  .file-chip{ display:none; align-items:center; gap:10px; margin-top:12px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:var(--font-mono); font-size:12px; }
+  .file-chip{ display:none; align-items:center; gap:10px; margin-top:12px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:var(--font-mono); font-size:12px; }
   .file-chip.show{ display:flex; }
   .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
   .file-chip .x:hover{ color:var(--red); }
 
-  select, input[type=number]{ font-family:var(--font-mono); font-size:13px; color:var(--text); background:#0C1019; border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
+  select, input[type=number]{ font-family:var(--font-mono); font-size:13px; color:var(--text); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
   select:focus, input[type=number]:focus{ border-color:var(--cyan); }
 
   .yr-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .yr-preset{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--text-dim); background:#0C1019; border:1px solid var(--hairline); border-radius:20px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
+  .yr-preset{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:20px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
   .yr-preset:hover{ border-color:var(--cyan); color:var(--cyan); }
   .yr-preset.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
   .yr-sep{ width:1px; height:18px; background:var(--hairline); margin:0 2px; }
@@ -63,7 +72,7 @@
 
   .manual-fix{ display:none; margin-top:16px; }
   .manual-fix.show{ display:block; }
-  textarea{ width:100%; min-height:160px; background:#0C1019; border:1px solid var(--hairline); border-radius:8px; padding:12px; color:var(--text); font-family:var(--font-mono); font-size:12px; line-height:1.7; resize:vertical; outline:none; }
+  textarea{ width:100%; min-height:160px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:12px; color:var(--text); font-family:var(--font-mono); font-size:12px; line-height:1.7; resize:vertical; outline:none; }
   textarea:focus{ border-color:var(--cyan); }
 
   .results{ display:none; }
@@ -95,7 +104,7 @@
   .parse-banner.fail .pb-title{ color:var(--red); }
   .parse-banner .pb-stats{ color:var(--text-dim); margin-bottom:8px; }
   .parse-banner .pb-failed-list{ margin-top:8px; }
-  .parse-banner .pb-failed-item{ background:#0C1019; border-left:3px solid var(--red); border-radius:0 6px 6px 0; padding:8px 10px; margin-bottom:6px; font-size:11.5px; color:var(--text-dim); }
+  .parse-banner .pb-failed-item{ background:var(--input-bg); border-left:3px solid var(--red); border-radius:0 6px 6px 0; padding:8px 10px; margin-bottom:6px; font-size:11.5px; color:var(--text-dim); }
   .parse-banner .pb-failed-item b{ color:var(--text); }
 
   /* ---- Report preview (white "paper" look, screen only) ---- */
@@ -142,7 +151,10 @@
       <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
       <h1>Upload &amp; Ekspor Laporan Sitasi</h1>
     </div>
-    <a href="index.html" class="back-link">← Kembali ke Validator Utama</a>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
+      <a href="index.html" class="back-link">← Kembali ke Validator Utama</a>
+    </div>
   </header>
 
   <div class="panel">
@@ -249,8 +261,9 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
+<script src="theme.js?v=1"></script>
 <script src="engine.js?v=12"></script>
-<script src="upload.js?v=10"></script>
+<script src="upload.js?v=11"></script>
 </body>
 </html>
 
