@@ -734,6 +734,7 @@ MultiFormatValidator.prototype.annotateLocations = function() {
 
 MultiFormatValidator.prototype.validate = function() {
   this.buildAcronymMap();
+  this.citationCounts = new Map(); // ref object -> number of times it's actually cited (for analytics)
   var parsed = parseReferenceListDetailed(this.referenceText, this.styleId);
   this.references = parsed.references;
   this.parseStats = { totalFound: parsed.totalFound, succeededCount: parsed.succeededCount, failedCount: parsed.failedCount };
@@ -756,11 +757,12 @@ MultiFormatValidator.prototype.validate = function() {
   this.detectDuplicateReferences();
   this.detectMixedCitationStyles();
   this.annotateLocations();
+  var analytics = computeReferenceAnalytics(this);
 
   return {
     errors: this.errors, warnings: this.warnings, suggestions: this.suggestions,
     citations: this.citations, references: this.references, styleId: this.styleId,
-    parseStats: this.parseStats, failedLines: this.failedLines,
+    parseStats: this.parseStats, failedLines: this.failedLines, analytics: analytics,
   };
 };
 
@@ -782,6 +784,8 @@ MultiFormatValidator.prototype.validateNumeric = function() {
       if (!seenNums.has(n)) { seenNums.add(n); firstSeenOrder.push(n); }
       if (!refByNumber[n]) {
         self.errors.push({ title: 'Sitasi merujuk nomor yang tidak ada di referensi', description: 'Sitasi "' + c.raw + '" merujuk [' + n + '] tetapi tidak ada referensi bernomor ' + n + '.', code: c.raw, severity: 'error' });
+      } else {
+        self.citationCounts.set(refByNumber[n], (self.citationCounts.get(refByNumber[n]) || 0) + 1);
       }
     });
   });
@@ -929,6 +933,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         });
         if (d.initial && candidates.length === 1) {
           matchedRefs.add(candidates[0]);
+          self.citationCounts.set(candidates[0], (self.citationCounts.get(candidates[0]) || 0) + 1);
           if (candidates[0].authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + candidates[0].authorCount + ' penulis', description: 'Referensi "' + candidates[0].firstAuthor + ' (' + candidates[0].year + ')" hanya punya ' + candidates[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
           }
@@ -938,6 +943,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       } else {
         refs.forEach(function(ref) {
           matchedRefs.add(ref);
+          self.citationCounts.set(ref, (self.citationCounts.get(ref) || 0) + 1);
           if (ref.authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
           }
@@ -1001,6 +1007,8 @@ MultiFormatValidator.prototype.validateAuthorPage = function() {
       if (!refByAuthor.has(key)) {
         var fuzzy = self.fuzzyFind(key, refByAuthor);
         if (!fuzzy) self.errors.push({ title: 'Sitasi tidak ada di Works Cited', description: 'Sitasi "(' + p.raw + ')" tidak memiliki entri penulis cocok di Works Cited.', code: '(' + p.raw + ')', severity: 'error' });
+      } else {
+        refByAuthor.get(key).forEach(function(ref) { self.citationCounts.set(ref, (self.citationCounts.get(ref) || 0) + 1); });
       }
     });
   });
@@ -1107,6 +1115,131 @@ MultiFormatValidator.prototype.validateReferenceOrdering = function() {
 // entries with DIFFERENT titles that aren't yet disambiguated with a/b suffixes (numeric and
 // author-page families don't go through validateAuthorDate's collision check, so this is
 // their only safety net for that case too).
+// ----- REFERENCE ANALYTICS -----
+// Deliberately does NOT produce a single "quality score" — that would imply a scientific
+// judgment this tool can't make. Every number here is a plain, individually-checkable count
+// or percentage; interpreting what's "good" is left entirely to the person reading it.
+function computeReferenceAnalytics(validator) {
+  var refs = validator.references;
+  var citations = validator.citations;
+  var articleText = validator.articleText || '';
+  var styleId = validator.styleId;
+  var citationCounts = validator.citationCounts || new Map();
+  var currentYear = new Date().getFullYear();
+
+  var total = refs.length;
+
+  // --- Unique sources (dedup by DOI, else normalized title) ---
+  var seenKeys = new Set();
+  refs.forEach(function(r) {
+    var key = r.doi ? 'doi:' + r.doi.toLowerCase() : 'title:' + normalizeTitle(r.title || r.raw);
+    seenKeys.add(key);
+  });
+  var uniqueSources = seenKeys.size;
+
+  // --- Year distribution + median age ---
+  var yearCounts = {};
+  var ages = [];
+  var unknownYearCount = 0;
+  refs.forEach(function(r) {
+    var y = r.year ? parseInt(String(r.year).replace(/[a-z]$/, ''), 10) : null;
+    if (!y || isNaN(y)) { unknownYearCount++; return; }
+    yearCounts[y] = (yearCounts[y] || 0) + 1;
+    ages.push(currentYear - y);
+  });
+  var yearDistribution = Object.keys(yearCounts).map(function(y) { return { year: parseInt(y, 10), count: yearCounts[y] }; }).sort(function(a, b) { return a.year - b.year; });
+  ages.sort(function(a, b) { return a - b; });
+  var medianAge = null;
+  if (ages.length > 0) {
+    var mid = Math.floor(ages.length / 2);
+    medianAge = ages.length % 2 === 0 ? (ages[mid - 1] + ages[mid]) / 2 : ages[mid];
+  }
+
+  // --- Source type breakdown ---
+  var typeLabels = { 'journal-article': 'Artikel jurnal', 'book': 'Buku', 'book-chapter': 'Bab buku', 'thesis': 'Skripsi/Tesis/Disertasi', 'website': 'Website', 'report': 'Laporan', 'conference': 'Prosiding', 'unknown': 'Tidak teridentifikasi' };
+  var typeCounts = {};
+  refs.forEach(function(r) { var t = r.sourceType || 'unknown'; typeCounts[t] = (typeCounts[t] || 0) + 1; });
+  var sourceTypeBreakdown = Object.keys(typeCounts).map(function(t) {
+    return { type: t, label: typeLabels[t] || t, count: typeCounts[t], pct: total ? Math.round((typeCounts[t] / total) * 100) : 0 };
+  }).sort(function(a, b) { return b.count - a.count; });
+  function pctOfType(t) { return total ? Math.round(((typeCounts[t] || 0) / total) * 100) : 0; }
+
+  // --- DOI coverage ---
+  var withDoi = refs.filter(function(r) { return !!r.doi; }).length;
+  var doiPercentage = total ? Math.round((withDoi / total) * 100) : 0;
+  var journalRefs = refs.filter(function(r) { return r.sourceType === 'journal-article'; });
+  var journalWithDoi = journalRefs.filter(function(r) { return !!r.doi; }).length;
+  var doiPercentageOfJournals = journalRefs.length ? Math.round((journalWithDoi / journalRefs.length) * 100) : null;
+
+  // --- Most / never cited ---
+  var mostCited = refs.map(function(r) { return { ref: r, count: citationCounts.get(r) || 0 }; })
+    .filter(function(x) { return x.count > 0; })
+    .sort(function(a, b) { return b.count - a.count; })
+    .slice(0, 5);
+  var neverCited = refs.filter(function(r) { return !citationCounts.get(r); });
+
+  // --- Citation density ---
+  var wordCount = articleText.split(/\s+/).filter(Boolean).length;
+  function countCitationInstances(cites) {
+    var n = 0;
+    cites.forEach(function(c) {
+      if (c.numbers) n += c.numbers.length;
+      else if (c.parts) n += c.parts.length;
+      else n += 1;
+    });
+    return n;
+  }
+  var totalCitationInstances = countCitationInstances(citations);
+  var citationsPerThousandWords = wordCount ? Math.round((totalCitationInstances / wordCount) * 1000 * 10) / 10 : 0;
+  var paragraphCount = articleText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean).length;
+  var citationsPerParagraph = paragraphCount ? Math.round((totalCitationInstances / paragraphCount) * 10) / 10 : 0;
+
+  // --- Dominant authors (appear as first author on 2+ references) ---
+  var authorCounts = new Map();
+  refs.forEach(function(r) {
+    if (!r.firstAuthor || r.isInstitutional) return;
+    var key = normalizeKeyName(surnameOf(r.firstAuthor, styleId), false);
+    if (!key) return;
+    if (!authorCounts.has(key)) authorCounts.set(key, { label: surnameOf(r.firstAuthor, styleId) || r.firstAuthor, count: 0 });
+    authorCounts.get(key).count++;
+  });
+  var dominantAuthors = Array.from(authorCounts.values()).filter(function(a) { return a.count >= 2; }).sort(function(a, b) { return b.count - a.count; }).slice(0, 5);
+
+  // --- Dominant journals (best-effort extraction, journal-article sources only) ---
+  var journalCounts = new Map();
+  journalRefs.forEach(function(r) {
+    var span = extractJournalNameSpan(r.raw, r.title || '');
+    if (!span) return;
+    var key = span.text.toLowerCase().trim();
+    if (!key) return;
+    if (!journalCounts.has(key)) journalCounts.set(key, { label: span.text.trim(), count: 0 });
+    journalCounts.get(key).count++;
+  });
+  var dominantJournals = Array.from(journalCounts.values()).filter(function(j) { return j.count >= 2; }).sort(function(a, b) { return b.count - a.count; }).slice(0, 5);
+
+  return {
+    totalReferences: total,
+    uniqueSources: uniqueSources,
+    yearDistribution: yearDistribution,
+    unknownYearCount: unknownYearCount,
+    medianAge: medianAge,
+    sourceTypeBreakdown: sourceTypeBreakdown,
+    pctJournalArticle: pctOfType('journal-article'),
+    pctBook: pctOfType('book') + pctOfType('book-chapter'),
+    pctWebsite: pctOfType('website'),
+    doiPercentage: doiPercentage,
+    doiPercentageOfJournals: doiPercentageOfJournals,
+    mostCited: mostCited,
+    neverCited: neverCited,
+    wordCount: wordCount,
+    citationsPerThousandWords: citationsPerThousandWords,
+    paragraphCount: paragraphCount,
+    citationsPerParagraph: citationsPerParagraph,
+    dominantAuthors: dominantAuthors,
+    dominantJournals: dominantJournals,
+  };
+}
+
 MultiFormatValidator.prototype.detectDuplicateReferences = function() {
   var self = this;
   var refs = this.references;

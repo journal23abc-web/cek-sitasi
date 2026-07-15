@@ -6,15 +6,22 @@ berjalan 100% di browser, tanpa backend, cocok untuk hosting statis (GitHub Page
 ## Struktur proyek
 
 ```
-index.html          Halaman utama — tempel/ketik teks, validasi langsung
-upload.html         Upload file .docx, ekspor laporan PDF / docx ber-highlight
-shared.css           Design tokens & komponen yang identik di kedua halaman
-engine.js            Mesin inti: parsing referensi, deteksi gaya, validasi, matching
-app.js                UI logic untuk index.html
-upload.js             UI logic untuk upload.html (JSZip + Mammoth.js untuk baca .docx)
-validator-worker.js  Web Worker — menjalankan validasi berat di background thread
-tests/               Automated test suite (Node, tanpa dependency)
+index.html            Beranda (hub) — pilih mau pakai validator yang mana
+validator-copy.html   Validator via copy-paste teks — tempel & validasi langsung
+validator-upload.html Validator via upload .docx — ekspor laporan PDF / docx ber-highlight
+shared.css             Design tokens & komponen yang identik di semua halaman
+theme.js                Toggle dark/light mode, dipakai semua halaman
+engine.js               Mesin inti: parsing referensi, deteksi gaya, validasi, matching
+app.js                   UI logic untuk validator-copy.html
+upload.js                UI logic untuk validator-upload.html (JSZip + Mammoth.js)
+validator-worker.js    Web Worker — menjalankan validasi berat di background thread
+tests/                 Automated test suite (Node, tanpa dependency)
 ```
+
+`index.html` sengaja dibuat sesederhana mungkin (cuma dua kartu tautan) supaya gampang
+ditambah kalau nanti ada validator/fitur baru — tinggal salin blok `.tool-card` yang ada
+dan ganti tautan/isinya, tanpa perlu mengubah apa pun di `validator-copy.html` atau
+`validator-upload.html`.
 
 ## Menjalankan tes
 
@@ -43,6 +50,11 @@ Auto-detect gaya tersedia, tapi untuk dokumen ambigu selalu ada opsi pilih manua
 - Jenis sumber (buku/artikel/skripsi/dll) — supaya buku tidak dituntut punya DOI
 - Format italic & sentence-case/title-case pada judul (khusus upload .docx, dibaca
   langsung dari XML asli file, bukan dari copy-paste)
+- **Analitik referensi** (murni hitungan objektif, bukan skor kualitas): jumlah
+  sumber unik, distribusi tahun (grafik SVG), median usia referensi, persentase
+  jenis sumber (jurnal/buku/website), persentase DOI, referensi paling
+  sering/tidak pernah disitasi, kepadatan sitasi (per 1000 kata & per paragraf),
+  penulis dan jurnal paling dominan
 
 ## Keterbatasan yang jujur perlu diketahui
 
@@ -63,10 +75,14 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
 - **Auto-detect gaya sitasi** memakai skor berbasis pola (tanda kutip, "pp.", dst.) —
   untuk dokumen yang formatnya sangat tidak konsisten, hasil deteksi bisa meleset;
   selalu tersedia opsi pilih gaya manual di dropdown.
+- **Analitik referensi** sengaja tidak menghasilkan satu "skor kualitas" gabungan —
+  itu akan terlihat ilmiah padahal tidak berdasar. Yang ditampilkan cuma hitungan
+  objektif (jumlah, persentase, median); menilai apakah angkanya "bagus" tergantung
+  bidang ilmu dan aturan jurnal/institusi masing-masing, di luar cakupan alat ini.
 - **DOI check** bergantung API publik CrossRef — hasil "tidak ditemukan" atau
   "metadata beda" bisa juga karena DOI belum terindeks CrossRef, bukan berarti DOI-nya
   salah (khususnya jurnal kecil/baru).
-- **Copy-paste dari Word** ke kotak teks index.html cuma membawa teks polos (tanpa
+- **Copy-paste dari Word** ke kotak teks validator-copy.html cuma membawa teks polos (tanpa
   italic). Kalau butuh cek format italic yang akurat, gunakan halaman Upload —
   itu membaca format asli langsung dari file `.docx`.
 
@@ -82,13 +98,13 @@ seluruh naskah, ke api.crossref.org).
 - **Font**: memakai font sistem (`-apple-system`/`Segoe UI`/Roboto/dst.) untuk teks,
   dan `ui-monospace`/`SF Mono`/`Cascadia Code`/dst. untuk elemen kode — tidak ada
   dependency Google Fonts, jadi tidak ada request tambahan saat halaman dibuka.
-- **Library eksternal** (JSZip, Mammoth.js di `upload.html`) dimuat dari jsDelivr
+- **Library eksternal** (JSZip, Mammoth.js di `validator-upload.html`) dimuat dari jsDelivr
   dengan Subresource Integrity (`integrity="sha384-..."`) — browser akan menolak
   memuat file itu kalau isinya pernah berubah dari yang di-hash, jadi aman dari CDN
   yang di-kompromikan. Kalau versi library di-upgrade, hash SRI-nya harus dihitung
   ulang (`openssl dgst -sha384 -binary FILE | openssl base64 -A`).
 - **Web Worker**: dokumen besar (>50rb karakter gabungan artikel+referensi) di
-  `upload.html` otomatis diproses di background thread (`validator-worker.js`)
+  `validator-upload.html` otomatis diproses di background thread (`validator-worker.js`)
   supaya tab browser tidak macet, dengan fallback otomatis ke main thread kalau
   Worker gagal/timeout.
 - **Aksesibilitas**: tab (baik input mode maupun kategori hasil) pakai pola ARIA

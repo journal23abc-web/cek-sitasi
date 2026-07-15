@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upload &amp; Ekspor Laporan — Validator Sitasi</title>
+<script>
+(function(){
+  try {
+    var saved = localStorage.getItem('citationValidatorTheme');
+    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="shared.css?v=2">
+<style>
+
+  
+  .wrap{ max-width:820px; margin:0 auto; }
+  a{ color:var(--cyan); }
+  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
+  
+  h1{ font-family:var(--font-display); font-weight:700; font-size:26px; margin:0; letter-spacing:-0.01em; }
+  .back-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+  .back-link:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  
+
+  
+
+  .field-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  
+  .step-num{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--cyan); color:var(--void); font-family:var(--font-mono); font-size:11px; font-weight:700; margin-right:8px; flex-shrink:0; }
+
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:30px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .icon{ font-size:30px; margin-bottom:10px; }
+  .dropzone .main{ font-size:13.5px; color:var(--text); margin-bottom:4px; }
+  .dropzone .sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); }
+  .file-chip{ display:none; align-items:center; gap:10px; margin-top:12px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:var(--font-mono); font-size:12px; }
+  .file-chip.show{ display:flex; }
+  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
+  .file-chip .x:hover{ color:var(--red); }
+
+  select, input[type=number]{ font-family:var(--font-mono); font-size:13px; color:var(--text); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
+  select:focus, input[type=number]:focus{ border-color:var(--cyan); }
+
+  .yr-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .yr-preset{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:20px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
+  .yr-preset:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .yr-preset.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
+  .yr-sep{ width:1px; height:18px; background:var(--hairline); margin:0 2px; }
+  .yr-custom{ display:flex; align-items:center; gap:6px; }
+  .yr-custom label{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); }
+  .yr-input{ width:76px; }
+
+  .row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); margin-top:14px; }
+  .checkbox-row input{ accent-color:var(--cyan); width:15px; height:15px; }
+
+  button.primary{ font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
+  button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
+  button.primary:active{ transform:translateY(1px); }
+  button.primary:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+
+  .status{ font-family:var(--font-mono); font-size:11.5px; margin-top:12px; line-height:1.7; }
+  .status.info{ color:var(--text-dim); } .status.ok{ color:var(--green); } .status.err{ color:var(--red); } .status.warn{ color:var(--amber); }
+
+  .spinner{ width:16px; height:16px; border:2px solid var(--hairline); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:-3px; margin-right:6px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .manual-fix{ display:none; margin-top:16px; }
+  .manual-fix.show{ display:block; }
+  textarea{ width:100%; min-height:160px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:12px; color:var(--text); font-family:var(--font-mono); font-size:12px; line-height:1.7; resize:vertical; outline:none; }
+  textarea:focus{ border-color:var(--cyan); }
+
+  .results{ display:none; }
+  .results.active{ display:block; }
+  .summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; margin-bottom:18px; }
+  .sum-card{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center; }
+  .sum-card .n{ font-family:var(--font-display); font-size:22px; font-weight:700; }
+  .sum-card .l{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:2px; }
+  .sum-card.err .n{ color:var(--red); } .sum-card.warn .n{ color:var(--amber); } .sum-card.sugg .n{ color:var(--cyan); }
+  .sum-card.ok .n{ color:var(--green); } .sum-card.fmt .n{ font-size:13px; color:var(--violet); }
+
+  .yr-bar{ width:100%; height:14px; border-radius:7px; overflow:hidden; display:flex; background:var(--hairline); margin:14px 0 10px; }
+  .yr-seg{ height:100%; }
+  .yr-seg.in{ background:linear-gradient(90deg, var(--green), var(--cyan)); }
+  .yr-seg.out{ background:var(--red); opacity:.75; }
+  .yr-seg.unk{ background:var(--text-faint); }
+  .yr-legend{ display:flex; gap:18px; flex-wrap:wrap; margin-bottom:6px; font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+  .yr-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .yr-legend .d{ width:9px; height:9px; border-radius:3px; }
+  .yr-legend .d.in{ background:var(--cyan); } .yr-legend .d.out{ background:var(--red); } .yr-legend .d.unk{ background:var(--text-faint); }
+
+  .privacy-note{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+
+  details.collapsible{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; margin-bottom:16px; }
+  details.collapsible summary{ padding:12px 16px; cursor:pointer; font-family:var(--font-mono); font-size:12px; color:var(--cyan); list-style:none; display:flex; align-items:center; justify-content:space-between; }
+  details.collapsible summary::-webkit-details-marker{ display:none; }
+  details.collapsible summary::before{ content:'▶ '; font-size:9px; }
+  details.collapsible[open] summary::before{ content:'▼ '; }
+  .collapsible-content{ padding:0 16px 14px; }
+
+  .an-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:20px; }
+  .an-stat{ background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:12px 14px; }
+  .an-stat .v{ font-family:var(--font-display); font-size:22px; font-weight:700; color:var(--text); line-height:1.2; }
+  .an-stat .v small{ font-size:12px; color:var(--text-dim); font-weight:400; }
+  .an-stat .l{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin-top:3px; }
+  .an-section{ margin-bottom:22px; }
+  .an-section-title{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  .an-section-title::before{ content:'▸'; color:var(--cyan); }
+  .an-bar-row{ display:flex; align-items:center; gap:10px; margin-bottom:7px; font-size:12px; }
+  .an-bar-label{ width:150px; flex-shrink:0; color:var(--text-dim); font-family:var(--font-mono); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .an-bar-track{ flex:1; height:16px; background:var(--input-bg); border-radius:4px; overflow:hidden; }
+  .an-bar-fill{ height:100%; background:linear-gradient(90deg, var(--cyan), var(--violet)); border-radius:4px; }
+  .an-bar-count{ width:42px; text-align:right; flex-shrink:0; font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+  .an-list{ display:flex; flex-direction:column; gap:6px; }
+  .an-list-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--input-bg); border-radius:6px; padding:8px 12px; font-size:12px; }
+  .an-list-item .name{ color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .an-list-item .badge{ flex-shrink:0; font-family:var(--font-mono); font-size:10.5px; padding:2px 8px; border-radius:10px; background:rgba(79,227,232,.15); color:var(--cyan); }
+  .an-empty{ font-size:11.5px; color:var(--text-faint); font-style:italic; }
+  .an-note{ font-size:10.5px; color:var(--text-faint); margin-top:8px; line-height:1.6; }
+  .an-yearchart{ width:100%; height:auto; }
+  .an-yearchart rect{ fill:var(--cyan); }
+  .an-yearchart text{ fill:var(--text-dim); font-family:var(--font-mono); }
+  .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+
+  .parse-banner{ border-radius:8px; padding:14px 16px; margin-bottom:16px; font-family:var(--font-mono); font-size:12px; line-height:1.7; }
+  .parse-banner.ok{ background:rgba(62,217,143,.08); border:1px solid rgba(62,217,143,.3); color:var(--green); }
+  .parse-banner.fail{ background:rgba(242,109,109,.08); border:1px solid rgba(242,109,109,.35); color:var(--text); }
+  .parse-banner .pb-title{ font-weight:700; font-size:13px; margin-bottom:6px; }
+  .parse-banner.fail .pb-title{ color:var(--red); }
+  .parse-banner .pb-stats{ color:var(--text-dim); margin-bottom:8px; }
+  .parse-banner .pb-failed-list{ margin-top:8px; }
+  .parse-banner .pb-failed-item{ background:var(--input-bg); border-left:3px solid var(--red); border-radius:0 6px 6px 0; padding:8px 10px; margin-bottom:6px; font-size:11.5px; color:var(--text-dim); }
+  .parse-banner .pb-failed-item b{ color:var(--text); }
+
+  /* ---- Report preview (white "paper" look, screen only) ---- */
+  .preview-shell{ background:var(--panel); border:1px solid var(--hairline); border-radius:10px; padding:0; margin-bottom:20px; overflow:hidden; }
+  .preview-toolbar{ display:flex; align-items:center; justify-content:space-between; padding:10px 16px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); border-bottom:1px solid var(--hairline); }
+  .report-page{ background:#ffffff; color:#1a1a1a; max-width:210mm; margin:20px auto; padding:18mm 16mm; font-family:var(--font-sans); font-size:12.5px; line-height:1.65; box-shadow:0 4px 24px rgba(0,0,0,.35); border-radius:2px; }
+  .report-page h1{ font-family:var(--font-display); font-size:20px; margin:0 0 4px; color:#0C1019; }
+  .report-page .rp-meta{ font-size:11px; color:#555; margin-bottom:2px; }
+  .report-page h2{ font-family:var(--font-display); font-size:14.5px; margin:22px 0 10px; padding-bottom:6px; border-bottom:2px solid #1a1a1a; color:#0C1019; }
+  .report-page h3{ font-size:12.5px; margin:14px 0 4px; color:#0C1019; }
+  .report-page table{ width:100%; border-collapse:collapse; font-size:12px; margin-bottom:6px; }
+  .report-page table td{ padding:5px 8px; border:1px solid #ddd; }
+  .report-page table td.k{ color:#555; width:46%; }
+  .report-page table td.v{ font-weight:600; }
+  .report-page ul{ margin:6px 0; padding-left:20px; }
+  .report-page li{ margin-bottom:5px; }
+  .report-page mark.hl-red{ background:#ffc9c9; color:#7a0000; padding:1px 3px; border-radius:2px; }
+  .report-page mark.hl-yellow{ background:#fff3ac; color:#5c4b00; padding:1px 3px; border-radius:2px; }
+  .report-page mark.hl-green{ background:#c8f7d6; color:#0a5c26; padding:1px 3px; border-radius:2px; }
+  .report-page mark.hl-cyan{ background:#c6f3f5; color:#004b4d; padding:1px 3px; border-radius:2px; }
+  .report-page .rp-bar{ width:100%; height:12px; border-radius:6px; overflow:hidden; display:flex; background:#eee; margin:8px 0; }
+  .report-page .rp-seg.in{ background:#3ED98F; } .report-page .rp-seg.out{ background:#F26D6D; } .report-page .rp-seg.unk{ background:#bbb; }
+  .report-page .rp-legend{ font-size:10.5px; color:#555; margin-bottom:10px; }
+  .report-page .rp-issue{ padding:8px 10px; margin-bottom:8px; border-left:3px solid #ccc; background:#fafafa; border-radius:0 4px 4px 0; }
+  .report-page .rp-issue.error{ border-left-color:#F26D6D; } .report-page .rp-issue.warning{ border-left-color:#F2B84B; } .report-page .rp-issue.suggestion{ border-left-color:#4FE3E8; }
+  .report-page .rp-issue .t{ font-weight:700; font-size:12.5px; margin-bottom:3px; }
+  .report-page .rp-issue .t .loc{ font-weight:400; font-size:10.5px; color:#666; margin-left:6px; }
+  .report-page .rp-issue .d{ color:#444; margin-bottom:4px; }
+  .report-page .rp-foot{ margin-top:24px; padding-top:10px; border-top:1px dashed #ccc; font-size:10.5px; color:#666; font-style:italic; }
+  .report-page .rp-empty{ color:#777; font-size:11.5px; }
+
+  @media print{
+    body *{ visibility:hidden; }
+    .report-page, .report-page *{ visibility:visible; }
+    .report-page{ position:absolute; left:0; top:0; width:100%; max-width:none; margin:0; padding:14mm 14mm; box-shadow:none; }
+    @page{ margin:12mm; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
+      <h1>Upload &amp; Ekspor Laporan Sitasi</h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
+      <a href="index.html" class="back-link">🏠 Beranda</a>
+      <a href="validator-copy.html" class="back-link">✏️ Validator Copy-Paste</a>
+    </div>
+  </header>
+
+  <div class="panel">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+
+    <div class="field-label"><span class="step-num">1</span>Unggah Naskah (.docx atau .txt)</div>
+    <div class="dropzone" id="dropzone">
+      <div class="icon">📄</div>
+      <div class="main">Klik untuk pilih file, atau seret &amp; lepas di sini</div>
+      <div class="sub">.DOCX / .TXT — DIPROSES SEPENUHNYA DI BROWSER ANDA, TIDAK DIUNGGAH KE SERVER MANA PUN</div>
+      <input type="file" id="fileInput" accept=".docx,.txt" style="display:none;">
+    </div>
+    <div class="file-chip" id="fileChip">
+      <span id="fileIcon">📄</span>
+      <span id="fileName"></span>
+      <span id="fileSize" style="color:var(--text-dim);"></span>
+      <span class="x" id="fileRemove">✕</span>
+    </div>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">2</span>Gaya Sitasi</div>
+    <select id="styleSelect">
+      <option value="auto">🔍 Auto-detect</option>
+      <option value="apa7">APA 7th Edition</option>
+      <option value="mla9">MLA 9th Edition</option>
+      <option value="chicago">Chicago (Author-Date)</option>
+      <option value="harvard">Harvard</option>
+      <option value="ieee">IEEE</option>
+      <option value="vancouver">Vancouver</option>
+    </select>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">3</span>Rentang Tahun yang Diperiksa <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(pilih satu — dipakai untuk highlight referensi usang di laporan)</span></div>
+    <div class="yr-controls">
+      <button class="yr-preset active" data-years="5" type="button">5 Tahun Terakhir</button>
+      <button class="yr-preset" data-years="3" type="button">3 Tahun Terakhir</button>
+      <button class="yr-preset" data-years="10" type="button">10 Tahun Terakhir</button>
+      <span class="yr-sep"></span>
+      <div class="yr-custom">
+        <label for="yrFrom">Dari</label>
+        <input type="number" id="yrFrom" class="yr-input" placeholder="mis. 2018">
+        <label for="yrTo">Sampai</label>
+        <input type="number" id="yrTo" class="yr-input" placeholder="mis. 2026">
+        <button class="ghost" id="yrApplyCustom" type="button">Pakai Custom</button>
+      </div>
+    </div>
+
+    <div class="checkbox-row">
+      <input type="checkbox" id="includeDoi">
+      <label for="includeDoi">Sertakan pengecekan DOI via CrossRef (butuh koneksi internet, proses sedikit lebih lama)</label>
+    </div>
+
+    <div class="row" style="margin-top:24px;">
+      <button class="primary" id="processBtn" disabled>⚙️ Proses &amp; Buat Laporan</button>
+      <span class="status info" id="statusMsg" role="status" aria-live="polite"></span>
+    </div>
+
+    <div class="manual-fix" id="manualFix">
+      <div class="field-label" style="margin-top:4px;">Heading referensi tidak terdeteksi otomatis — periksa/potong manual di bawah</div>
+      <textarea id="manualArticle" placeholder="Teks artikel (Introduction — sebelum daftar referensi)..."></textarea>
+      <div style="height:10px;"></div>
+      <textarea id="manualReferences" placeholder="Daftar referensi, satu per baris..."></textarea>
+      <div class="row" style="margin-top:10px;">
+        <button class="ghost" id="manualProcessBtn" type="button">✅ Proses dari Teks Manual</button>
+      </div>
+    </div>
+
+    <div class="privacy-note">🔒 File Anda tidak pernah dikirim ke server — parsing (.docx via Mammoth.js) dan seluruh analisis sitasi berjalan langsung di browser Anda. Pratinjau &amp; PDF juga dibuat di sisi klien menggunakan fitur cetak bawaan browser (tanpa library tambahan yang berat). Maksimum ukuran file 25MB; untuk naskah besar, proses analisis dijalankan di background (Web Worker) supaya tab browser tidak macet.<br><br>✅ Khusus untuk file <b>.docx</b>: sistem otomatis mengecek format <i>italic</i> (nama jurnal/judul buku) dan huruf besar-kecil judul (sentence case vs Title Case) — dibaca <b>langsung dari format asli file Word</b>, bukan dari copy-paste, jadi hasilnya akurat. Muncul di tab "Saran" setelah proses selesai.</div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="panel">
+      <div class="field-label">Ringkasan Hasil</div>
+      <div id="parseStatusBanner" role="status" aria-live="polite"></div>
+      <div class="summary-grid" id="summaryGrid"></div>
+      <div id="yearRangeSummary"></div>
+      <div class="row" style="margin-top:14px;">
+        <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
+        <span class="status info" id="downloadStatus" role="status" aria-live="polite"></span>
+      </div>
+      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah adalah tampilan persis yang akan tercetak/tersimpan — laporan mengikuti format tetap: Ringkasan → Rentang Tahun (referensi bermasalah di-highlight merah/kuning seperti penanda Turnitin) → Detail Perlu Diperbaiki/Saran (temuan &amp; koreksi di-highlight) → (opsional) Validasi DOI.</div>
+    </div>
+
+    <details class="collapsible" id="analyticsPanel" open>
+      <summary>📊 Analitik Kualitas Referensi</summary>
+      <div class="collapsible-content"><div id="analyticsBody"></div></div>
+    </details>
+
+    <div class="preview-shell">
+      <div class="preview-toolbar">
+        <span>👁️ Pratinjau Laporan Ringkasan</span>
+      </div>
+      <div class="report-page" id="reportPreview"></div>
+    </div>
+
+    <div class="panel" id="originalHlPanel" style="display:none;">
+      <div class="field-label">Naskah Asli dengan Highlight + Komentar Word</div>
+      <p style="font-size:11.5px;color:var(--text-dim);margin-top:-4px;">Format &amp; layout dokumen <b>.docx asli tidak diubah sama sekali</b>. Kalimat/tahun bermasalah diberi highlight warna, DAN ditempeli <b>komentar Word asli</b> (muncul di panel Review › Comments saat dibuka di Word) yang menjelaskan alasan kenapa bagian itu ditandai — jadi tidak perlu menebak-nebak.</p>
+      <div class="row" style="margin-top:10px;">
+        <button class="primary" id="downloadOriginalBtn">📎 Unduh Naskah Asli ber-Highlight (.docx)</button>
+        <span class="status info" id="downloadOriginalStatus" role="status" aria-live="polite"></span>
+      </div>
+      <div class="yr-legend" style="margin-top:12px;">
+        <span><span class="d out" style="background:var(--red);"></span>Perlu diperbaiki / tahun di luar rentang</span>
+        <span><span class="d" style="background:var(--amber);"></span>Tahun tidak diketahui</span>
+        <span><span class="d" style="background:var(--cyan);"></span>Saran</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
+<script src="theme.js?v=1"></script>
+<script src="engine.js?v=13"></script>
+<script src="upload.js?v=12"></script>
+</body>
+</html>
+
