@@ -22,6 +22,7 @@
     doiFill: document.getElementById('doiFill'),
     results: document.getElementById('results'),
     parseStatusBanner: document.getElementById('parseStatusBanner'),
+    sortByPosition: document.getElementById('sortByPosition'),
     summaryGrid: document.getElementById('summaryGrid'),
     yearRangePanel: document.getElementById('yearRangePanel'),
     yearRangeBody: document.getElementById('yearRangeBody'),
@@ -209,7 +210,7 @@
     renderIssueList('list-errors', result.errors);
     renderIssueList('list-suggestions', result.suggestions);
     renderDoiList(doiIssues);
-    renderIssueList('list-all', result.errors.concat(result.suggestions));
+    renderAllTab(result.errors.concat(result.suggestions));
   }
 
   function renderParseStatus(result) {
@@ -245,6 +246,52 @@
       '<div class="sum-card ok"><div class="n">' + result.references.length + '</div><div class="l">Referensi</div></div>' +
       '<div class="sum-card sugg"><div class="n">' + doiValid + '/' + doiTotal + '</div><div class="l">DOI Valid</div></div>';
   }
+
+  var lastAllIssues = [];
+  var activeFilter = 'all';
+
+  function getIssueCategories(issue) {
+    var t = (issue.title || '').toLowerCase();
+    var cats = [];
+    if (/duplikat/.test(t)) cats.push('duplikat');
+    if (/tahun/.test(t)) cats.push('tahun');
+    if (/format italic|huruf besar/.test(t)) cats.push('format');
+    if (/alfabetis|gaya sitasi tidak konsisten/.test(t)) cats.push('gaya');
+    if (/^referensi|nomor referensi|penomoran referensi/.test(t)) cats.push('referensi');
+    if (/sitasi|et al|pemisah/.test(t)) cats.push('sitasi');
+    if (cats.length === 0) cats.push('lainnya');
+    return cats;
+  }
+
+  function renderAllTab(issues) {
+    lastAllIssues = issues;
+    applyFilterAndRender();
+  }
+
+  function applyFilterAndRender() {
+    var filtered = activeFilter === 'all' ? lastAllIssues.slice() : lastAllIssues.filter(function(i) { return getIssueCategories(i).indexOf(activeFilter) !== -1; });
+    if (els.sortByPosition && els.sortByPosition.checked) {
+      filtered = filtered.slice().sort(function(a, b) {
+        var la = a.location ? a.location.line : Infinity;
+        var lb = b.location ? b.location.line : Infinity;
+        var sa = a.location ? (a.location.source === 'article' ? 0 : 1) : 2;
+        var sb = b.location ? (b.location.source === 'article' ? 0 : 1) : 2;
+        if (sa !== sb) return sa - sb;
+        return la - lb;
+      });
+    }
+    renderIssueList('list-all', filtered);
+  }
+
+  document.querySelectorAll('.filter-chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      document.querySelectorAll('.filter-chip').forEach(function(c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      activeFilter = chip.getAttribute('data-filter');
+      applyFilterAndRender();
+    });
+  });
+  if (els.sortByPosition) els.sortByPosition.addEventListener('change', applyFilterAndRender);
 
   function countCitations(citations) {
     var n = 0;
@@ -454,11 +501,15 @@
       return;
     }
     var html = '';
-    issues.forEach(function(issue) {
+    issues.forEach(function(issue, idx) {
       var sc = issue.severity || 'error';
       var sl = sc === 'error' ? 'PERLU DIPERBAIKI' : sc === 'warning' ? 'WARNING' : 'SARAN';
       html += '<div class="issue-item ' + sc + '">';
-      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(issue.title) + '</span></div>';
+      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(issue.title) + '</span>';
+      if (issue.location) {
+        html += '<button class="loc-badge" data-loc-source="' + issue.location.source + '" data-loc-line="' + issue.location.line + '" title="Klik untuk lompat ke baris ini">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</button>';
+      }
+      html += '</div>';
       html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
       if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline">📋</button></div>';
       if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline">📋</button></div>';
@@ -466,6 +517,36 @@
     });
     el.innerHTML = html;
     bindCopyBlocks(el);
+    bindLocationBadges(el);
+  }
+
+  function scrollToLocation(source, line) {
+    var manualBtn = document.querySelector('.input-mode-tab[data-mode="manual"]');
+    if (manualBtn) manualBtn.click();
+    var el = source === 'reference' ? els.referenceText : els.articleText;
+    if (!el) return;
+    var text = el.value;
+    var lines = text.split('\n');
+    var start = 0;
+    for (var i = 0; i < line - 1 && i < lines.length; i++) start += lines[i].length + 1;
+    var lineText = lines[line - 1] || '';
+    var end = start + lineText.length;
+    el.focus();
+    try { el.setSelectionRange(start, end); } catch (e) {}
+    // approximate scroll position so the selected line lands near the middle of the box
+    var lineHeight = 21; // matches the 12.5px/1.7 line-height textarea font used across the app
+    el.scrollTop = Math.max(0, (line - 1) * lineHeight - el.clientHeight / 2);
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showToast('Melompat ke baris ' + line);
+  }
+
+  function bindLocationBadges(container) {
+    container.querySelectorAll('.loc-badge').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        scrollToLocation(btn.getAttribute('data-loc-source'), parseInt(btn.getAttribute('data-loc-line'), 10));
+      });
+    });
   }
 
   function renderDoiList(doiIssues) {
@@ -475,7 +556,7 @@
       return;
     }
     var html = '';
-    doiIssues.forEach(function(issue) {
+    doiIssues.forEach(function(issue, idx) {
       var sc = issue.severity;
       var sl = sc === 'error' ? 'FIKTIF' : sc === 'warning' ? (issue.status==='mismatch'?'MISMATCH':'UNVERIFIED') : sc === 'success' ? 'VALID' : 'INFO';
       var instTag = issue.ref && issue.ref.isInstitutional ? '<span class="type-tag inst">INSTITUSI</span>' : '';
@@ -491,10 +572,52 @@
         html += 'CrossRef — Judul: ' + esc(m.crossref.title||'-') + ' | Penulis: ' + esc(m.crossref.authors||'-') + ' | Tahun: ' + esc(m.crossref.year||'-');
         html += '</div>';
       }
+      if (issue.status === 'no_doi' && issue.ref) {
+        html += '<button class="doi-search-btn" data-doi-search-idx="' + idx + '" style="margin-top:8px;">🔍 Cari DOI</button>';
+        html += '<div class="doi-search-results" id="doiSearchResults' + idx + '"></div>';
+      }
       html += '</div>';
     });
     el.innerHTML = html;
     bindCopyBlocks(el);
+    bindDoiSearchButtons(el, doiIssues);
+  }
+
+  function bindDoiSearchButtons(container, doiIssues) {
+    container.querySelectorAll('.doi-search-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var idx = parseInt(btn.getAttribute('data-doi-search-idx'), 10);
+        var issue = doiIssues[idx];
+        var resultsEl = document.getElementById('doiSearchResults' + idx);
+        btn.disabled = true;
+        btn.textContent = '⏳ Mencari...';
+        CE.DOIChecker.searchByMetadata(issue.ref.title, issue.ref.firstAuthor, issue.ref.year).then(function(res) {
+          btn.disabled = false;
+          btn.textContent = '🔍 Cari DOI Lagi';
+          if (res.status !== 'ok') {
+            resultsEl.innerHTML = '<div class="doi-cand-empty">⚠️ Pencarian gagal (' + (res.message || res.status) + '). Coba lagi atau cari manual di search.crossref.org.</div>';
+            return;
+          }
+          if (res.candidates.length === 0) {
+            resultsEl.innerHTML = '<div class="doi-cand-empty">Tidak ditemukan kandidat DOI yang cocok.</div>';
+            return;
+          }
+          var html = '<div class="doi-cand-hint">Kandidat dari CrossRef — periksa kecocokannya sendiri sebelum dipakai, tidak diisi otomatis:</div>';
+          res.candidates.forEach(function(c) {
+            var confClass = c.score >= 75 ? 'high' : c.score >= 40 ? 'mid' : 'low';
+            html += '<div class="doi-cand ' + confClass + '">';
+            html += '<div class="doi-cand-score">' + c.score + '% cocok</div>';
+            html += '<div class="doi-cand-body">';
+            html += '<div class="doi-cand-title">' + esc(c.title || '(tanpa judul)') + '</div>';
+            html += '<div class="doi-cand-meta">' + esc(c.author || '-') + (c.year ? ' · ' + esc(c.year) : '') + '</div>';
+            if (c.doi) html += '<div class="code-block code-fix" data-copy="' + escAttr(c.doi) + '">' + esc(c.doi) + '<button class="copy-inline">📋</button></div>';
+            html += '</div></div>';
+          });
+          resultsEl.innerHTML = html;
+          bindCopyBlocks(resultsEl);
+        });
+      });
+    });
   }
 
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }

@@ -77,13 +77,21 @@
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  var MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — generous for a text-heavy manuscript, guards against pathological uploads freezing the tab
+  var WARN_FILE_SIZE = 8 * 1024 * 1024; // 8MB — still fine, but slower; let the user know what to expect
+
   function handleFile(file) {
     var name = file.name.toLowerCase();
     if (!name.endsWith('.docx') && !name.endsWith('.txt')) {
       setStatus('⚠️ Format tidak didukung. Gunakan file .docx atau .txt.', 'err');
       return;
     }
+    if (file.size > MAX_FILE_SIZE) {
+      setStatus('⚠️ File terlalu besar (' + formatSize(file.size) + ', maksimum ' + formatSize(MAX_FILE_SIZE) + '). File sebesar ini berisiko membuat browser macet. Coba pisah naskah jadi beberapa bagian, atau hapus gambar/lampiran besar dari dokumen dulu.', 'err');
+      return;
+    }
     setStatus('Membaca file...', 'info');
+    if (file.size > WARN_FILE_SIZE) setStatus('Membaca file besar (' + formatSize(file.size) + ')... mungkin perlu beberapa detik.', 'info');
     els.processBtn.disabled = true;
     state.originalFile = null;
 
@@ -179,6 +187,52 @@
     validateAndRender(split.article, split.references);
   }
 
+  // Large documents (long article + many references) can make parsing/matching noticeably
+  // slow. Offload that step to a Web Worker so the tab stays responsive — falls back to the
+  // main thread automatically if Workers aren't available, fail to start, error out, or take
+  // too long (so a worker hiccup never leaves the user stuck with no result).
+  var WORKER_THRESHOLD = 50000; // combined article+reference character count
+  var WORKER_TIMEOUT_MS = 20000;
+  var validatorWorker = null;
+  function getWorker() {
+    if (validatorWorker) return validatorWorker;
+    try { validatorWorker = new Worker('validator-worker.js?v=1'); return validatorWorker; }
+    catch (e) { return null; }
+  }
+  function runValidation(articleText, referenceText, styleId) {
+    var combined = (articleText || '').length + (referenceText || '').length;
+    function runOnMainThread() {
+      var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
+      return validator.validate();
+    }
+    if (combined < WORKER_THRESHOLD || typeof Worker === 'undefined') {
+      return Promise.resolve(runOnMainThread());
+    }
+    var worker = getWorker();
+    if (!worker) return Promise.resolve(runOnMainThread());
+    return new Promise(function(resolve) {
+      var settled = false;
+      var timeoutId = setTimeout(function() {
+        if (settled) return;
+        settled = true;
+        resolve(runOnMainThread());
+      }, WORKER_TIMEOUT_MS);
+      worker.onmessage = function(e) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(e.data && e.data.ok ? e.data.result : runOnMainThread());
+      };
+      worker.onerror = function() {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(runOnMainThread());
+      };
+      worker.postMessage({ articleText: articleText, referenceText: referenceText, styleId: styleId });
+    });
+  }
+
   function validateAndRender(articleText, referenceText) {
     setStatus('Memvalidasi sitasi...', 'info');
     var selected = els.styleSelect.value;
@@ -190,40 +244,40 @@
     } else {
       styleId = selected;
     }
-    var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
-    var result = validator.validate();
-    state.lastResult = result;
-    state.lastStyleId = styleId;
-    state.lastConfidence = confidence;
-    state.lastDoiIssues = [];
+    runValidation(articleText, referenceText, styleId).then(function(result) {
+      state.lastResult = result;
+      state.lastStyleId = styleId;
+      state.lastConfidence = confidence;
+      state.lastDoiIssues = [];
 
-    els.results.classList.add('active');
-    renderResults(result, []);
+      els.results.classList.add('active');
+      renderResults(result, []);
 
-    if (state.originalFile) {
-      checkDocxReferenceFormatting(styleId).then(function(fmtIssues) {
-        fmtIssues.forEach(function(fi) {
-          result.suggestions.push({
-            title: fi.field === 'italic' ? 'Format italic referensi' : 'Format huruf besar/kecil judul',
-            description: fi.message,
-            code: fi.ref.raw.substring(0, 150),
+      if (state.originalFile) {
+        checkDocxReferenceFormatting(styleId).then(function(fmtIssues) {
+          fmtIssues.forEach(function(fi) {
+            result.suggestions.push({
+              title: fi.field === 'italic' ? 'Format italic referensi' : 'Format huruf besar/kecil judul',
+              description: fi.message,
+              code: fi.ref.raw.substring(0, 150),
+            });
           });
+          if (fmtIssues.length > 0) renderResults(result, state.lastDoiIssues);
         });
-        if (fmtIssues.length > 0) renderResults(result, state.lastDoiIssues);
-      });
-    }
+      }
 
-    if (els.includeDoi.checked && result.references.length > 0) {
-      setStatus('Memvalidasi DOI via CrossRef (' + result.references.length + ' referensi)...', 'info');
-      runDoiChecks(result.references).then(function(doiIssues) {
-        state.lastDoiIssues = doiIssues;
-        renderResults(result, doiIssues);
+      if (els.includeDoi.checked && result.references.length > 0) {
+        setStatus('Memvalidasi DOI via CrossRef (' + result.references.length + ' referensi)...', 'info');
+        runDoiChecks(result.references).then(function(doiIssues) {
+          state.lastDoiIssues = doiIssues;
+          renderResults(result, doiIssues);
+          setStatus('✅ Selesai. Laporan siap diunduh.', 'ok');
+        });
+      } else {
         setStatus('✅ Selesai. Laporan siap diunduh.', 'ok');
-      });
-    } else {
-      setStatus('✅ Selesai. Laporan siap diunduh.', 'ok');
-    }
-    if (els.results.scrollIntoView) els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      if (els.results.scrollIntoView) els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
 
   function runDoiChecks(references) {
@@ -397,7 +451,7 @@
     }
     issues.forEach(function(issue, i) {
       html += '<div class="rp-issue ' + sevClass + '">';
-      html += '<div class="t">' + (i + 1) + '. ' + esc(issue.title) + '</div>';
+      html += '<div class="t">' + (i + 1) + '. ' + esc(issue.title) + (issue.location ? ' <span class="loc">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</span>' : '') + '</div>';
       html += '<div class="d">' + esc(issue.description) + '</div>';
       if (issue.code) html += '<div>Ditemukan: <mark class="' + codeHl + '">' + esc(issue.code) + '</mark></div>';
       if (issue.correction) html += '<div>Saran perbaikan: <mark class="hl-green">' + esc(issue.correction) + '</mark></div>';

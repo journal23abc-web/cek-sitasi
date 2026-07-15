@@ -702,6 +702,36 @@ function MultiFormatValidator(articleText, referenceText, styleId) {
   this.references = [];
 }
 
+function computeLineNumber(text, charOffset) {
+  if (charOffset < 0) return null;
+  return text.slice(0, charOffset).split('\n').length;
+}
+
+// Best-effort location tagging: works retroactively for every issue that has a `code`
+// snippet (the vast majority) by finding where that exact text appears in the article or
+// reference text, without needing to touch every single error-creation call site. Reference
+// issues are checked first since `code` there is usually a verbatim substring of a specific
+// reference line; falls back to the article text for citation-based issues.
+MultiFormatValidator.prototype.annotateLocations = function() {
+  var self = this;
+  var allIssues = this.errors.concat(this.warnings).concat(this.suggestions);
+  allIssues.forEach(function(issue) {
+    if (issue.location || !issue.code) return;
+    var snippet = issue.code.split(' | ')[0].trim();
+    if (!snippet) return;
+    var needle = snippet.length > 50 ? snippet.slice(0, 50) : snippet;
+    var refIdx = self.referenceText.indexOf(needle);
+    if (refIdx !== -1) {
+      issue.location = { source: 'reference', line: computeLineNumber(self.referenceText, refIdx) };
+      return;
+    }
+    var artIdx = self.articleText.indexOf(needle);
+    if (artIdx !== -1) {
+      issue.location = { source: 'article', line: computeLineNumber(self.articleText, artIdx) };
+    }
+  });
+};
+
 MultiFormatValidator.prototype.validate = function() {
   this.buildAcronymMap();
   var parsed = parseReferenceListDetailed(this.referenceText, this.styleId);
@@ -725,6 +755,7 @@ MultiFormatValidator.prototype.validate = function() {
   this.validateReferenceOrdering();
   this.detectDuplicateReferences();
   this.detectMixedCitationStyles();
+  this.annotateLocations();
 
   return {
     errors: this.errors, warnings: this.warnings, suggestions: this.suggestions,
@@ -1098,24 +1129,27 @@ MultiFormatValidator.prototype.detectDuplicateReferences = function() {
     });
   });
 
-  // Near-identical titles (bigram similarity) — O(n^2) but reference lists are small (dozens,
-  // not thousands), so this stays fast.
+  // Near-identical titles (bigram similarity) — O(n^2), fine for the dozens-of-references
+  // case this tool is built for. Skip it outright past a size where it'd noticeably lag the
+  // browser instead of silently taking a long time.
   var reportedPairs = new Set();
-  for (var i = 0; i < refs.length; i++) {
-    for (var j = i + 1; j < refs.length; j++) {
-      var a = refs[i], b = refs[j];
-      if (!a.title || !b.title) continue;
-      if (a.title.length < 25 || b.title.length < 25) continue; // short titles: one word can differ a lot yet still look "similar" by bigram count
-      var sim = bigramSimilarity(a.title, b.title);
-      if (sim >= 0.88) {
-        var pairKey = i + '_' + j;
-        if (reportedPairs.has(pairKey)) continue;
-        reportedPairs.add(pairKey);
-        self.errors.push({
-          title: 'Referensi kemungkinan duplikat', severity: 'error',
-          description: 'Judul referensi "' + (a.firstAuthor||'-') + ' (' + (a.year||'-') + ')" dan "' + (b.firstAuthor||'-') + ' (' + (b.year||'-') + ')" sangat mirip (' + Math.round(sim*100) + '% kemiripan) — kemungkinan entri yang sama tertulis dua kali.',
-          code: a.raw.substring(0,90) + ' | ' + b.raw.substring(0,90),
-        });
+  if (refs.length <= 400) {
+    for (var i = 0; i < refs.length; i++) {
+      for (var j = i + 1; j < refs.length; j++) {
+        var a = refs[i], b = refs[j];
+        if (!a.title || !b.title) continue;
+        if (a.title.length < 25 || b.title.length < 25) continue; // short titles: one word can differ a lot yet still look "similar" by bigram count
+        var sim = bigramSimilarity(a.title, b.title);
+        if (sim >= 0.88) {
+          var pairKey = i + '_' + j;
+          if (reportedPairs.has(pairKey)) continue;
+          reportedPairs.add(pairKey);
+          self.errors.push({
+            title: 'Referensi kemungkinan duplikat', severity: 'error',
+            description: 'Judul referensi "' + (a.firstAuthor||'-') + ' (' + (a.year||'-') + ')" dan "' + (b.firstAuthor||'-') + ' (' + (b.year||'-') + ')" sangat mirip (' + Math.round(sim*100) + '% kemiripan) — kemungkinan entri yang sama tertulis dua kali.',
+            code: a.raw.substring(0,90) + ' | ' + b.raw.substring(0,90),
+          });
+        }
       }
     }
   }
@@ -1479,6 +1513,37 @@ var DOIChecker = {
       return Promise.resolve({ exists: false, status: 'network_error', data: null, message: err.message });
     }
   },
+  // Opt-in DOI lookup by bibliographic metadata (title/author/year). Returns ranked
+  // candidates with a similarity score — the caller decides whether to use any of them.
+  // NEVER writes a DOI into a reference automatically.
+  searchByMetadata: function(title, author, year) {
+    var q = [title, author, year].filter(Boolean).join(' ');
+    if (!q.trim()) return Promise.resolve({ status: 'error', candidates: [], message: 'Tidak ada judul/penulis/tahun untuk dicari.' });
+    var url = 'https://api.crossref.org/works?query.bibliographic=' + encodeURIComponent(q) + '&rows=5';
+    try {
+      return fetch(url, { headers: { 'Accept': 'application/json' } })
+        .then(function(response) {
+          if (!response.ok) return { status: 'error', candidates: [], message: 'HTTP ' + response.status };
+          return response.json().then(function(json) {
+            var items = (json.message && json.message.items) || [];
+            var candidates = items.map(function(it) {
+              var crTitle = (it.title && it.title[0]) ? it.title[0] : '';
+              var crAuthor = (it.author && it.author[0]) ? ((it.author[0].family || '') + (it.author[0].given ? ', ' + it.author[0].given : '')) : '';
+              var crYear = (it.issued && it.issued['date-parts'] && it.issued['date-parts'][0]) ? String(it.issued['date-parts'][0][0]) : '';
+              var titleSim = title ? bigramSimilarity(title, crTitle) : 0;
+              var authorSim = author ? bigramSimilarity(author, crAuthor) : 0.5;
+              var yearMatch = year && crYear ? (year.replace(/[a-z]$/, '') === crYear ? 1 : 0) : 0.5;
+              var score = titleSim * 0.6 + authorSim * 0.25 + yearMatch * 0.15;
+              return { doi: it.DOI || null, title: crTitle, author: crAuthor, year: crYear, score: Math.round(score * 100) };
+            }).sort(function(a, b) { return b.score - a.score; });
+            return { status: 'ok', candidates: candidates };
+          });
+        })
+        .catch(function(err) { return { status: 'network_error', candidates: [], message: err.message }; });
+    } catch (err) {
+      return Promise.resolve({ status: 'network_error', candidates: [], message: err.message });
+    }
+  },
   compareMetadata: function(ref, crossRefData) {
     var mismatches = [], matches = [];
     if (!crossRefData) return { mismatches: mismatches, matches: matches };
@@ -1598,3 +1663,4 @@ var CitationEngine = {
 };
 if (typeof module !== 'undefined' && module.exports) { module.exports = CitationEngine; }
 if (typeof window !== 'undefined') { window.CitationEngine = CitationEngine; }
+else if (typeof self !== 'undefined') { self.CitationEngine = CitationEngine; }
