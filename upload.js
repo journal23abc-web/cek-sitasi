@@ -463,7 +463,13 @@
   }
 
   // ---------- HTML report preview + print-to-PDF export ----------
+  function getSelectedReportSections() {
+    var boxes = document.querySelectorAll('#reportSections input:checked');
+    return Array.prototype.slice.call(boxes).map(function(b) { return b.value; });
+  }
+
   function renderReportPreview(result, doiIssues) {
+    var sections = getSelectedReportSections();
     var style = STYLES[result.styleId];
     var stats = CE.YearRange.compute(result.references, state.yearRange.from, state.yearRange.to);
     var confidence = state.lastConfidence;
@@ -473,46 +479,46 @@
     html += '<div class="rp-meta">Gaya sitasi: <b>' + esc(style.name) + '</b>' + (confidence != null ? ' (auto-detect, keyakinan ' + confidence + '%)' : '') + '</div>';
     html += '<div class="rp-meta">Sumber dokumen: ' + esc(state.fileName || '-') + '  |  Dibuat: ' + esc(new Date().toLocaleString('id-ID')) + '</div>';
 
-    // Ringkasan
-    html += '<h2>Ringkasan</h2><table>';
-    html += row('Total sitasi terdeteksi', countCitations(result.citations));
-    html += row('Total referensi terdeteksi', result.references.length);
-    html += row('Perlu Diperbaiki / Saran', result.errors.length + ' / ' + result.suggestions.length);
-    html += row('Rentang tahun diperiksa', state.yearRange.label);
-    html += row('Dalam rentang / Di luar rentang / Tahun tak diketahui', stats.inRange.length + ' / ' + stats.outRange.length + ' / ' + stats.unknown.length);
-    html += row('Persentase dalam rentang (dari yang bertahun jelas)', stats.pctOfKnown + '%');
-    html += '</table>';
-
-    // Rentang tahun
-    html += '<h2>Analisis Rentang Tahun Referensi</h2>';
-    var inW = stats.total ? (stats.inRange.length / stats.total * 100) : 0;
-    var outW = stats.total ? (stats.outRange.length / stats.total * 100) : 0;
-    var unkW = stats.total ? (stats.unknown.length / stats.total * 100) : 0;
-    html += '<div class="rp-bar"><div class="rp-seg in" style="width:' + inW + '%"></div><div class="rp-seg out" style="width:' + outW + '%"></div><div class="rp-seg unk" style="width:' + unkW + '%"></div></div>';
-    html += '<div class="rp-legend">🟩 Dalam rentang &nbsp; 🟥 Di luar rentang (' + esc(state.yearRange.label) + ') &nbsp; ⬜ Tahun tidak diketahui</div>';
-    if (result.references.length === 0) {
-      html += '<p class="rp-empty">Tidak ada referensi terdeteksi.</p>';
-    } else {
-      html += '<ul>';
-      result.references.forEach(function(r) {
-        var y = CE.YearRange.getRefYear(r);
-        var outOfRange = y != null && (y < state.yearRange.from || y > state.yearRange.to);
-        var unknown = y == null;
-        var yearHtml;
-        if (outOfRange) yearHtml = ' <mark class="hl-red">(' + esc(r.year || '-') + ')</mark>';
-        else if (unknown) yearHtml = ' <mark class="hl-yellow">(tahun tidak terdeteksi)</mark>';
-        else yearHtml = ' (' + esc(r.year) + ')';
-        html += '<li><b>' + esc(r.firstAuthor || '-') + '</b>' + yearHtml + (r.title ? ' — ' + esc(r.title) : '') + '</li>';
-      });
-      html += '</ul>';
+    if (sections.indexOf('summary') !== -1) {
+      html += '<h2>Ringkasan</h2><table>';
+      html += row('Total sitasi terdeteksi', countCitations(result.citations));
+      html += row('Total referensi terdeteksi', result.references.length);
+      html += row('Perlu Diperbaiki / Saran', result.errors.length + ' / ' + result.suggestions.length);
+      html += row('Rentang tahun diperiksa', state.yearRange.label);
+      html += row('Dalam rentang / Di luar rentang / Tahun tak diketahui', stats.inRange.length + ' / ' + stats.outRange.length + ' / ' + stats.unknown.length);
+      html += row('Persentase dalam rentang (dari yang bertahun jelas)', stats.pctOfKnown + '%');
+      html += '</table>';
     }
 
-    // Issues
-    html += issueSection('Perlu Diperbaiki', result.errors, 'error', 'hl-red');
-    html += issueSection('Saran', result.suggestions, 'suggestion', 'hl-cyan');
+    if (sections.indexOf('yearrange') !== -1) {
+      html += '<h2>Analisis Rentang Tahun Referensi</h2>';
+      var inW = stats.total ? (stats.inRange.length / stats.total * 100) : 0;
+      var outW = stats.total ? (stats.outRange.length / stats.total * 100) : 0;
+      var unkW = stats.total ? (stats.unknown.length / stats.total * 100) : 0;
+      html += '<div class="rp-bar"><div class="rp-seg in" style="width:' + inW + '%"></div><div class="rp-seg out" style="width:' + outW + '%"></div><div class="rp-seg unk" style="width:' + unkW + '%"></div></div>';
+      html += '<div class="rp-legend">🟩 Dalam rentang &nbsp; 🟥 Di luar rentang (' + esc(state.yearRange.label) + ') &nbsp; ⬜ Tahun tidak diketahui</div>';
+      if (result.references.length === 0) {
+        html += '<p class="rp-empty">Tidak ada referensi terdeteksi.</p>';
+      } else {
+        html += '<ul>';
+        result.references.forEach(function(r) {
+          var y = CE.YearRange.getRefYear(r);
+          var outOfRange = y != null && (y < state.yearRange.from || y > state.yearRange.to);
+          var unknown = y == null;
+          var yearHtml;
+          if (outOfRange) yearHtml = ' <mark class="hl-red">(' + esc(r.year || '-') + ')</mark>';
+          else if (unknown) yearHtml = ' <mark class="hl-yellow">(tahun tidak terdeteksi)</mark>';
+          else yearHtml = ' (' + esc(r.year) + ')';
+          html += '<li><b>' + esc(r.firstAuthor || '-') + '</b>' + yearHtml + (r.title ? ' — ' + esc(r.title) : '') + '</li>';
+        });
+        html += '</ul>';
+      }
+    }
 
-    // DOI
-    if (doiIssues && doiIssues.length > 0) {
+    if (sections.indexOf('errors') !== -1) html += issueSection('Perlu Diperbaiki', result.errors, 'error', 'hl-red');
+    if (sections.indexOf('suggestions') !== -1) html += issueSection('Saran', result.suggestions, 'suggestion', 'hl-cyan');
+
+    if (sections.indexOf('doi') !== -1 && doiIssues && doiIssues.length > 0) {
       html += '<h2>Validasi DOI (CrossRef)</h2><ul>';
       doiIssues.forEach(function(d) {
         var cls = d.status === 'fake' ? 'hl-red' : (d.status === 'mismatch' || d.status === 'unverified') ? 'hl-yellow' : d.status === 'valid' ? 'hl-green' : null;
@@ -525,6 +531,12 @@
 
     els.reportPreview.innerHTML = html;
   }
+
+  document.querySelectorAll('#reportSections input').forEach(function(box) {
+    box.addEventListener('change', function() {
+      if (state.lastResult) renderReportPreview(state.lastResult, state.lastDoiIssues || []);
+    });
+  });
 
   function row(k, v) {
     return '<tr><td class="k">' + esc(String(k)) + '</td><td class="v">' + esc(String(v)) + '</td></tr>';

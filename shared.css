@@ -61,3 +61,44 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 
 .watermark{ position:fixed; inset:0; z-index:0; display:flex; align-items:center; justify-content:center; overflow:hidden; pointer-events:none; user-select:none; }
 .watermark span{ font-family:var(--font-display); font-weight:800; font-size:min(18vw, 220px); letter-spacing:-0.02em; color:var(--text); opacity:.035; white-space:nowrap; transform:rotate(-18deg); }
+
+.export-panel{ background:linear-gradient(180deg, var(--panel-raised), var(--panel)); border:1px solid var(--hairline); border-radius:10px; padding:24px; margin-top:8px; }
+.export-options{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; margin:14px 0 18px; }
+.export-check{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:7px; padding:9px 12px; cursor:pointer; }
+.export-check input{ accent-color:var(--cyan); }
+
+/* Printable report component (used by any page offering a "Unduh sebagai PDF" report) */
+.preview-shell{ background:var(--panel); border:1px solid var(--hairline); border-radius:10px; padding:0; margin-bottom:20px; overflow:hidden; }
+.preview-toolbar{ display:flex; align-items:center; justify-content:space-between; padding:10px 16px; font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); border-bottom:1px solid var(--hairline); }
+.report-page{ background:#ffffff; color:#1a1a1a; max-width:210mm; margin:20px auto; padding:18mm 16mm; font-family:var(--font-sans); font-size:12.5px; line-height:1.65; box-shadow:0 4px 24px rgba(0,0,0,.35); border-radius:2px; }
+.report-page h1{ font-family:var(--font-display); font-size:20px; margin:0 0 4px; color:#0C1019; }
+.report-page .rp-meta{ font-size:11px; color:#555; margin-bottom:2px; }
+.report-page h2{ font-family:var(--font-display); font-size:14.5px; margin:22px 0 10px; padding-bottom:6px; border-bottom:2px solid #1a1a1a; color:#0C1019; }
+.report-page h3{ font-size:12.5px; margin:14px 0 4px; color:#0C1019; }
+.report-page table{ width:100%; border-collapse:collapse; font-size:12px; margin-bottom:6px; }
+.report-page table td{ padding:5px 8px; border:1px solid #ddd; }
+.report-page table td.k{ color:#555; width:46%; }
+.report-page table td.v{ font-weight:600; }
+.report-page ul{ margin:6px 0; padding-left:20px; }
+.report-page li{ margin-bottom:5px; }
+.report-page mark.hl-red{ background:#ffc9c9; color:#7a0000; padding:1px 3px; border-radius:2px; }
+.report-page mark.hl-yellow{ background:#fff3ac; color:#5c4b00; padding:1px 3px; border-radius:2px; }
+.report-page mark.hl-green{ background:#c8f7d6; color:#0a5c26; padding:1px 3px; border-radius:2px; }
+.report-page mark.hl-cyan{ background:#c6f3f5; color:#004b4d; padding:1px 3px; border-radius:2px; }
+.report-page .rp-bar{ width:100%; height:12px; border-radius:6px; overflow:hidden; display:flex; background:#eee; margin:8px 0; }
+.report-page .rp-seg.in{ background:#3ED98F; } .report-page .rp-seg.out{ background:#F26D6D; } .report-page .rp-seg.unk{ background:#bbb; }
+.report-page .rp-legend{ font-size:10.5px; color:#555; margin-bottom:10px; }
+.report-page .rp-issue{ padding:8px 10px; margin-bottom:8px; border-left:3px solid #ccc; background:#fafafa; border-radius:0 4px 4px 0; }
+.report-page .rp-issue.error{ border-left-color:#F26D6D; } .report-page .rp-issue.warning{ border-left-color:#F2B84B; } .report-page .rp-issue.suggestion{ border-left-color:#4FE3E8; }
+.report-page .rp-issue .t{ font-weight:700; font-size:12.5px; margin-bottom:3px; }
+.report-page .rp-issue .t .loc{ font-weight:400; font-size:10.5px; color:#666; margin-left:6px; }
+.report-page .rp-issue .d{ color:#444; margin-bottom:4px; }
+.report-page .rp-foot{ margin-top:24px; padding-top:10px; border-top:1px dashed #ccc; font-size:10.5px; color:#666; font-style:italic; }
+.report-page .rp-empty{ color:#777; font-size:11.5px; }
+
+@media print{
+  body *{ visibility:hidden; }
+  .report-page, .report-page *{ visibility:visible; }
+  .report-page{ position:absolute; left:0; top:0; width:100%; max-width:none; margin:0; padding:14mm 14mm; box-shadow:none; }
+  @page{ margin:12mm; }
+}

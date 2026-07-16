@@ -6,6 +6,9 @@
     styleSelect: document.getElementById('styleSelect'),
     confBadge: document.getElementById('confBadge'),
     confText: document.getElementById('confText'),
+    reportPreview: document.getElementById('reportPreview'),
+    downloadBtn: document.getElementById('downloadBtn'),
+    downloadStatus: document.getElementById('downloadStatus'),
     confFill: document.getElementById('confFill'),
     exampleToggle: document.getElementById('exampleToggle'),
     exampleBox: document.getElementById('exampleBox'),
@@ -143,6 +146,7 @@
       els.loading.classList.remove('active');
       els.results.classList.add('active');
       renderAll(result, []);
+      renderReportPreview();
 
       // DOI checking (async, progressive)
       var refsWithDoi = result.references.filter(function(r) { return r.doi; });
@@ -153,6 +157,7 @@
           lastDoiIssues = doiIssues;
           els.doiProgress.classList.remove('active');
           renderAll(result, doiIssues);
+          renderReportPreview();
         });
       }
     }, 250);
@@ -313,6 +318,118 @@
   // ---------- Year-range recency analysis ----------
   function computeYearRange(references, from, to) {
     return CE.YearRange.compute(references, from, to);
+  }
+
+  // ---------- PDF report export (selectable sections) ----------
+  function row(k, v) {
+    return '<tr><td class="k">' + esc(String(k)) + '</td><td class="v">' + esc(String(v)) + '</td></tr>';
+  }
+
+  function issueSectionHtml(title, issues, sevClass, codeHl) {
+    var html = '<h2>' + esc(title) + ' (' + issues.length + ')</h2>';
+    if (issues.length === 0) {
+      html += '<p class="rp-empty">Tidak ada masalah pada kategori ini.</p>';
+      return html;
+    }
+    issues.forEach(function(issue, i) {
+      html += '<div class="rp-issue ' + sevClass + '">';
+      html += '<div class="t">' + (i + 1) + '. ' + esc(issue.title) + (issue.location ? ' <span class="loc">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</span>' : '') + '</div>';
+      html += '<div class="d">' + esc(issue.description) + '</div>';
+      if (issue.code) html += '<div>Ditemukan: <mark class="' + codeHl + '">' + esc(issue.code) + '</mark></div>';
+      if (issue.correction) html += '<div>Saran perbaikan: <mark class="hl-green">' + esc(issue.correction) + '</mark></div>';
+      html += '</div>';
+    });
+    return html;
+  }
+
+  function getSelectedReportSections() {
+    var boxes = document.querySelectorAll('#reportSections input:checked');
+    return Array.prototype.slice.call(boxes).map(function(b) { return b.value; });
+  }
+
+  function renderReportPreview() {
+    if (!els.reportPreview || !lastResult) return;
+    var result = lastResult, doiIssues = lastDoiIssues || [];
+    var sections = getSelectedReportSections();
+    var style = STYLES[result.styleId];
+    var yr = currentYearRange || CE.YearRange.presetToRange(10);
+    var stats = computeYearRange(result.references, yr.from, yr.to);
+    var html = '';
+
+    html += '<h1>Laporan Validasi Sitasi</h1>';
+    html += '<div class="rp-meta">Gaya sitasi: <b>' + esc(style.name) + '</b>' + (lastConfidence != null ? ' (auto-detect, keyakinan ' + lastConfidence + '%)' : '') + '</div>';
+    html += '<div class="rp-meta">Dibuat: ' + esc(new Date().toLocaleString('id-ID')) + '</div>';
+
+    if (sections.indexOf('summary') !== -1) {
+      html += '<h2>Ringkasan</h2><table>';
+      html += row('Total sitasi terdeteksi', countCitations(result.citations));
+      html += row('Total referensi terdeteksi', result.references.length);
+      html += row('Perlu Diperbaiki / Saran', result.errors.length + ' / ' + result.suggestions.length);
+      html += row('Rentang tahun diperiksa', yr.label);
+      html += row('Dalam rentang / Di luar rentang / Tahun tak diketahui', stats.inRange.length + ' / ' + stats.outRange.length + ' / ' + stats.unknown.length);
+      html += row('Persentase dalam rentang (dari yang bertahun jelas)', stats.pctOfKnown + '%');
+      html += '</table>';
+    }
+
+    if (sections.indexOf('yearrange') !== -1) {
+      html += '<h2>Analisis Rentang Tahun Referensi</h2>';
+      var inW = stats.total ? (stats.inRange.length / stats.total * 100) : 0;
+      var outW = stats.total ? (stats.outRange.length / stats.total * 100) : 0;
+      var unkW = stats.total ? (stats.unknown.length / stats.total * 100) : 0;
+      html += '<div class="rp-bar"><div class="rp-seg in" style="width:' + inW + '%"></div><div class="rp-seg out" style="width:' + outW + '%"></div><div class="rp-seg unk" style="width:' + unkW + '%"></div></div>';
+      html += '<div class="rp-legend">🟩 Dalam rentang &nbsp; 🟥 Di luar rentang (' + esc(yr.label) + ') &nbsp; ⬜ Tahun tidak diketahui</div>';
+      if (result.references.length === 0) {
+        html += '<p class="rp-empty">Tidak ada referensi terdeteksi.</p>';
+      } else {
+        html += '<ul>';
+        result.references.forEach(function(r) {
+          var y = CE.YearRange.getRefYear(r);
+          var outOfRange = y != null && (y < yr.from || y > yr.to);
+          var unknown = y == null;
+          var yearHtml;
+          if (outOfRange) yearHtml = ' <mark class="hl-red">(' + esc(r.year || '-') + ')</mark>';
+          else if (unknown) yearHtml = ' <mark class="hl-yellow">(tahun tidak terdeteksi)</mark>';
+          else yearHtml = ' (' + esc(r.year) + ')';
+          html += '<li><b>' + esc(r.firstAuthor || '-') + '</b>' + yearHtml + (r.title ? ' — ' + esc(r.title) : '') + '</li>';
+        });
+        html += '</ul>';
+      }
+    }
+
+    if (sections.indexOf('errors') !== -1) html += issueSectionHtml('Perlu Diperbaiki', result.errors, 'error', 'hl-red');
+    if (sections.indexOf('suggestions') !== -1) html += issueSectionHtml('Saran', result.suggestions, 'suggestion', 'hl-cyan');
+
+    if (sections.indexOf('doi') !== -1 && doiIssues.length > 0) {
+      html += '<h2>Validasi DOI (CrossRef)</h2><ul>';
+      doiIssues.forEach(function(d) {
+        var cls = d.status === 'fake' ? 'hl-red' : (d.status === 'mismatch' || d.status === 'unverified') ? 'hl-yellow' : d.status === 'valid' ? 'hl-green' : null;
+        html += '<li>' + (cls ? '<mark class="' + cls + '">[' + esc(d.status.toUpperCase()) + ']</mark>' : '[' + esc(d.status.toUpperCase()) + ']') + ' ' + esc(d.title) + ' — ' + esc(d.description) + '</li>';
+      });
+      html += '</ul>';
+    }
+
+    html += '<div class="rp-foot">Laporan ini dihasilkan otomatis berdasarkan pola teks (heuristik), bukan pemeriksaan tata bahasa penuh atau penilaian editorial. Bagian yang di-highlight menandai hal yang perlu diperiksa ulang secara manual, bukan kesalahan pasti. Selalu tinjau kembali sebelum mengirimkan naskah ke jurnal.</div>';
+
+    els.reportPreview.innerHTML = html;
+  }
+
+  document.querySelectorAll('#reportSections input').forEach(function(box) {
+    box.addEventListener('change', renderReportPreview);
+  });
+
+  if (els.downloadBtn) {
+    els.downloadBtn.addEventListener('click', function() {
+      if (!lastResult) return;
+      var style = STYLES[lastStyleId];
+      var dateStr = new Date().toISOString().slice(0, 10);
+      var suggestedName = 'Laporan-Validasi-Sitasi-' + style.name.replace(/[^\w]+/g, '-') + '-' + dateStr;
+      var originalTitle = document.title;
+      document.title = suggestedName;
+      els.downloadStatus.textContent = 'Membuka dialog cetak... pilih tujuan "Simpan sebagai PDF".';
+      els.downloadStatus.className = 'status info';
+      window.print();
+      setTimeout(function() { document.title = originalTitle; }, 1000);
+    });
   }
 
   function setActivePreset(years) {

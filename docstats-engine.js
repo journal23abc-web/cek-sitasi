@@ -5,13 +5,22 @@
 
 var DocStatsEngine = (function () {
 
+  function normalizeWhitespace(s) {
+    return (s || '')
+      .replace(/[\u00A0\u1680\u2000-\u200B\u202F\u205F\u3000\uFEFF]/g, ' ')
+      .replace(/\t/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
   function countWords(text) {
-    return (text || '').split(/\s+/).filter(Boolean).length;
+    var t = normalizeWhitespace(text);
+    return t ? t.split(' ').filter(Boolean).length : 0;
   }
 
   var ABBREV = /\b(et al|e\.g|i\.e|vs|cf|no|fig|tabel|dkk|st|dr|prof|misal)\.$/i;
   function splitSentences(text) {
-    var parts = (text || '').split(/(?<=[.!?])\s+/);
+    var parts = normalizeWhitespace(text).split(/(?<=[.!?])\s+/);
     var sentences = [];
     var buffer = '';
     parts.forEach(function (p) {
@@ -25,30 +34,35 @@ var DocStatsEngine = (function () {
     return sentences.filter(function (s) { return countWords(s) >= 3; });
   }
 
-  // Order matters: earlier patterns are checked first, and each is matched at the START of
-  // a paragraph. "results and discussion" must be checked before "discussion" alone so a
-  // combined heading doesn't get mis-tagged.
+  // Optional heading-numbering prefix: "3.", "3.1", "3)", "III.", "BAB 3", "Section 3:" etc.
+  var PREFIX = '(?:(?:bab|section|chapter)\\s*)?(?:\\d+(?:\\.\\d+)*|[ivxlcdm]+)?[\\.\\):]?\\s*';
+
+  // Core keyword patterns are intentionally loose (no end-anchor) — real headings routinely
+  // carry extra words ("HASIL PENELITIAN DAN PEMBAHASAN", "RESEARCH FINDINGS AND DISCUSSION").
+  // A short line containing the keyword near the start is treated as a heading; the "is this
+  // short enough to be a heading, not body text" judgment is made separately by word count.
   var SECTION_PATTERNS = [
-    { key: 'title', label: 'Judul', re: null }, // resolved separately, not by heading match
-    { key: 'abstract', label: 'Abstrak', re: /^(?:\d+[\.\)]?\s*)?(abstract|abstrak)\b\s*[:.\-]?\s*/i },
-    { key: 'keywords', label: 'Kata Kunci', re: /^(?:\d+[\.\)]?\s*)?(keywords?|kata\s*kunci)\s*[:.\-]/i },
-    { key: 'introduction', label: 'Pendahuluan (I)', re: /^(?:\d+[\.\)]?\s*)?(introduction|pendahuluan|latar\s*belakang)\b\s*[:.\-]?\s*$/i },
-    { key: 'method', label: 'Metode (M)', re: /^(?:\d+[\.\)]?\s*)?(research\s*method(ology)?|methods?|methodology|metod(e|ologi)(\s*penelitian)?)\b\s*[:.\-]?\s*$/i },
-    { key: 'results_discussion', label: 'Hasil & Pembahasan (R&D)', re: /^(?:\d+[\.\)]?\s*)?(results?\s*and\s*discussions?|hasil\s*dan\s*pembahasan)\s*[:.\-]?\s*$/i },
-    { key: 'results', label: 'Hasil (R)', re: /^(?:\d+[\.\)]?\s*)?(results?|findings?|hasil(\s*penelitian)?|temuan)\b\s*[:.\-]?\s*$/i },
-    { key: 'discussion', label: 'Pembahasan (D)', re: /^(?:\d+[\.\)]?\s*)?(discussions?|pembahasan|diskusi)\b\s*[:.\-]?\s*$/i },
-    { key: 'conclusion', label: 'Kesimpulan', re: /^(?:\d+[\.\)]?\s*)?(conclusions?(\s*and\s*suggestions?)?|kesimpulan(\s*dan\s*saran)?|simpulan|penutup)\b\s*[:.\-]?\s*$/i },
-    { key: 'acknowledgment', label: 'Ucapan Terima Kasih', re: /^(?:\d+[\.\)]?\s*)?(acknowledge?ments?|ucapan\s*terima\s*kasih)\s*[:.\-]?\s*$/i },
-    { key: 'references', label: 'Referensi', re: /^(?:\d+[\.\)]?\s*)?(references|daftar\s*pustaka|bibliography|reference\s*list)\s*[:.\-]?\s*$/i },
+    { key: 'title', label: 'Judul', re: null },
+    { key: 'abstract', label: 'Abstrak', re: /^(abstract|abstrak)\b\s*[:.\-]?\s*/i },
+    { key: 'keywords', label: 'Kata Kunci', re: /^(keywords?|kata\s*kunci)\b\s*[:.\-]?\s*/i },
+    { key: 'introduction', label: 'Pendahuluan (I)', re: new RegExp('^' + PREFIX + '(introduction|pendahuluan|latar\\s*belakang)\\b', 'i') },
+    { key: 'method', label: 'Metode (M)', re: new RegExp('^' + PREFIX + '(research\\s*method\\w*|methods?\\b|methodology|metod(e|ologi)(\\s*penelitian)?)', 'i') },
+    { key: 'results_discussion', label: 'Hasil & Pembahasan (R&D)', re: new RegExp('^' + PREFIX + '((research\\s*)?results?\\s*(and|&)\\s*discussions?|hasil(\\s*(penelitian|riset))?\\s*dan\\s*pembahasan)', 'i') },
+    { key: 'results', label: 'Hasil (R)', re: new RegExp('^' + PREFIX + '((research\\s*)?results?\\b|findings?\\b|hasil(\\s*(penelitian|riset))?\\b|temuan(\\s*penelitian)?\\b)', 'i') },
+    { key: 'discussion', label: 'Pembahasan (D)', re: new RegExp('^' + PREFIX + '(discussions?\\b|pembahasan\\b|diskusi\\b)', 'i') },
+    { key: 'conclusion', label: 'Kesimpulan', re: new RegExp('^' + PREFIX + '(conclusions?\\b(\\s*(and|&)\\s*suggestions?)?|kesimpulan\\b(\\s*dan\\s*saran)?|simpulan\\b|penutup\\b)', 'i') },
+    { key: 'acknowledgment', label: 'Ucapan Terima Kasih', re: new RegExp('^' + PREFIX + '(acknowledge?ments?\\b|ucapan\\s*terima\\s*kasih\\b)', 'i') },
+    { key: 'references', label: 'Referensi', re: new RegExp('^' + PREFIX + '(references\\b|daftar\\s*pustaka\\b|bibliography\\b|reference\\s*list\\b)', 'i') },
   ];
 
   // Headings we expect to stand ALONE on their own paragraph (numbered IMRAD sections).
-  // Abstract/Keywords are handled specially below since they very commonly share a
-  // paragraph with their own content ("Abstract. Lorem ipsum...").
+  // Abstract/Keywords are handled specially since they very commonly share a paragraph
+  // with their own content ("Abstract. Lorem ipsum...").
   var STANDALONE_KEYS = ['introduction', 'method', 'results_discussion', 'results', 'discussion', 'conclusion', 'acknowledgment', 'references'];
+  var MAX_HEADING_WORDS = 10; // generous — covers padded headings like "HASIL PENELITIAN DAN PEMBAHASAN UMUM"
 
   function matchSection(line) {
-    var t = (line || '').trim();
+    var t = normalizeWhitespace(line);
     if (!t) return null;
     for (var i = 0; i < SECTION_PATTERNS.length; i++) {
       var sp = SECTION_PATTERNS[i];
@@ -65,14 +79,12 @@ var DocStatsEngine = (function () {
   function detectSections(paragraphs) {
     var hits = [];
     paragraphs.forEach(function (p, idx) {
-      var t = (p || '').trim();
+      var t = normalizeWhitespace(p);
       if (!t) return;
-      // Standalone-style headings only match if the WHOLE paragraph is short (just the
-      // heading, nothing else) — avoids matching "Introduction" appearing mid-sentence.
-      var standaloneCandidateOk = t.length <= 60;
       var m = matchSection(t);
       if (!m) return;
-      if (STANDALONE_KEYS.indexOf(m.key) !== -1 && !standaloneCandidateOk) return;
+      var isStandalone = STANDALONE_KEYS.indexOf(m.key) !== -1;
+      if (isStandalone && countWords(t) > MAX_HEADING_WORDS) return; // looks like body text, not a heading
       var seenAlready = hits.some(function (h) { return h.key === m.key; });
       if (seenAlready) return; // keep first occurrence only (running headers can repeat)
       hits.push({ key: m.key, label: m.label, startIdx: idx, startOffset: m.matchLength, headingText: t.slice(0, m.matchLength).trim() });
@@ -95,23 +107,25 @@ var DocStatsEngine = (function () {
   function sectionText(paragraphs, section) {
     if (!section) return '';
     var parts = [];
-    var startP = (paragraphs[section.startIdx] || '');
+    var startP = normalizeWhitespace(paragraphs[section.startIdx] || '');
     var restOfStartLine = startP.slice(section.startOffset).trim();
     if (restOfStartLine) parts.push(restOfStartLine);
     for (var i = section.startIdx + 1; i < section.endIdx; i++) {
       if (paragraphs[i]) parts.push(paragraphs[i]);
     }
-    if (section.endOffset > 0 && paragraphs[section.endIdx]) {
-      // last chunk belongs to the NEXT heading's own paragraph, before that heading starts —
-      // only relevant if the next section's heading shares a paragraph with trailing content
-      // from THIS section, which in practice doesn't happen since headings start paragraphs.
-    }
     return parts.join('\n').trim();
+  }
+
+  function previewText(text, n) {
+    var words = normalizeWhitespace(text).split(' ').filter(Boolean);
+    if (words.length === 0) return '';
+    if (words.length <= n * 2) return words.join(' ');
+    return words.slice(0, n).join(' ') + ' … ' + words.slice(-n).join(' ');
   }
 
   function analyzeDocument(doc) {
     var paragraphs = (doc.paragraphs || []).map(function (p) { return p || ''; });
-    var nonEmpty = paragraphs.map(function (p) { return p.trim(); }).filter(Boolean);
+    var nonEmpty = paragraphs.map(function (p) { return normalizeWhitespace(p); }).filter(Boolean);
 
     var sections = detectSections(paragraphs);
     var byKey = {};
@@ -120,7 +134,7 @@ var DocStatsEngine = (function () {
     // Title: first non-empty paragraph that isn't itself a detected heading and has 3+ words.
     var title = null, titleIdx = -1;
     for (var i = 0; i < Math.min(paragraphs.length, 10); i++) {
-      var t = paragraphs[i].trim();
+      var t = normalizeWhitespace(paragraphs[i]);
       if (!t) continue;
       if (matchSection(t)) break; // hit a real section heading before finding a title candidate
       if (countWords(t) >= 3) { title = t; titleIdx = i; break; }
@@ -128,11 +142,12 @@ var DocStatsEngine = (function () {
 
     var abstractText = sectionText(paragraphs, byKey.abstract);
     var abstractWords = countWords(abstractText);
+    var abstractPreview = previewText(abstractText, 12);
 
     var imradKeys = ['introduction', 'method', 'results_discussion', 'results', 'discussion', 'conclusion'];
     var allImradSections = imradKeys.filter(function (k) { return byKey[k]; }).map(function (k) {
       var text = sectionText(paragraphs, byKey[k]);
-      return { key: k, label: byKey[k].label, headingText: byKey[k].headingText, words: countWords(text), sentences: splitSentences(text).length };
+      return { key: k, label: byKey[k].label, headingText: byKey[k].headingText, words: countWords(text), sentences: splitSentences(text).length, preview: previewText(text, 10) };
     });
     // A section with 0 words almost always means a sub-heading (e.g. "Result" / "Discussion")
     // immediately followed a wrapper heading (e.g. "RESULTS AND DISCUSSION") and took over its
@@ -179,6 +194,7 @@ var DocStatsEngine = (function () {
       titleWords: title ? countWords(title) : 0,
       abstractFound: !!byKey.abstract,
       abstractWords: abstractWords,
+      abstractPreview: abstractPreview,
       keywordsFound: !!byKey.keywords,
       keywordList: keywordList,
       keywordCount: keywordList.length,

@@ -10,6 +10,7 @@
     fileSize: document.getElementById('fileSize'),
     removeFile: document.getElementById('removeFile'),
     processBtn: document.getElementById('processBtn'),
+    includeReferences: document.getElementById('includeReferences'),
     statusMsg: document.getElementById('statusMsg'),
     results: document.getElementById('results'),
     dashboardBody: document.getElementById('dashboardBody'),
@@ -91,8 +92,10 @@
     if (!state.file) return;
     els.processBtn.disabled = true;
     setStatus('Membaca & menganalisis naskah...', 'info');
+    var includeRefs = els.includeReferences.checked;
     extractDocStructure(state.file).then(function (doc) {
       var result = DS.analyzeDocument(doc);
+      result.referencesIncluded = includeRefs;
       state.result = result;
       renderDashboard(result);
       renderChecklist(result);
@@ -116,7 +119,7 @@
     html += statCard(r.keywordCount, 'Kata Kunci', r.keywordsFound ? null : 'warn');
     html += statCard(r.totalWords.toLocaleString('id-ID'), 'Total Kata Naskah');
     html += statCard(r.totalSentences.toLocaleString('id-ID'), 'Total Kalimat');
-    html += statCard(r.referenceCount, 'Total Referensi', r.referenceCount < 20 ? 'warn' : null);
+    if (r.referencesIncluded) html += statCard(r.referenceCount, 'Total Referensi', r.referenceCount < 20 ? 'warn' : null);
     html += statCard(r.tableCount, 'Tabel');
     html += statCard(r.imageCount, 'Gambar');
     html += '</div>';
@@ -124,6 +127,7 @@
     html += '<div class="db-section"><div class="db-section-title">Judul Terdeteksi</div><div class="db-text-block">' + (r.title ? esc(r.title) : '<i>Tidak terdeteksi</i>') + '</div></div>';
 
     if (r.abstractFound) {
+      html += '<div class="db-section"><div class="db-section-title">Abstrak Terdeteksi (cuplikan)</div><div class="db-text-block">' + esc(r.abstractPreview || '-') + '</div></div>';
       html += '<div class="db-section"><div class="db-section-title">Kata Kunci Terdeteksi</div><div class="db-text-block">' + (r.keywordList.length ? r.keywordList.map(esc).join(', ') : '<i>Tidak terdeteksi</i>') + '</div></div>';
     }
 
@@ -136,22 +140,36 @@
         var pct = maxWords ? Math.round((s.words / maxWords) * 100) : 0;
         html += '<div class="db-imrad-row"><span class="db-imrad-label">' + esc(s.label) + '</span><div class="db-imrad-track"><div class="db-imrad-fill" style="width:' + pct + '%"></div></div><span class="db-imrad-count">' + s.words + ' kata</span></div>';
       });
+      html += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:6px;">';
+      r.imradSections.forEach(function (s) {
+        html += '<div style="font-size:11px;color:var(--text-faint);"><b style="color:var(--text-dim);">' + esc(s.label) + ':</b> "' + esc(s.preview || '-') + '"</div>';
+      });
+      html += '</div>';
     }
     if (r.missingImrad.length > 0) {
       html += '<div class="db-text-block" style="margin-top:10px;border-left:3px solid var(--red);">⚠️ Bagian tidak terdeteksi: ' + r.missingImrad.map(esc).join(', ') + '</div>';
     }
     html += '</div>';
 
-    html += '<div class="db-section"><div class="db-section-title">Kebaruan Referensi</div><div class="db-text-block">';
-    if (r.referenceRecency.totalWithYear > 0) {
-      html += r.referenceRecency.recentPct + '% referensi (' + r.referenceRecency.recentCount + ' dari ' + r.referenceRecency.totalWithYear + ') terbit dalam ' + r.referenceRecency.thresholdYears + ' tahun terakhir.';
-      if (r.referenceRecency.totalWithoutYear > 0) html += ' (' + r.referenceRecency.totalWithoutYear + ' referensi tidak terbaca tahunnya.)';
-    } else {
-      html += '<i>Tahun referensi tidak terbaca.</i>';
+    if (r.referencesIncluded) {
+      html += '<div class="db-section"><div class="db-section-title">Kebaruan Referensi</div><div class="db-text-block">';
+      if (r.referenceRecency.totalWithYear > 0) {
+        html += r.referenceRecency.recentPct + '% referensi (' + r.referenceRecency.recentCount + ' dari ' + r.referenceRecency.totalWithYear + ') terbit dalam ' + r.referenceRecency.thresholdYears + ' tahun terakhir.';
+        if (r.referenceRecency.totalWithoutYear > 0) html += ' (' + r.referenceRecency.totalWithoutYear + ' referensi tidak terbaca tahunnya.)';
+      } else {
+        html += '<i>Tahun referensi tidak terbaca.</i>';
+      }
+      html += '</div></div>';
     }
-    html += '</div></div>';
 
     els.dashboardBody.innerHTML = html;
+
+    var refExportCheckbox = document.querySelector('#exportOptions input[value="references"]');
+    if (refExportCheckbox) {
+      refExportCheckbox.disabled = !r.referencesIncluded;
+      refExportCheckbox.checked = r.referencesIncluded;
+      refExportCheckbox.closest('label').style.opacity = r.referencesIncluded ? '1' : '.5';
+    }
   }
 
   function statCard(value, label, tone) {
@@ -186,9 +204,11 @@
       items.push({ status: 'bad', title: 'Struktur IMRAD tidak lengkap', desc: 'Bagian tidak terdeteksi: ' + r.missingImrad.join(', ') + '. Periksa apakah heading-nya memang tidak ada, atau cuma tidak terbaca sistem.' });
     }
 
-    items.push({ status: r.referenceCount >= 20 ? 'ok' : 'warn', title: 'Jumlah referensi: ' + r.referenceCount, desc: r.referenceCount >= 20 ? 'Memenuhi ambang umum (≥20).' : 'Di bawah ambang umum yang sering disyaratkan jurnal terindeks Scopus (≥20 referensi) — cek ketentuan jurnal tujuan.' });
+    items.push({ status: r.referencesIncluded ? (r.referenceCount >= 20 ? 'ok' : 'warn') : 'info',
+      title: r.referencesIncluded ? ('Jumlah referensi: ' + r.referenceCount) : 'Analisis referensi tidak disertakan',
+      desc: r.referencesIncluded ? (r.referenceCount >= 20 ? 'Memenuhi ambang umum (≥20).' : 'Di bawah ambang umum yang sering disyaratkan jurnal terindeks Scopus (≥20 referensi) — cek ketentuan jurnal tujuan.') : 'Anda memilih untuk tidak menyertakan analisis referensi.' });
 
-    if (r.referenceRecency.totalWithYear > 0) {
+    if (r.referencesIncluded && r.referenceRecency.totalWithYear > 0) {
       var recencyOk = r.referenceRecency.recentPct >= 50;
       items.push({ status: recencyOk ? 'ok' : 'warn', title: 'Kebaruan referensi: ' + r.referenceRecency.recentPct + '% dari 10 tahun terakhir', desc: recencyOk ? 'Mayoritas referensi relatif baru.' : 'Kurang dari separuh referensi berasal dari 10 tahun terakhir — banyak jurnal meminta referensi yang lebih mutakhir.' });
     }
@@ -254,7 +274,7 @@
       html += '</table>';
     }
 
-    if (sections.indexOf('references') !== -1) {
+    if (sections.indexOf('references') !== -1 && r.referencesIncluded) {
       html += '<h2>Statistik Referensi</h2><table>';
       html += row('Total Referensi', r.referenceCount);
       html += row('Referensi dari ' + r.referenceRecency.thresholdYears + ' Tahun Terakhir', r.referenceRecency.recentPct + '% (' + r.referenceRecency.recentCount + '/' + r.referenceRecency.totalWithYear + ')');
