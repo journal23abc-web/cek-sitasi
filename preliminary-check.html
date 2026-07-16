@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preliminary Check — Journal Tools</title>
+<script>
+(function(){
+  try {
+    var saved = localStorage.getItem('citationValidatorTheme');
+    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="shared.css?v=2">
+<style>
+  .wrap{ max-width:980px; margin:0 auto; position:relative; z-index:1; }
+  h1{ font-family:var(--font-display); font-weight:700; font-size:22px; margin:0; letter-spacing:-0.01em; }
+  header{ display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:14px; margin-bottom:28px; }
+  .back-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; cursor:pointer; }
+  .back-link:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .field-label{ font-family:var(--font-mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:34px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .icon{ font-size:30px; margin-bottom:10px; }
+  .dropzone .main{ font-size:13.5px; color:var(--text); margin-bottom:4px; }
+  .dropzone .sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); }
+  .file-chip{ display:none; align-items:center; gap:10px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; margin-top:12px; font-size:12.5px; }
+  .file-chip.show{ display:flex; }
+  .file-chip .name{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-chip .remove{ cursor:pointer; color:var(--text-faint); background:none; border:none; font-size:16px; }
+  .file-chip .remove:hover{ color:var(--red); }
+  .status{ font-family:var(--font-mono); font-size:11.5px; margin-left:10px; }
+  .status.info{ color:var(--text-dim); } .status.ok{ color:var(--green); } .status.err{ color:var(--red); }
+
+  .db-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:10px; margin-bottom:22px; }
+  .db-stat{ background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:13px 14px; }
+  .db-stat .v{ font-family:var(--font-display); font-size:22px; font-weight:700; color:var(--text); line-height:1.2; }
+  .db-stat .v small{ font-size:12px; color:var(--text-dim); font-weight:400; }
+  .db-stat .l{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-dim); margin-top:3px; }
+  .db-stat.warn{ border-color:rgba(242,184,75,.4); }
+  .db-stat.warn .v{ color:var(--amber); }
+  .db-stat.bad{ border-color:rgba(242,109,109,.4); }
+  .db-stat.bad .v{ color:var(--red); }
+
+  .db-section{ margin-bottom:24px; }
+  .db-section-title{ font-family:var(--font-mono); font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  .db-section-title::before{ content:'▸'; color:var(--cyan); }
+  .db-text-block{ background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:14px 16px; font-size:13px; line-height:1.65; color:var(--text); }
+  .db-imrad-row{ display:flex; align-items:center; gap:10px; margin-bottom:7px; font-size:12px; }
+  .db-imrad-label{ width:220px; flex-shrink:0; color:var(--text-dim); font-family:var(--font-mono); font-size:11px; }
+  .db-imrad-track{ flex:1; height:16px; background:var(--input-bg); border-radius:4px; overflow:hidden; }
+  .db-imrad-fill{ height:100%; background:linear-gradient(90deg, var(--cyan), var(--violet)); border-radius:4px; }
+  .db-imrad-count{ width:80px; text-align:right; flex-shrink:0; font-family:var(--font-mono); font-size:11px; color:var(--text-dim); }
+
+  .checklist{ display:flex; flex-direction:column; gap:8px; }
+  .cl-item{ display:flex; align-items:flex-start; gap:12px; background:var(--input-bg); border-radius:8px; padding:11px 14px; border-left:3px solid var(--hairline); }
+  .cl-item.ok{ border-left-color:var(--green); }
+  .cl-item.warn{ border-left-color:var(--amber); }
+  .cl-item.bad{ border-left-color:var(--red); }
+  .cl-item.info{ border-left-color:var(--cyan); }
+  .cl-icon{ flex-shrink:0; font-size:14px; margin-top:1px; }
+  .cl-body .cl-title{ font-size:12.5px; color:var(--text); font-weight:600; margin-bottom:2px; }
+  .cl-body .cl-desc{ font-size:11.5px; color:var(--text-dim); line-height:1.55; }
+
+  .export-panel{ background:linear-gradient(180deg, var(--panel-raised), var(--panel)); border:1px solid var(--hairline); border-radius:10px; padding:24px; margin-top:8px; }
+  .export-options{ display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; margin:14px 0 18px; }
+  .export-check{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:7px; padding:9px 12px; cursor:pointer; }
+  .export-check input{ accent-color:var(--cyan); }
+  button.primary{ font-family:var(--font-mono); font-size:12px; letter-spacing:.05em; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:7px; padding:11px 20px; cursor:pointer; font-weight:600; }
+  button.primary:hover{ filter:brightness(1.08); }
+  button.primary:disabled{ opacity:.5; cursor:not-allowed; filter:none; }
+  button.ghost{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; cursor:pointer; }
+
+  .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:16px; padding-top:14px; border-top:1px dashed var(--hairline); }
+
+  /* Print report */
+  .report-page{ display:none; }
+  @media print {
+    body *{ visibility:hidden; }
+    .report-page, .report-page *{ visibility:visible; }
+    .report-page{ display:block; position:absolute; top:0; left:0; width:100%; background:#fff; color:#1a1a1a; padding:20mm 16mm; }
+  }
+  .report-page h1{ font-family:var(--font-display); font-size:19px; margin:0 0 4px; color:#0C1019; }
+  .report-page .rp-meta{ font-size:10.5px; color:#555; margin-bottom:14px; }
+  .report-page h2{ font-family:var(--font-display); font-size:13.5px; margin:20px 0 8px; padding-bottom:5px; border-bottom:2px solid #1a1a1a; color:#0C1019; }
+  .report-page table{ width:100%; border-collapse:collapse; font-size:11.5px; margin-bottom:6px; }
+  .report-page td{ padding:5px 8px; border-bottom:1px solid #ddd; }
+  .report-page td:first-child{ color:#555; width:55%; }
+  .report-page .rp-cl{ padding:6px 0; border-bottom:1px solid #eee; font-size:11.5px; }
+  .report-page .rp-cl b{ margin-right:6px; }
+</style>
+</head>
+<body>
+<div class="watermark" aria-hidden="true"><span>JOURNAL TOOLS</span></div>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Journal Tools</div>
+      <h1>🔍 Preliminary Check</h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
+      <a href="index.html" class="back-link">🏠 Beranda</a>
+      <a href="validator-copy.html" class="back-link">✏️ Validator Sitasi</a>
+    </div>
+  </header>
+
+  <div class="panel">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+    <div class="field-label">Upload Naskah (.docx)</div>
+    <div class="dropzone" id="dropzone">
+      <div class="icon">📄</div>
+      <div class="main">Klik atau seret file .docx ke sini</div>
+      <div class="sub">Maks. 25MB — hanya format Word (.docx)</div>
+      <input type="file" id="fileInput" accept=".docx" style="display:none;">
+    </div>
+    <div class="file-chip" id="fileChip">
+      <span>📄</span><span class="name" id="fileName"></span><span id="fileSize" style="color:var(--text-faint);font-family:var(--font-mono);font-size:11px;"></span>
+      <button class="remove" id="removeFile" aria-label="Hapus file">✕</button>
+    </div>
+    <div class="row" style="margin-top:16px;display:flex;align-items:center;">
+      <button class="primary" id="processBtn" disabled>⚙️ Analisis Naskah</button>
+      <span class="status info" id="statusMsg" role="status" aria-live="polite"></span>
+    </div>
+    <div class="disclaimer">🔒 File tidak pernah dikirim ke server — semua pembacaan &amp; analisis berjalan langsung di browser Anda.<br>⚠️ Deteksi judul/abstrak/IMRAD berbasis pola heading umum (kata "Abstract", "Introduction", penomoran bab, dst). Naskah dengan format tidak lazim mungkin perlu dicek manual. Ambang batas pada checklist (jumlah kata, jumlah referensi, dst.) adalah <b>acuan umum</b>, bukan aturan baku semua jurnal — selalu rujuk panduan penulis (author guidelines) jurnal tujuan Anda.</div>
+  </div>
+
+  <div id="results" style="display:none;">
+
+    <div class="panel" id="dashboardPanel">
+      <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      <div class="field-label">Dashboard Dokumen</div>
+      <div id="dashboardBody"></div>
+    </div>
+
+    <div class="panel" id="checklistPanel">
+      <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      <div class="field-label">Checklist Preliminary</div>
+      <div id="checklistBody"></div>
+    </div>
+
+    <div class="export-panel">
+      <div class="field-label" style="margin-bottom:4px;">Ekspor Laporan</div>
+      <div style="font-size:12px;color:var(--text-dim);">Pilih bagian yang mau disertakan dalam laporan:</div>
+      <div class="export-options" id="exportOptions">
+        <label class="export-check"><input type="checkbox" value="identity" checked> Judul &amp; Info Dasar</label>
+        <label class="export-check"><input type="checkbox" value="abstract" checked> Abstrak &amp; Kata Kunci</label>
+        <label class="export-check"><input type="checkbox" value="imrad" checked> Struktur IMRAD</label>
+        <label class="export-check"><input type="checkbox" value="references" checked> Statistik Referensi</label>
+        <label class="export-check"><input type="checkbox" value="assets" checked> Tabel &amp; Gambar</label>
+        <label class="export-check"><input type="checkbox" value="checklist" checked> Checklist Preliminary</label>
+      </div>
+      <button class="primary" id="exportBtn">📄 Ekspor sebagai PDF</button>
+      <span class="status info" id="exportStatus"></span>
+    </div>
+
+  </div>
+</div>
+
+<div class="report-page" id="reportPage"></div>
+
+<script src="theme.js?v=1"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<script src="docstats-engine.js?v=1"></script>
+<script src="preliminary.js?v=1"></script>
+</body>
+</html>

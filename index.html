@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sistem Integrasi Kelola Jurnal — Beranda</title>
+<title>Journal Tools — Beranda</title>
 <script>
 (function(){
   try {
@@ -15,7 +15,7 @@
 </script>
 <link rel="stylesheet" href="shared.css?v=2">
 <style>
-  .wrap{ max-width:980px; margin:0 auto; }
+  .wrap{ max-width:980px; margin:0 auto; position:relative; z-index:1; }
   a{ color:var(--cyan); }
 
   header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:34px; }
@@ -58,11 +58,12 @@
 </style>
 </head>
 <body>
+<div class="watermark" aria-hidden="true"><span>JOURNAL TOOLS</span></div>
 <div class="wrap">
   <header>
     <div>
       <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
-      <h1>Validator Sitasi</h1>
+      <h1>Journal Tools</h1>
     </div>
     <div class="status-pill" style="gap:14px;">
       <button id="themeToggle" class="ghost-link" style="cursor:pointer;">☀️ Terang</button>
@@ -71,42 +72,42 @@
   </header>
 
   <div class="intro">
-    <p>Pilih cara Anda mau memeriksa naskah. Semua alat di bawah memakai mesin validasi yang sama (parsing referensi, deteksi gaya, pencocokan sitasi) — bedanya cuma cara Anda memasukkan naskahnya. Semuanya berjalan di browser Anda sendiri, tanpa server.</p>
+    <p>Kumpulan alat untuk membantu proses editorial jurnal. Pilih alat yang Anda perlukan di bawah — semuanya berjalan langsung di browser Anda sendiri, tanpa server.</p>
   </div>
 
-  <div class="section-label">Pilih Validator</div>
+  <div class="section-label">Pilih Tool</div>
   <div class="tool-grid">
 
     <a href="validator-copy.html" class="tool-card">
       <span class="corner tl"></span><span class="corner br"></span>
       <div class="tc-icon">✏️</div>
-      <div class="tc-title">Validator Copy-Paste</div>
-      <div class="tc-desc">Tempel teks artikel dan daftar referensi langsung ke kotak teks — atau tempel seluruh naskah sekaligus dan biarkan sistem memisahkannya otomatis. Paling cepat untuk cek sekilas.</div>
+      <div class="tc-title">Validator Sitasi</div>
+      <div class="tc-desc">Tempel teks artikel dan daftar referensi, atau tempel seluruh naskah sekaligus untuk dipisahkan otomatis. Perlu unggah file .docx? Ada tautan ke Validator Upload di dalam halaman ini.</div>
       <div class="tc-tags">
         <span class="tc-tag">Deteksi gaya otomatis</span>
         <span class="tc-tag">Analitik referensi</span>
         <span class="tc-tag">Filter &amp; lokasi hasil</span>
       </div>
-      <div class="tc-cta">Buka validator <span class="arrow">→</span></div>
+      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
     </a>
 
-    <a href="validator-upload.html" class="tool-card">
+    <a href="preliminary-check.html" class="tool-card">
       <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">📤</div>
-      <div class="tc-title">Validator Upload (.docx)</div>
-      <div class="tc-desc">Unggah file Word langsung. Format italic &amp; huruf besar-kecil dibaca dari XML asli file (bukan copy-paste), lalu bisa unduh laporan PDF atau naskah asli dengan highlight + komentar.</div>
+      <div class="tc-icon">🔍</div>
+      <div class="tc-title">Preliminary Check</div>
+      <div class="tc-desc">Upload naskah .docx untuk dashboard cek awal ala standar Scopus: jumlah kata judul/abstrak, kelengkapan struktur IMRAD, jumlah &amp; kebaruan referensi, dan checklist preliminary lainnya.</div>
       <div class="tc-tags">
-        <span class="tc-tag">Format italic akurat</span>
-        <span class="tc-tag">Highlight di file asli</span>
-        <span class="tc-tag">Ekspor PDF / DOCX</span>
+        <span class="tc-tag">Dashboard IMRAD</span>
+        <span class="tc-tag">Checklist objektif</span>
+        <span class="tc-tag">Ekspor laporan pilihan</span>
       </div>
-      <div class="tc-cta">Buka validator <span class="arrow">→</span></div>
+      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
     </a>
 
     <div class="tool-card placeholder" aria-hidden="true">
       <div class="tc-icon">➕</div>
-      <div class="tc-title">Fitur Berikutnya</div>
-      <div class="tc-desc">Tempat untuk validator/alat baru — tinggal tambahkan kartu di sini kalau ada fitur baru nanti.</div>
+      <div class="tc-title">Tool Berikutnya</div>
+      <div class="tc-desc">Tempat untuk tool baru — tinggal tambahkan kartu di sini kalau ada fitur baru nanti.</div>
     </div>
 
   </div>

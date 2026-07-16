@@ -6,22 +6,24 @@ berjalan 100% di browser, tanpa backend, cocok untuk hosting statis (GitHub Page
 ## Struktur proyek
 
 ```
-index.html            Beranda (hub) — pilih mau pakai validator yang mana
-validator-copy.html   Validator via copy-paste teks — tempel & validasi langsung
-validator-upload.html Validator via upload .docx — ekspor laporan PDF / docx ber-highlight
-shared.css             Design tokens & komponen yang identik di semua halaman
-theme.js                Toggle dark/light mode, dipakai semua halaman
-engine.js               Mesin inti: parsing referensi, deteksi gaya, validasi, matching
-app.js                   UI logic untuk validator-copy.html
-upload.js                UI logic untuk validator-upload.html (JSZip + Mammoth.js)
-validator-worker.js    Web Worker — menjalankan validasi berat di background thread
-tests/                 Automated test suite (Node, tanpa dependency)
+index.html             Beranda (hub "Journal Tools") — pilih mau pakai tool yang mana
+validator-copy.html    Validator sitasi via copy-paste teks — tempel & validasi langsung
+validator-upload.html  Validator sitasi via upload .docx — ekspor laporan PDF / docx ber-highlight
+preliminary-check.html Preliminary check naskah (upload .docx) — dashboard IMRAD & checklist
+shared.css              Design tokens, watermark & komponen yang identik di semua halaman
+theme.js                 Toggle dark/light mode, dipakai semua halaman
+engine.js                Mesin inti validator sitasi: parsing referensi, deteksi gaya, matching
+docstats-engine.js       Mesin analisis struktur naskah (judul/abstrak/IMRAD) untuk Preliminary Check
+app.js                    UI logic untuk validator-copy.html
+upload.js                 UI logic untuk validator-upload.html (JSZip + Mammoth.js)
+preliminary.js            UI logic untuk preliminary-check.html (JSZip)
+validator-worker.js     Web Worker — menjalankan validasi berat di background thread
+tests/                  Automated test suite (Node, tanpa dependency)
 ```
 
-`index.html` sengaja dibuat sesederhana mungkin (cuma dua kartu tautan) supaya gampang
-ditambah kalau nanti ada validator/fitur baru — tinggal salin blok `.tool-card` yang ada
-dan ganti tautan/isinya, tanpa perlu mengubah apa pun di `validator-copy.html` atau
-`validator-upload.html`.
+`index.html` sengaja dibuat sesederhana mungkin (cuma kartu-kartu tautan) supaya gampang
+ditambah kalau nanti ada tool baru — tinggal salin blok `.tool-card` yang ada dan ganti
+tautan/isinya, tanpa perlu mengubah apa pun di halaman tool lainnya.
 
 ## Menjalankan tes
 
@@ -79,6 +81,12 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
   itu akan terlihat ilmiah padahal tidak berdasar. Yang ditampilkan cuma hitungan
   objektif (jumlah, persentase, median); menilai apakah angkanya "bagus" tergantung
   bidang ilmu dan aturan jurnal/institusi masing-masing, di luar cakupan alat ini.
+- **Preliminary Check** mendeteksi judul/abstrak/struktur IMRAD berdasarkan pola heading
+  umum (kata "Abstract"/"Introduction", penomoran bab, dst.) — naskah dengan format
+  heading tidak lazim mungkin terlewat dan perlu dicek manual. Ambang batas di checklist
+  (jumlah kata abstrak, jumlah referensi minimum, dst.) adalah **acuan umum yang sering
+  dipakai**, bukan aturan baku semua jurnal terindeks Scopus — selalu rujuk panduan
+  penulis (author guidelines) jurnal tujuan.
 - **DOI check** bergantung API publik CrossRef — hasil "tidak ditemukan" atau
   "metadata beda" bisa juga karena DOI belum terindeks CrossRef, bukan berarti DOI-nya
   salah (khususnya jurnal kecil/baru).
