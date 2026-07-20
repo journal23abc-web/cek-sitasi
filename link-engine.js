@@ -100,7 +100,7 @@
 
   // Opsional: mewarnai teks sitasi yang jadi link (mis. biru khas hyperlink), TANPA menyentuh
   // atribut format lain (bold/italic/font tetap seperti aslinya) — cukup timpa/ tambah <w:color>.
-  // colorHex tanpa '#', mis. "0563C1" (biru default hyperlink Word).
+  // colorHex tanpa '#', mis. "0000FF" (biru default hyperlink Word).
   function applyColorToRun(xmlDoc, runEl, colorHex) {
     if (!colorHex) return;
     var rPrList = runEl.getElementsByTagName('w:rPr');
@@ -296,7 +296,7 @@
   //                                              (diterapkan SETELAH linkScope, opsional/independen).
   // options.onlyHighlighted   (default false) : lewati sitasi yang SAMA SEKALI tidak
   //                                              punya highlight (untuk kontrol manual penuh).
-  // options.linkColor         (default null)  : opsional — hex warna (mis. "0563C1", biru khas
+  // options.linkColor         (default null)  : opsional — hex warna (mis. "0000FF", biru khas
   //                                              hyperlink) untuk teks sitasi yang ditautkan.
   //                                              null/kosong = format asli TIDAK diubah sama sekali.
   // ============================================================
@@ -305,7 +305,7 @@
     var narrowToHighlight = options.narrowToHighlight !== false;
     var onlyHighlighted = !!options.onlyHighlighted;
     var linkScope = options.linkScope === 'year' ? 'year' : 'full'; // 'full' (default) | 'year'
-    var linkColor = options.linkColor || null; // null = format asli tidak diubah; atau hex mis. "0563C1"
+    var linkColor = options.linkColor || null; // null = format asli tidak diubah; atau hex mis. "0000FF"
 
     var paras = buildParagraphList(xmlDoc);
     var headingIdx = findHeadingIndex(paras);
