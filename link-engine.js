@@ -64,19 +64,27 @@
   }
 
   // ---------- run-splitting yang aman-format (pola sama seperti upload.js) ----------
+  // PENTING: harus menelusuri SEMUA <w:r>, termasuk yang sudah bersarang di dalam
+  // <w:hyperlink>/<w:ins>/<w:del> dsb. (lazim ada di naskah yang sitasinya dibuat lewat
+  // Mendeley/Zotero/EndNote) — bukan cuma anak langsung <w:p>. Kalau tidak, posisi karakter
+  // di sini akan "geser" dibanding teks-polos paragraf (yang dihitung dari SEMUA <w:t>
+  // lewat getElementsByTagName di buildParagraphList), dan setiap sitasi SETELAH bagian
+  // yang bersarang itu akan salah tautan atau gagal total.
+  // Setiap info run juga menyimpan apakah dia "spliceable" — anak langsung <w:p> (aman
+  // dipecah/disisipi w:hyperlink baru) atau bukan (sudah di dalam wrapper lain; menyisipkan
+  // w:hyperlink baru di situ akan jadi hyperlink bersarang yang tidak valid di OOXML, jadi
+  // match yang menyentuh run ini akan dilewati & dilaporkan, bukan dipaksakan).
   function getRunInfos(p) {
-    var runs = [];
-    for (var c = p.firstChild; c; c = c.nextSibling) {
-      if (c.nodeType === 1 && c.tagName === 'w:r') runs.push(c);
-    }
+    var runNodes = p.getElementsByTagName('w:r');
     var text = '', infos = [];
-    runs.forEach(function (r) {
+    for (var i = 0; i < runNodes.length; i++) {
+      var r = runNodes[i];
       var wts = r.getElementsByTagName('w:t');
       var t = '';
-      for (var i = 0; i < wts.length; i++) t += wts[i].textContent;
-      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t });
+      for (var j = 0; j < wts.length; j++) t += wts[j].textContent;
+      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t, spliceable: r.parentNode === p });
       text += t;
-    });
+    }
     return { text: text, infos: infos };
   }
 
@@ -96,6 +104,9 @@
     var info = getRunInfos(p);
     var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
     if (overlapping.length === 0) return false;
+    // Jangan pernah menyisipkan w:hyperlink baru bersarang di dalam wrapper yang sudah ada
+    // (hyperlink lama, tracked-change, dst.) — itu OOXML tidak valid. Lewati saja match ini.
+    if (overlapping.some(function (inf) { return !inf.spliceable; })) return false;
 
     var hl = xmlDoc.createElementNS(W_NS, 'w:hyperlink');
     hl.setAttributeNS(W_NS, 'w:anchor', anchorName);
@@ -124,6 +135,78 @@
     return true;
   }
 
+  // Kalau referensi ini SUDAH punya bookmark (lazim di naskah yang sitasinya dibuat lewat
+  // Mendeley/Zotero/EndNote — biasanya bernama seperti nama belakang penulis, mis. "Aini",
+  // "Winarno2016", dst.), pakai ulang bookmark itu alih-alih bikin baru. Bookmark internal
+  // Word sendiri (nama diawali "_", mis. "_Toc..."/"_heading=...") diabaikan.
+  function findExistingBookmarkName(p) {
+    var bms = p.getElementsByTagName('w:bookmarkStart');
+    for (var i = 0; i < bms.length; i++) {
+      var nm = bms[i].getAttribute('w:name');
+      if (nm && nm.charAt(0) !== '_') return nm;
+    }
+    return null;
+  }
+
+  // Cari <w:hyperlink> pembungkus terdekat dari sebuah run (null kalau run itu anak langsung <w:p>
+  // atau bersarang di wrapper lain yang bukan hyperlink, mis. tracked-change <w:ins>/<w:del>).
+  function findWrapperHyperlink(runEl, p) {
+    var node = runEl.parentNode;
+    while (node && node !== p) {
+      if (node.tagName === 'w:hyperlink') return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  // Menaut sebuah match [s,e) ke bookmarkName. Kasus nyata paling umum di naskah yang sitasinya
+  // dibuat lewat Mendeley/Zotero/EndNote: HANYA SEBAGIAN teks sitasi (biasanya cuma tahunnya)
+  // yang sudah dibungkus <w:hyperlink> lama, sisanya (nama penulis, tanda kurung) masih run polos
+  // — jadi satu match sering "campur": sebagian spliceable, sebagian sudah di dalam hyperlink lain.
+  // Match dipecah per-segmen berdasarkan wrapper-nya:
+  //  - segmen run polos (anak langsung <w:p>)      -> dibungkus <w:hyperlink> BARU (jalur umum lama)
+  //  - segmen yang sudah di dalam SATU <w:hyperlink> -> anchor hyperlink itu DIPERBAIKI di tempat
+  //    (tidak perlu bongkar-pasang run sama sekali; kalau anchor-nya sudah benar, tidak disentuh)
+  //  - segmen di dalam wrapper lain (tracked-change dst.) -> dilewati (tidak diubah)
+  // Karena penambahan wrapper TIDAK PERNAH mengubah isi teks, posisi karakter [s,e) tetap valid
+  // sepanjang proses ini walau dipanggil berkali-kali pada paragraf yang sama.
+  function wrapOrRetarget(xmlDoc, p, s, e, bookmarkName) {
+    var info = getRunInfos(p);
+    var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
+    if (overlapping.length === 0) return { ok: false, mode: 'unsupported' };
+
+    var groups = [];
+    overlapping.forEach(function (inf) {
+      var key = inf.spliceable ? 'SPLICE' : findWrapperHyperlink(inf.run, p);
+      var last = groups[groups.length - 1];
+      if (last && last.key === key) last.infos.push(inf);
+      else groups.push({ key: key, infos: [inf] });
+    });
+
+    var anyOk = false, anyRetarget = false, anyFail = false;
+    groups.forEach(function (g) {
+      var segStart = Math.max(s, g.infos[0].start);
+      var segEnd = Math.min(e, g.infos[g.infos.length - 1].end);
+      if (g.key === 'SPLICE') {
+        if (wrapWithHyperlink(xmlDoc, p, segStart, segEnd, bookmarkName)) anyOk = true;
+        else anyFail = true;
+      } else if (g.key && g.key.tagName === 'w:hyperlink') {
+        var already = g.key.getAttribute('w:anchor') === bookmarkName;
+        if (!already) {
+          g.key.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
+          g.key.setAttributeNS(W_NS, 'w:history', '1');
+          anyRetarget = true;
+        }
+        anyOk = true;
+      } else {
+        anyFail = true; // wrapper selain hyperlink (tracked-change dst.) — dilewati apa adanya
+      }
+    });
+
+    if (!anyOk) return { ok: false, mode: 'unsupported' };
+    return { ok: true, mode: anyRetarget ? 'retargeted' : (anyFail ? 'partial' : 'new') };
+  }
+
   function insertBookmark(xmlDoc, p, name, id) {
     var bmStart = xmlDoc.createElementNS(W_NS, 'w:bookmarkStart');
     bmStart.setAttributeNS(W_NS, 'w:id', String(id));
@@ -139,17 +222,64 @@
     p.appendChild(bmEnd);
   }
 
+  // ---------- deteksi teks yang sudah di-highlight manual oleh pengguna ----------
+  // Kalau pengguna sudah menandai (highlight warna apa saja, via tombol Highlight di Word)
+  // sebagian dari sebuah sitasi — misalnya cuma tahunnya saja — maka link yang dibuat akan
+  // dipersempit ke bagian yang di-highlight itu saja, bukan seluruh teks sitasi. Ini dibaca
+  // langsung dari <w:highlight>/<w:shd> pada rPr tiap run, dengan pola baca atribut yang sama
+  // seperti checkReferenceFormatting() di engine.js / upload.js (getAttribute('w:val') dsb.).
+  function isRunHighlighted(runEl) {
+    var rPrList = runEl.getElementsByTagName('w:rPr');
+    if (!rPrList.length) return false;
+    var rPr = rPrList[0];
+    var hlList = rPr.getElementsByTagName('w:highlight');
+    if (hlList.length) {
+      var val = hlList[0].getAttribute('w:val');
+      if (val && val.toLowerCase() !== 'none') return true;
+    }
+    var shdList = rPr.getElementsByTagName('w:shd');
+    if (shdList.length) {
+      var fill = shdList[0].getAttribute('w:fill');
+      if (fill && fill.toLowerCase() !== 'auto' && fill.toLowerCase() !== 'ffffff') return true;
+    }
+    return false;
+  }
+
+  // Rentang [start,end) (koordinat teks-polos paragraf) yang di-highlight, digabung kalau
+  // ada run highlighted yang bersebelahan (mis. highlight dipecah jadi 2 run karena alasan lain).
+  function buildHighlightRanges(pEl) {
+    var info = getRunInfos(pEl);
+    var ranges = [];
+    info.infos.forEach(function (inf) {
+      if (!isRunHighlighted(inf.run) || !inf.text) return;
+      var last = ranges[ranges.length - 1];
+      if (last && last.end === inf.start) last.end = inf.end;
+      else ranges.push({ start: inf.start, end: inf.end });
+    });
+    return ranges;
+  }
+
+
   // ============================================================
   // MAIN: linkDocx(xmlDoc, options) -> mutasi xmlDoc in-place + laporan
+  // options.narrowToHighlight (default true)  : kalau sitasi punya bagian ter-highlight,
+  //                                              persempit link ke bagian itu saja.
+  // options.onlyHighlighted   (default false) : lewati sitasi yang SAMA SEKALI tidak
+  //                                              punya highlight (untuk kontrol manual penuh).
   // ============================================================
   function linkDocx(xmlDoc, options) {
     options = options || {};
+    var narrowToHighlight = options.narrowToHighlight !== false;
+    var onlyHighlighted = !!options.onlyHighlighted;
+
     var paras = buildParagraphList(xmlDoc);
     var headingIdx = findHeadingIndex(paras);
     if (headingIdx === -1) return { error: 'NO_HEADING' };
 
     var bodyParas = paras.slice(0, headingIdx);
     var refParas = paras.slice(headingIdx + 1);
+    var highlightRangesByPara = bodyParas.map(function (p) { return buildHighlightRanges(p.el); });
+    var docHasHighlight = highlightRangesByPara.some(function (r) { return r.length > 0; });
 
     var articleText = bodyParas.map(function (p) { return p.text; }).join('\n');
     var referenceText = refParas.map(function (p) { return p.text; }).join('\n');
@@ -175,9 +305,12 @@
       if (!paraObj) return;
       ordinal++;
       refCount++;
-      var id = bookmarkSeq++;
-      var bookmarkName = 'ref_' + id;
-      insertBookmark(xmlDoc, paraObj.el, bookmarkName, id);
+      var bookmarkName = findExistingBookmarkName(paraObj.el);
+      if (!bookmarkName) {
+        var id = bookmarkSeq++;
+        bookmarkName = 'ref_' + id;
+        insertBookmark(xmlDoc, paraObj.el, bookmarkName, id);
+      }
 
       if (style.family === 'numeric') {
         var label = ref.numLabel || ordinal;
@@ -278,6 +411,8 @@
     }
 
     var linkedList = [];
+    var narrowedCount = 0, skippedNotHighlighted = 0;
+    var newCount = 0, retargetedCount = 0, alreadyCount = 0;
     Object.keys(matchesByPara).forEach(function (piStr) {
       var pi = parseInt(piStr, 10);
       var list = matchesByPara[pi];
@@ -288,13 +423,40 @@
         var overlap = accepted.some(function (a) { return m.start < a.end && m.end > a.start; });
         if (!overlap) accepted.push(m);
       });
+
+      var ranges = highlightRangesByPara[pi] || [];
+      accepted.forEach(function (m) {
+        if (!m.bookmarkName) return; // ditangani di bawah sebagai unmatched, highlight tidak relevan
+        var overlapRanges = ranges.filter(function (r) { return r.start < m.end && r.end > m.start; });
+        if (overlapRanges.length) {
+          if (narrowToHighlight) {
+            var newStart = Math.max(m.start, Math.min.apply(null, overlapRanges.map(function (r) { return r.start; })));
+            var newEnd = Math.min(m.end, Math.max.apply(null, overlapRanges.map(function (r) { return r.end; })));
+            if (newStart < newEnd && (newStart !== m.start || newEnd !== m.end)) {
+              narrowedCount++;
+              m.start = newStart; m.end = newEnd;
+            }
+          }
+        } else if (onlyHighlighted) {
+          skippedNotHighlighted++;
+          m.skip = true;
+        }
+      });
+
       // proses dari belakang supaya offset match sebelumnya tetap valid
       accepted.sort(function (a, b) { return b.start - a.start; });
       accepted.forEach(function (m) {
+        if (m.skip) return;
         if (m.bookmarkName) {
-          var ok = wrapWithHyperlink(xmlDoc, bodyParas[pi].el, m.start, m.end, m.bookmarkName);
-          if (ok) linkedList.push(m.raw);
-          else unmatched.push(m.raw + ' (struktur run tidak didukung)');
+          var r = wrapOrRetarget(xmlDoc, bodyParas[pi].el, m.start, m.end, m.bookmarkName);
+          if (r.ok) {
+            linkedList.push(m.raw);
+            if (r.mode === 'already') alreadyCount++;
+            else if (r.mode === 'retargeted') retargetedCount++;
+            else newCount++;
+          } else {
+            unmatched.push(m.raw + ' (struktur run tidak didukung — kemungkinan bagian dari hyperlink/format khusus lain)');
+          }
         } else {
           unmatched.push(m.raw);
         }
@@ -309,7 +471,13 @@
       linked: linkedList.length,
       linkedList: linkedList,
       unmatched: unmatched,
-      refParseFailed: parsed.failedLines
+      refParseFailed: parsed.failedLines,
+      docHasHighlight: docHasHighlight,
+      narrowedToHighlight: narrowedCount,
+      skippedNotHighlighted: skippedNotHighlighted,
+      newlyLinked: newCount,
+      retargeted: retargetedCount,
+      alreadyLinked: alreadyCount
     };
   }
 

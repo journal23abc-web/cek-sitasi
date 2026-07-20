@@ -9,6 +9,8 @@
     fileSize: document.getElementById('fileSize'),
     fileRemove: document.getElementById('fileRemove'),
     styleSelect: document.getElementById('styleSelect'),
+    narrowToHighlight: document.getElementById('narrowToHighlight'),
+    onlyHighlighted: document.getElementById('onlyHighlighted'),
     processBtn: document.getElementById('processBtn'),
     statusMsg: document.getElementById('statusMsg'),
     results: document.getElementById('results'),
@@ -98,7 +100,11 @@
           throw new Error('Gagal mem-parsing XML dokumen.');
         }
         var styleId = els.styleSelect.value;
-        var result = window.CitationLinker.linkDocx(xmlDoc, { styleId: styleId });
+        var result = window.CitationLinker.linkDocx(xmlDoc, {
+          styleId: styleId,
+          narrowToHighlight: els.narrowToHighlight.checked,
+          onlyHighlighted: els.onlyHighlighted.checked
+        });
         if (result.error === 'NO_HEADING') {
           throw new Error('Heading daftar referensi tidak ditemukan. Pastikan ada paragraf tersendiri bertuliskan "References" / "Daftar Pustaka" / "Bibliography" sebelum daftar referensi dimulai.');
         }
@@ -140,10 +146,19 @@
 
     var bannerClass = result.unmatched.length === 0 ? 'ok' : 'ok';
     var styleLabel = result.styleName + (result.detected ? ' (auto-detect, keyakinan ' + result.detected.confidence + '%)' : ' (dipilih manual)');
+    var hlNote = '';
+    if (result.docHasHighlight) {
+      hlNote = '<div class="pb-stats" style="margin-top:4px;">🖍️ ';
+      if (result.narrowedToHighlight) hlNote += result.narrowedToHighlight + ' sitasi dipersempit ke bagian yang di-highlight';
+      if (result.skippedNotHighlighted) hlNote += (result.narrowedToHighlight ? ' &middot; ' : '') + result.skippedNotHighlighted + ' sitasi dilewati (tidak di-highlight)';
+      if (!result.narrowedToHighlight && !result.skippedNotHighlighted) hlNote += 'Ada highlight di naskah, tapi tidak beririsan dengan sitasi manapun';
+      hlNote += '</div>';
+    }
     els.parseBanner.innerHTML =
       '<div class="parse-banner ' + bannerClass + '">' +
       '<div class="pb-title">Gaya sitasi: ' + escHtml(styleLabel) + '</div>' +
       '<div class="pb-stats">' + result.refCount + ' referensi terdeteksi &middot; ' + result.linked + ' sitasi tertaut &middot; ' + result.unmatched.length + ' tidak cocok</div>' +
+      hlNote +
       '</div>';
 
     els.summaryGrid.innerHTML =

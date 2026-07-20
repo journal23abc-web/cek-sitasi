@@ -39,6 +39,8 @@
   select:focus{ border-color:var(--cyan); }
 
   .row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .checkbox-row{ display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); margin-top:10px; }
+  .checkbox-row input{ accent-color:var(--cyan); width:15px; height:15px; flex-shrink:0; }
 
   button.primary{ font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
   button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
@@ -121,6 +123,21 @@
       <option value="ieee">IEEE</option>
       <option value="vancouver">Vancouver</option>
     </select>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">3</span>Highlight Manual <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
+    <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
+      Kalau di naskah Anda sudah ada bagian sitasi yang di-<i>highlight</i> manual (warna apa saja, pakai tombol
+      Highlight bawaan Word) — misalnya cuma tahunnya saja seperti <code>Smith (<mark style="background:#fff3ac;color:#5c4b00;padding:0 3px;border-radius:2px;">2020</mark>)</code> —
+      sistem otomatis mempersempit link hanya ke bagian yang di-highlight itu, bukan seluruh sitasi.
+    </p>
+    <div class="checkbox-row" style="margin-top:0;">
+      <input type="checkbox" id="narrowToHighlight" checked>
+      <label for="narrowToHighlight">Kalau ada bagian ter-highlight dalam sitasi, tautkan hanya bagian itu</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="onlyHighlighted">
+      <label for="onlyHighlighted">Lewati sitasi yang sama sekali tidak di-highlight (kontrol manual penuh)</label>
+    </div>
 
     <div class="row" style="margin-top:24px;">
       <button class="primary" id="processBtn" disabled>🔗 Proses &amp; Tautkan Sitasi</button>
