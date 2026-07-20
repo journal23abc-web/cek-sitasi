@@ -98,9 +98,27 @@
     return r;
   }
 
+  // Opsional: mewarnai teks sitasi yang jadi link (mis. biru khas hyperlink), TANPA menyentuh
+  // atribut format lain (bold/italic/font tetap seperti aslinya) — cukup timpa/ tambah <w:color>.
+  // colorHex tanpa '#', mis. "0563C1" (biru default hyperlink Word).
+  function applyColorToRun(xmlDoc, runEl, colorHex) {
+    if (!colorHex) return;
+    var rPrList = runEl.getElementsByTagName('w:rPr');
+    var rPr;
+    if (rPrList.length) rPr = rPrList[0];
+    else { rPr = xmlDoc.createElementNS(W_NS, 'w:rPr'); runEl.insertBefore(rPr, runEl.firstChild); }
+    var colorList = rPr.getElementsByTagName('w:color');
+    var colorEl;
+    if (colorList.length) colorEl = colorList[0];
+    else { colorEl = xmlDoc.createElementNS(W_NS, 'w:color'); rPr.appendChild(colorEl); }
+    colorEl.setAttributeNS(W_NS, 'w:val', colorHex.replace('#', ''));
+  }
+
   // Membungkus rentang [s,e) teks paragraf dengan <w:hyperlink w:anchor="...">, memecah
   // hanya run yang tersentuh dan menjaga rPr asli tiap run — run lain tidak disentuh sama sekali.
-  function wrapWithHyperlink(xmlDoc, p, s, e, anchorName) {
+  // colorHex (opsional) diterapkan HANYA ke run yang masuk hyperlink, bukan ke potongan
+  // before/after di luar hyperlink — supaya cuma teks sitasinya yang berubah warna.
+  function wrapWithHyperlink(xmlDoc, p, s, e, anchorName, colorHex) {
     var info = getRunInfos(p);
     var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
     if (overlapping.length === 0) return false;
@@ -122,7 +140,11 @@
       var matchText = inf.text.slice(localS, localE);
       var afterText = inf.text.slice(localE);
       if (idx === 0 && beforeText) beforeRun = createRun(xmlDoc, rPr, beforeText);
-      if (matchText) matchRuns.push(createRun(xmlDoc, rPr, matchText));
+      if (matchText) {
+        var mRun = createRun(xmlDoc, rPr, matchText);
+        applyColorToRun(xmlDoc, mRun, colorHex);
+        matchRuns.push(mRun);
+      }
       if (idx === overlapping.length - 1 && afterText) afterRun = createRun(xmlDoc, rPr, afterText);
     });
     matchRuns.forEach(function (r) { hl.appendChild(r); });
@@ -170,7 +192,7 @@
   //  - segmen di dalam wrapper lain (tracked-change dst.) -> dilewati (tidak diubah)
   // Karena penambahan wrapper TIDAK PERNAH mengubah isi teks, posisi karakter [s,e) tetap valid
   // sepanjang proses ini walau dipanggil berkali-kali pada paragraf yang sama.
-  function wrapOrRetarget(xmlDoc, p, s, e, bookmarkName) {
+  function wrapOrRetarget(xmlDoc, p, s, e, bookmarkName, colorHex) {
     var info = getRunInfos(p);
     var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
     if (overlapping.length === 0) return { ok: false, mode: 'unsupported' };
@@ -188,7 +210,7 @@
       var segStart = Math.max(s, g.infos[0].start);
       var segEnd = Math.min(e, g.infos[g.infos.length - 1].end);
       if (g.key === 'SPLICE') {
-        if (wrapWithHyperlink(xmlDoc, p, segStart, segEnd, bookmarkName)) anyOk = true;
+        if (wrapWithHyperlink(xmlDoc, p, segStart, segEnd, bookmarkName, colorHex)) anyOk = true;
         else anyFail = true;
       } else if (g.key && g.key.tagName === 'w:hyperlink') {
         var already = g.key.getAttribute('w:anchor') === bookmarkName;
@@ -196,6 +218,10 @@
           g.key.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
           g.key.setAttributeNS(W_NS, 'w:history', '1');
           anyRetarget = true;
+        }
+        if (colorHex) {
+          var innerRuns = g.key.getElementsByTagName('w:r');
+          for (var ri = 0; ri < innerRuns.length; ri++) applyColorToRun(xmlDoc, innerRuns[ri], colorHex);
         }
         anyOk = true;
       } else {
@@ -262,15 +288,24 @@
 
   // ============================================================
   // MAIN: linkDocx(xmlDoc, options) -> mutasi xmlDoc in-place + laporan
-  // options.narrowToHighlight (default true)  : kalau sitasi punya bagian ter-highlight,
-  //                                              persempit link ke bagian itu saja.
+  // options.linkScope         ('full' default | 'year') : pilih dari WEBSITE, tidak perlu
+  //                                              highlight manual di Word — 'year' menautkan
+  //                                              hanya token tahunnya, 'full' seluruh sitasi.
+  // options.narrowToHighlight (default true)  : kalau sitasi punya bagian ter-highlight DI FILE
+  //                                              WORD-nya sendiri, persempit link ke situ saja
+  //                                              (diterapkan SETELAH linkScope, opsional/independen).
   // options.onlyHighlighted   (default false) : lewati sitasi yang SAMA SEKALI tidak
   //                                              punya highlight (untuk kontrol manual penuh).
+  // options.linkColor         (default null)  : opsional — hex warna (mis. "0563C1", biru khas
+  //                                              hyperlink) untuk teks sitasi yang ditautkan.
+  //                                              null/kosong = format asli TIDAK diubah sama sekali.
   // ============================================================
   function linkDocx(xmlDoc, options) {
     options = options || {};
     var narrowToHighlight = options.narrowToHighlight !== false;
     var onlyHighlighted = !!options.onlyHighlighted;
+    var linkScope = options.linkScope === 'year' ? 'year' : 'full'; // 'full' (default) | 'year'
+    var linkColor = options.linkColor || null; // null = format asli tidak diubah; atau hex mis. "0563C1"
 
     var paras = buildParagraphList(xmlDoc);
     var headingIdx = findHeadingIndex(paras);
@@ -343,12 +378,12 @@
 
     var matchesByPara = {};
     var unmatched = [];
-    function addMatch(startAbs, endAbs, bookmarkName, raw) {
+    function addMatch(startAbs, endAbs, bookmarkName, raw, yearText) {
       var a = locate(startAbs), b = locate(endAbs);
       if (!a || !b || a.paraIndex !== b.paraIndex) { unmatched.push(raw); return; }
       var pi = a.paraIndex;
       if (!matchesByPara[pi]) matchesByPara[pi] = [];
-      matchesByPara[pi].push({ start: a.offset, end: b.offset, bookmarkName: bookmarkName, raw: raw });
+      matchesByPara[pi].push({ start: a.offset, end: b.offset, bookmarkName: bookmarkName, raw: raw, yearText: yearText || null });
     }
 
     if (style.family === 'numeric') {
@@ -357,7 +392,7 @@
         for (var k = 0; k < c.numbers.length; k++) {
           if (numIndex[c.numbers[k]]) { bm = numIndex[c.numbers[k]]; break; }
         }
-        addMatch(c.position, c.position + c.raw.length, bm, c.raw);
+        addMatch(c.position, c.position + c.raw.length, bm, c.raw, null);
       });
     } else {
       CE.extractAuthorDateCitations(articleText).forEach(function (c) {
@@ -382,19 +417,19 @@
               // trim spasi di tepi segmen supaya link tidak "makan" spasi pemisah
               var leadWs = segText.match(/^\s*/)[0].length;
               var trailWs = segText.match(/\s*$/)[0].length;
-              addMatch(segStartAbs + leadWs, segEndAbs - trailWs, bmSeg, segText.trim());
+              addMatch(segStartAbs + leadWs, segEndAbs - trailWs, bmSeg, segText.trim(), part ? part.year : null);
             });
           } else {
             // Bentuk tak umum (mis. sitasi tahun-ganda "Smith, 2019, 2021" dalam satu kurung)
             // — tautkan seluruh blok ke referensi pertama yang cocok, lebih aman daripada menebak.
-            var bm = null;
+            var bm = null, bmYear = null;
             for (var i = 0; i < c.parts.length; i++) {
               var part2 = c.parts[i];
               if (!part2.firstAuthor) continue;
               var key = keyOf(surnameFromCitationToken(part2.firstAuthor), part2.year, false);
-              if (refIndex[key]) { bm = refIndex[key]; break; }
+              if (refIndex[key]) { bm = refIndex[key]; bmYear = part2.year; break; }
             }
-            addMatch(c.position, c.position + c.raw.length, bm, c.raw);
+            addMatch(c.position, c.position + c.raw.length, bm, c.raw, bmYear);
           }
         } else if (c.type === 'narrative') {
           // raw di sini direkonstruksi engine ("Penulis (Tahun)"), panjangnya bisa sedikit
@@ -405,10 +440,11 @@
           var bm2 = refIndex[key2] || null;
           var yearIdx = articleText.indexOf(c.year, c.position);
           var endAbs = yearIdx >= 0 ? yearIdx + c.year.length + 1 : c.position + c.raw.length;
-          addMatch(c.position, endAbs, bm2, c.raw);
+          addMatch(c.position, endAbs, bm2, c.raw, c.year);
         }
       });
     }
+
 
     var linkedList = [];
     var narrowedCount = 0, skippedNotHighlighted = 0;
@@ -426,7 +462,18 @@
 
       var ranges = highlightRangesByPara[pi] || [];
       accepted.forEach(function (m) {
-        if (!m.bookmarkName) return; // ditangani di bawah sebagai unmatched, highlight tidak relevan
+        if (!m.bookmarkName) return; // ditangani di bawah sebagai unmatched, penyempitan tidak relevan
+
+        // Mode "hanya tahun" — dipilih langsung dari website, TIDAK butuh highlight manual di
+        // Word sama sekali. Persempit dulu ke token tahun (kalau ketemu) sebelum highlight-narrowing.
+        if (linkScope === 'year' && m.yearText) {
+          var paraText = bodyParas[pi].text;
+          var yIdx = paraText.indexOf(m.yearText, m.start);
+          if (yIdx !== -1 && yIdx + m.yearText.length <= m.end) {
+            m.start = yIdx; m.end = yIdx + m.yearText.length;
+          }
+        }
+
         var overlapRanges = ranges.filter(function (r) { return r.start < m.end && r.end > m.start; });
         if (overlapRanges.length) {
           if (narrowToHighlight) {
@@ -448,7 +495,7 @@
       accepted.forEach(function (m) {
         if (m.skip) return;
         if (m.bookmarkName) {
-          var r = wrapOrRetarget(xmlDoc, bodyParas[pi].el, m.start, m.end, m.bookmarkName);
+          var r = wrapOrRetarget(xmlDoc, bodyParas[pi].el, m.start, m.end, m.bookmarkName, linkColor);
           if (r.ok) {
             linkedList.push(m.raw);
             if (r.mode === 'already') alreadyCount++;

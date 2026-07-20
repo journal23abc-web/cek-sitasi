@@ -9,6 +9,9 @@
     fileSize: document.getElementById('fileSize'),
     fileRemove: document.getElementById('fileRemove'),
     styleSelect: document.getElementById('styleSelect'),
+    linkScope: document.getElementById('linkScope'),
+    applyColor: document.getElementById('applyColor'),
+    linkColor: document.getElementById('linkColor'),
     narrowToHighlight: document.getElementById('narrowToHighlight'),
     onlyHighlighted: document.getElementById('onlyHighlighted'),
     processBtn: document.getElementById('processBtn'),
@@ -39,6 +42,10 @@
     d.textContent = s == null ? '' : String(s);
     return d.innerHTML;
   }
+
+  els.applyColor.addEventListener('change', function () {
+    els.linkColor.disabled = !els.applyColor.checked;
+  });
 
   // ---------- file selection ----------
   els.dropzone.addEventListener('click', function () { els.fileInput.click(); });
@@ -102,6 +109,8 @@
         var styleId = els.styleSelect.value;
         var result = window.CitationLinker.linkDocx(xmlDoc, {
           styleId: styleId,
+          linkScope: els.linkScope.value,
+          linkColor: els.applyColor.checked ? els.linkColor.value : null,
           narrowToHighlight: els.narrowToHighlight.checked,
           onlyHighlighted: els.onlyHighlighted.checked
         });

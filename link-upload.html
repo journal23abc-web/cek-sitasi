@@ -124,11 +124,32 @@
       <option value="vancouver">Vancouver</option>
     </select>
 
-    <div class="field-label" style="margin-top:22px;"><span class="step-num">3</span>Highlight Manual <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">3</span>Cakupan Link</div>
     <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
-      Kalau di naskah Anda sudah ada bagian sitasi yang di-<i>highlight</i> manual (warna apa saja, pakai tombol
-      Highlight bawaan Word) — misalnya cuma tahunnya saja seperti <code>Smith (<mark style="background:#fff3ac;color:#5c4b00;padding:0 3px;border-radius:2px;">2020</mark>)</code> —
-      sistem otomatis mempersempit link hanya ke bagian yang di-highlight itu, bukan seluruh sitasi.
+      Pilih bagian mana dari tiap sitasi yang ingin dibuat bisa diklik — <b>tidak perlu highlight
+      manual apa pun di Word</b>, cukup pilih di sini.
+    </p>
+    <select id="linkScope">
+      <option value="full">Seluruh sitasi — mis. (Smith, 2019) atau Smith (2019)</option>
+      <option value="year">Hanya tahunnya saja — mis. (Smith, <u>2019</u>) atau Smith (<u>2019</u>)</option>
+    </select>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">4</span>Warna Teks Sitasi <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
+    <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
+      Default: format asli tidak diubah sama sekali (cuma jadi bisa diklik). Kalau diaktifkan,
+      teks sitasi yang ditautkan diberi warna — defaultnya biru khas hyperlink, bisa diganti bebas.
+    </p>
+    <div class="checkbox-row" style="margin-top:0;">
+      <input type="checkbox" id="applyColor">
+      <label for="applyColor">Beri warna pada teks sitasi yang ditautkan</label>
+      <input type="color" id="linkColor" value="#0563C1" disabled style="margin-left:6px;width:34px;height:26px;padding:2px;border-radius:5px;border:1px solid var(--hairline);background:var(--input-bg);cursor:pointer;">
+    </div>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">5</span>Highlight Manual di Word <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional, lanjutan)</span></div>
+    <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
+      Kalau Anda sendiri sudah men-<i>highlight</i> manual sebagian teks sitasi di file Word-nya
+      (warna apa saja), sistem bisa mempersempit link ke bagian yang di-highlight itu SAJA —
+      ini terpisah dari pilihan di atas, dan cuma berlaku kalau highlight-nya memang ada di file.
     </p>
     <div class="checkbox-row" style="margin-top:0;">
       <input type="checkbox" id="narrowToHighlight" checked>
@@ -168,7 +189,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
 <script src="engine.js?v=12"></script>
-<script src="link-engine.js?v=1"></script>
-<script src="link-upload.js?v=1"></script>
+<script src="link-engine.js?v=4"></script>
+<script src="link-upload.js?v=4"></script>
 </body>
 </html>
