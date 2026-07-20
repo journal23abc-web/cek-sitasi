@@ -432,15 +432,19 @@
             addMatch(c.position, c.position + c.raw.length, bm, c.raw, bmYear);
           }
         } else if (c.type === 'narrative') {
-          // raw di sini direkonstruksi engine ("Penulis (Tahun)"), panjangnya bisa sedikit
-          // beda dari teks asli (spasi/tanda baca) -> cari ulang batas akhir match yang
-          // sesungguhnya: tahun selalu diikuti langsung oleh ',' atau ')' pada posisi itu.
+          // engine.js kadang men-strip kata sambung di depan (mis. "However, Prawida (2021)"
+          // -> authors jadi cuma "Prawida") supaya pencarian referensi tidak salah, TAPI
+          // `position`/`raw` yang dikembalikan tetap dari match ASLI termasuk kata sambungnya.
+          // Kalau dipakai apa adanya, "However," ikut kebungkus hyperlink. Cari ulang posisi
+          // awal SESUNGGUHNYA dari `authors` yang sudah bersih itu di dalam teks.
           var firstTok = c.authors.split(/\s*(?:&|,|\band\b|\bdan\b|\bet\s+al\.?)\s*/i)[0];
           var key2 = keyOf(surnameFromCitationToken(firstTok), c.year, false);
           var bm2 = refIndex[key2] || null;
-          var yearIdx = articleText.indexOf(c.year, c.position);
-          var endAbs = yearIdx >= 0 ? yearIdx + c.year.length + 1 : c.position + c.raw.length;
-          addMatch(c.position, endAbs, bm2, c.raw, c.year);
+          var authorIdx = articleText.indexOf(c.authors, c.position);
+          var realStart = authorIdx >= 0 && authorIdx <= c.position + c.raw.length ? authorIdx : c.position;
+          var yearIdx = articleText.indexOf(c.year, realStart);
+          var endAbs = yearIdx >= 0 ? yearIdx + c.year.length + 1 : realStart + c.raw.length;
+          addMatch(realStart, endAbs, bm2, c.raw, c.year);
         }
       });
     }
