@@ -111,15 +111,11 @@ test('totalWordsWholeDocument includes the reference list and table text; totalW
 
 console.log('\n=== Word / sentence counting ===');
 
-test('countWords splits on hyphen and slash like MS Word does, but not en-dash/em-dash', () => {
-  // Calibrated against a real manuscript's actual MS Word word count (verified empirically):
-  // plain "-" and "/" act as word boundaries with no surrounding whitespace, en-dash "–" and
-  // em-dash "—" do not.
-  assert.strictEqual(DS.countWords('2020-2025'), 2);       // hyphen splits
-  assert.strictEqual(DS.countWords('he/she'), 2);           // slash splits
-  assert.strictEqual(DS.countWords('2020–2025'), 1);        // en-dash does NOT split
-  assert.strictEqual(DS.countWords('results—discussion'), 1); // em-dash does NOT split
-  assert.strictEqual(DS.countWords('well-known term'), 3);  // "well-known" -> 2 + "term" -> 1
+test('countWords uses plain whitespace splitting (verified against two real manuscripts — a hyphen/slash-splitting rule was tried and disproven)', () => {
+  assert.strictEqual(DS.countWords('2020-2025'), 1);        // hyphen does NOT split
+  assert.strictEqual(DS.countWords('he/she'), 1);            // slash does NOT split
+  assert.strictEqual(DS.countWords('2020–2025'), 1);         // en-dash does NOT split
+  assert.strictEqual(DS.countWords('well-known term'), 2);   // "well-known" -> 1 + "term" -> 1
 });
 
 test('countWords ignores extra whitespace and non-breaking spaces', () => {

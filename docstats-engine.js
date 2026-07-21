@@ -15,13 +15,7 @@ var DocStatsEngine = (function () {
 
   function countWords(text) {
     var t = normalizeWhitespace(text);
-    if (!t) return 0;
-    // MS Word's own word count treats "-" and "/" as word boundaries even with no surrounding
-    // whitespace (e.g. "2020-2025" counts as 2 words, "he/she" counts as 2 words) — but NOT
-    // en-dash "–" or em-dash "—", which stay attached. This was verified empirically: splitting
-    // on space + hyphen + slash reproduced MS Word's reported total to within ~0.1% on a real
-    // manuscript, while a plain whitespace-only split undercounted by several hundred words.
-    return t.split(/[\s\-\/]+/).filter(Boolean).length;
+    return t ? t.split(' ').filter(Boolean).length : 0;
   }
 
   var ABBREV = /\b(et al|e\.g|i\.e|vs|cf|no|fig|tabel|dkk|st|dr|prof|misal)\.$/i;
