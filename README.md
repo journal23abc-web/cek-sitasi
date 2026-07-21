@@ -29,10 +29,13 @@ tautan/isinya, tanpa perlu mengubah apa pun di halaman tool lainnya.
 
 ```
 node tests/engine.test.js
+node tests/docstats-engine.test.js
 ```
 
-Tidak perlu `npm install` — `engine.js` murni JavaScript tanpa dependency, tes memakai
-modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal (aman dipakai di CI).
+Tidak perlu `npm install` — `engine.js` dan `docstats-engine.js` murni JavaScript tanpa
+dependency, tes memakai modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal
+(aman dipakai di CI). (Sebelumnya `engine.test.js` sempat salah tempat di root proyek
+padahal require path & instruksinya mengasumsikan `tests/` — sudah diperbaiki.)
 
 ## Gaya sitasi yang didukung
 
@@ -52,11 +55,9 @@ Auto-detect gaya tersedia, tapi untuk dokumen ambigu selalu ada opsi pilih manua
 - Jenis sumber (buku/artikel/skripsi/dll) — supaya buku tidak dituntut punya DOI
 - Format italic & sentence-case/title-case pada judul (khusus upload .docx, dibaca
   langsung dari XML asli file, bukan dari copy-paste)
-- **Analitik referensi** (murni hitungan objektif, bukan skor kualitas): jumlah
-  sumber unik, distribusi tahun (grafik SVG), median usia referensi, persentase
-  jenis sumber (jurnal/buku/website), persentase DOI, referensi paling
-  sering/tidak pernah disitasi, kepadatan sitasi (per 1000 kata & per paragraf),
-  penulis dan jurnal paling dominan
+- **Peta Sitasi ↔ Referensi**: tampilan dua kolom (sitasi vs referensi) dengan status
+  cocok/tidak cocok; entri yang cocok bisa **diklik untuk lompat & disorot** ke
+  pasangannya di kolom sebelah
 
 ## Keterbatasan yang jujur perlu diketahui
 
@@ -77,13 +78,14 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
 - **Auto-detect gaya sitasi** memakai skor berbasis pola (tanda kutip, "pp.", dst.) —
   untuk dokumen yang formatnya sangat tidak konsisten, hasil deteksi bisa meleset;
   selalu tersedia opsi pilih gaya manual di dropdown.
-- **Analitik referensi** sengaja tidak menghasilkan satu "skor kualitas" gabungan —
-  itu akan terlihat ilmiah padahal tidak berdasar. Yang ditampilkan cuma hitungan
-  objektif (jumlah, persentase, median); menilai apakah angkanya "bagus" tergantung
-  bidang ilmu dan aturan jurnal/institusi masing-masing, di luar cakupan alat ini.
 - **Preliminary Check** mendeteksi judul/abstrak/struktur IMRAD berdasarkan pola heading
   umum (kata "Abstract"/"Introduction", penomoran bab, dst.) — naskah dengan format
-  heading tidak lazim mungkin terlewat dan perlu dicek manual. Ambang batas di checklist
+  heading tidak lazim mungkin terlewat dan perlu dicek manual. Untuk heading generik yang
+  rawan salah-tangkap (Introduction/Method/Results/Discussion/Conclusion), sistem hanya
+  menerimanya kalau ada nomor bab ("3. Results") atau ditulis ALL CAPS ("RESULTS") — teks
+  pendek yang kebetulan diawali kata itu (mis. judul kolom tabel) tidak ikut terhitung.
+  Teks di dalam tabel juga dikeluarkan dari hitungan kata/kalimat naskah & deteksi heading
+  sejak awal, supaya tidak tercampur dengan alur teks utama. Ambang batas di checklist
   (jumlah kata abstrak, jumlah referensi minimum, dst.) adalah **acuan umum yang sering
   dipakai**, bukan aturan baku semua jurnal terindeks Scopus — selalu rujuk panduan
   penulis (author guidelines) jurnal tujuan.
