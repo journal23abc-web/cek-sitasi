@@ -107,10 +107,17 @@ function extractAuthorDateCitations(text) {
   var citations = [];
   var parenRegex = /\(([^()]+?)\)/g;
   var m;
+  var editorialMetaRegex = /^(received|revised|accepted|submitted|published|available\s+online|in\s+press|first\s+published)\s*:/i;
   while ((m = parenRegex.exec(text)) !== null) {
     var content = m[1].trim();
     if (!/\b\d{4}[a-z]?\b/.test(content) && !/\bn\.d\./i.test(content)) continue;
     if (/^[\d\s,.\-–:;]+$/.test(content)) continue;
+    // Journal manuscripts commonly carry a "(Received: ...; Revised: ...; Accepted: ...)"
+    // line near the title/abstract. Every ";"-segment there matches "Word: Date", which
+    // parseSingleAuthorDate would otherwise happily parse as an author ("Received: July 03").
+    // If ALL segments look like this editorial metadata, it's not a citation at all.
+    var segments = content.split(';').map(function(s) { return s.trim(); });
+    if (segments.length > 0 && segments.every(function(s) { return editorialMetaRegex.test(s); })) continue;
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }

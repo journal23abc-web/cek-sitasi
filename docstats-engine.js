@@ -61,6 +61,24 @@ var DocStatsEngine = (function () {
   var STANDALONE_KEYS = ['introduction', 'method', 'results_discussion', 'results', 'discussion', 'conclusion', 'acknowledgment', 'references'];
   var MAX_HEADING_WORDS = 10; // generous — covers padded headings like "HASIL PENELITIAN DAN PEMBAHASAN UMUM"
 
+  // These single common-word keys are the ones most likely to false-match ordinary prose or
+  // short table/column text that merely happens to start with the word — e.g. a results table
+  // with a "Result Hypothesis" column header, or a sentence like "Result of this test...".
+  // Real IMRAD headings in the manuscripts this tool sees are consistently either numbered
+  // ("3. Results", "3.5 Discussion") or fully capitalized ("RESULTS"); plain Title-Case text
+  // with neither signal is far more likely to be incidental body/table text, so we require one
+  // of those two signals before accepting a match for these particular keys.
+  var GENERIC_RISK_KEYS = ['introduction', 'method', 'results', 'discussion', 'conclusion'];
+  // Roman numerals must be UPPERCASE and stand alone (followed by ".", ")", ":" or whitespace) —
+  // otherwise "I" in "Introduction", "M" in "Method", "C" in "Conclusion", "D" in "Discussion"
+  // would each look like a valid roman-numeral prefix of the word itself.
+  var NUMBERED_PREFIX_RE = /^(?:(?:bab|section|chapter)\s*)?(?:\d+(?:\.\d+)*|[IVXLCDM]+(?=[.:)\s]))[.:)]?\s*/;
+
+  function looksLikeRealHeadingSignal(t) {
+    if (NUMBERED_PREFIX_RE.test(t)) return true;
+    return t === t.toUpperCase() && /[A-Z]/.test(t); // ALL CAPS (and contains at least one letter)
+  }
+
   function matchSection(line) {
     var t = normalizeWhitespace(line);
     if (!t) return null;
@@ -68,7 +86,9 @@ var DocStatsEngine = (function () {
       var sp = SECTION_PATTERNS[i];
       if (!sp.re) continue;
       var m = t.match(sp.re);
-      if (m) return { key: sp.key, label: sp.label, matchLength: m[0].length, fullLine: t };
+      if (!m) continue;
+      if (GENERIC_RISK_KEYS.indexOf(sp.key) !== -1 && !looksLikeRealHeadingSignal(t)) continue;
+      return { key: sp.key, label: sp.label, matchLength: m[0].length, fullLine: t };
     }
     return null;
   }

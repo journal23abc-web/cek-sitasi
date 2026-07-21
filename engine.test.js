@@ -55,6 +55,14 @@ test('narrative citation with leading discourse word still matches', () => {
   assert.strictEqual(r.errors.length, 0);
 });
 
+test('journal Received/Revised/Accepted metadata is not parsed as a citation', () => {
+  const r = validate(
+    'Judul Naskah\n\n(Received: July 03, 2023; Revised: October 21, 2023; Accepted: October 30, 2023)\n\n' +
+    'Menurut penelitian (Smith, 2020), hal ini benar.',
+    'Smith, J. (2020). Some title. Journal A, 1(1), 1-10.');
+  assert.strictEqual(r.errors.length, 0);
+});
+
 test('n.d. (no date) citation matches', () => {
   const r = validate('Sebuah sumber online (Author, n.d.) menyatakan hal ini.',
     'Author, A. (n.d.). Title of webpage. Website Name.');

@@ -25,7 +25,6 @@
     doiFill: document.getElementById('doiFill'),
     results: document.getElementById('results'),
     parseStatusBanner: document.getElementById('parseStatusBanner'),
-    analyticsBody: document.getElementById('analyticsBody'),
     sortByPosition: document.getElementById('sortByPosition'),
     summaryGrid: document.getElementById('summaryGrid'),
     yearRangePanel: document.getElementById('yearRangePanel'),
@@ -214,7 +213,6 @@
   function renderAll(result, doiIssues) {
     renderParseStatus(result);
     renderSummary(result, doiIssues);
-    renderAnalytics(result);
     renderYearRange(result);
     renderCitationMap(result);
     renderDetected(result);
@@ -461,97 +459,6 @@
     if (lastResult) renderYearRange(lastResult);
   });
 
-  function renderYearChartSVG(dist, unknownCount) {
-    if (dist.length === 0) return '<div class="an-empty">Tidak ada tahun yang terbaca untuk digambarkan.</div>';
-    var w = 600, h = 160, padL = 30, padB = 24, padT = 10;
-    var maxCount = Math.max.apply(null, dist.map(function(d) { return d.count; }));
-    var minYear = dist[0].year, maxYear = dist[dist.length - 1].year;
-    var yearSpan = Math.max(1, maxYear - minYear);
-    var chartW = w - padL - 10, chartH = h - padT - padB;
-    var barW = Math.max(4, Math.min(28, chartW / (yearSpan + 1) - 4));
-    var svg = '<svg class="an-yearchart" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Distribusi tahun referensi">';
-    // gridline + max label
-    svg += '<line x1="' + padL + '" y1="' + padT + '" x2="' + w + '" y2="' + padT + '" stroke="var(--hairline)" stroke-width="1"/>';
-    svg += '<text x="' + (padL - 6) + '" y="' + (padT + 4) + '" font-size="9" text-anchor="end">' + maxCount + '</text>';
-    svg += '<line x1="' + padL + '" y1="' + (h - padB) + '" x2="' + w + '" y2="' + (h - padB) + '" stroke="var(--hairline)" stroke-width="1"/>';
-    dist.forEach(function(d) {
-      var x = padL + ((d.year - minYear) / (yearSpan || 1)) * (chartW - barW);
-      var barH = maxCount ? (d.count / maxCount) * chartH : 0;
-      var y = h - padB - barH;
-      svg += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barW.toFixed(1) + '" height="' + barH.toFixed(1) + '" rx="2"><title>' + d.year + ': ' + d.count + ' referensi</title></rect>';
-      if (yearSpan <= 20 || d.year === minYear || d.year === maxYear) {
-        svg += '<text x="' + (x + barW / 2).toFixed(1) + '" y="' + (h - padB + 12) + '" font-size="9" text-anchor="middle">' + d.year + '</text>';
-      }
-    });
-    svg += '</svg>';
-    if (unknownCount > 0) svg += '<div class="an-note">+ ' + unknownCount + ' referensi tanpa tahun terbaca (tidak ikut digambarkan).</div>';
-    return svg;
-  }
-
-  function renderAnalytics(result) {
-    var a = result.analytics;
-    if (!a || a.totalReferences === 0) {
-      els.analyticsBody.innerHTML = '<div class="an-empty">Belum ada referensi untuk dianalisis.</div>';
-      return;
-    }
-    var html = '';
-
-    // Top stat cards
-    html += '<div class="an-grid">';
-    html += '<div class="an-stat"><div class="v">' + a.totalReferences + '</div><div class="l">Total Referensi</div></div>';
-    html += '<div class="an-stat"><div class="v">' + a.uniqueSources + '</div><div class="l">Sumber Unik</div></div>';
-    html += '<div class="an-stat"><div class="v">' + (a.medianAge != null ? a.medianAge + '<small> thn</small>' : '—') + '</div><div class="l">Median Usia Referensi</div></div>';
-    html += '<div class="an-stat"><div class="v">' + a.doiPercentage + '<small>%</small></div><div class="l">Punya DOI</div></div>';
-    html += '<div class="an-stat"><div class="v">' + a.citationsPerThousandWords + '</div><div class="l">Sitasi / 1000 Kata</div></div>';
-    html += '<div class="an-stat"><div class="v">' + a.citationsPerParagraph + '</div><div class="l">Sitasi / Paragraf</div></div>';
-    html += '</div>';
-
-    // Year distribution
-    html += '<div class="an-section"><div class="an-section-title">Distribusi Tahun Referensi</div>' + renderYearChartSVG(a.yearDistribution, a.unknownYearCount) + '</div>';
-
-    // Source type breakdown
-    html += '<div class="an-section"><div class="an-section-title">Jenis Sumber</div>';
-    a.sourceTypeBreakdown.forEach(function(t) {
-      html += '<div class="an-bar-row"><span class="an-bar-label">' + esc(t.label) + '</span><div class="an-bar-track"><div class="an-bar-fill" style="width:' + t.pct + '%"></div></div><span class="an-bar-count">' + t.count + ' (' + t.pct + '%)</span></div>';
-    });
-    if (a.doiPercentageOfJournals != null) html += '<div class="an-note">Dari artikel jurnal saja: ' + a.doiPercentageOfJournals + '% punya DOI.</div>';
-    html += '</div>';
-
-    // Most cited / never cited
-    html += '<div class="an-section"><div class="an-section-title">Referensi Paling Sering Disitasi</div><div class="an-list">';
-    if (a.mostCited.length === 0) html += '<div class="an-empty">Belum ada sitasi yang cocok ke referensi.</div>';
-    a.mostCited.forEach(function(m) {
-      html += '<div class="an-list-item"><span class="name">' + esc(m.ref.firstAuthor || '-') + (m.ref.year ? ' (' + esc(m.ref.year) + ')' : '') + '</span><span class="badge">' + m.count + 'x disitasi</span></div>';
-    });
-    html += '</div></div>';
-
-    html += '<div class="an-section"><div class="an-section-title">Referensi Tidak Pernah Disitasi (' + a.neverCited.length + ')</div><div class="an-list">';
-    if (a.neverCited.length === 0) {
-      html += '<div class="an-empty">✅ Semua referensi disitasi di teks.</div>';
-    } else {
-      a.neverCited.slice(0, 8).forEach(function(r) {
-        html += '<div class="an-list-item"><span class="name">' + esc(r.firstAuthor || '-') + (r.year ? ' (' + esc(r.year) + ')' : '') + '</span></div>';
-      });
-      if (a.neverCited.length > 8) html += '<div class="an-note">+ ' + (a.neverCited.length - 8) + ' lainnya — lihat tab "Perlu Diperbaiki" untuk daftar lengkap.</div>';
-    }
-    html += '</div></div>';
-
-    // Dominant authors / journals
-    html += '<div class="an-section"><div class="an-section-title">Penulis Paling Dominan (2+ referensi)</div><div class="an-list">';
-    if (a.dominantAuthors.length === 0) html += '<div class="an-empty">Tidak ada penulis yang muncul lebih dari sekali.</div>';
-    a.dominantAuthors.forEach(function(d) { html += '<div class="an-list-item"><span class="name">' + esc(d.label) + '</span><span class="badge">' + d.count + ' referensi</span></div>'; });
-    html += '</div></div>';
-
-    html += '<div class="an-section"><div class="an-section-title">Jurnal Paling Dominan (2+ referensi)</div><div class="an-list">';
-    if (a.dominantJournals.length === 0) html += '<div class="an-empty">Tidak ada nama jurnal yang muncul lebih dari sekali (atau tidak terbaca otomatis).</div>';
-    a.dominantJournals.forEach(function(d) { html += '<div class="an-list-item"><span class="name">' + esc(d.label) + '</span><span class="badge">' + d.count + ' referensi</span></div>'; });
-    html += '</div></div>';
-
-    html += '<div class="an-note">📌 Angka-angka di atas adalah hitungan objektif (jumlah, persentase, median) — bukan skor atau vonis kualitas. Yang dianggap "wajar" berbeda-beda tergantung bidang ilmu dan ketentuan jurnal/institusi Anda.</div>';
-
-    els.analyticsBody.innerHTML = html;
-  }
-
   function renderYearRange(result) {
     if (!result.references || result.references.length === 0) {
       els.yearRangePanel.style.display = 'none';
@@ -611,6 +518,10 @@
 
   function esc(t) { return CE.esc(t); }
 
+  function mapLinkKey(author, year) {
+    return String(author || '').toLowerCase().replace(/[^a-z0-9]+/g, '') + '|' + String(year || '');
+  }
+
   function renderCitationMap(result) {
     var style = STYLES[result.styleId];
     var panel = els.citationMapPanel;
@@ -620,12 +531,13 @@
       var citedNums = new Set();
       result.citations.forEach(function(c){ c.numbers.forEach(function(n){citedNums.add(n);}); });
       var citeItems = Array.from(citedNums).sort(function(a,b){return a-b;}).map(function(n){
-        return { label: '[' + n + ']', matched: !!refByNum[n] };
+        return { label: '[' + n + ']', matched: !!refByNum[n], linkKey: 'num|' + n };
       });
       var refItems = result.references.map(function(r){
-        return { label: '[' + r.numLabel + '] ' + (r.firstAuthor||'-') + (r.year?' ('+r.year+')':''), matched: citedNums.has(r.numLabel) };
+        return { label: '[' + r.numLabel + '] ' + (r.firstAuthor||'-') + (r.year?' ('+r.year+')':''), matched: citedNums.has(r.numLabel), linkKey: 'num|' + r.numLabel };
       });
       panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
+      wireMapLinks(panel);
       return;
     }
 
@@ -639,7 +551,7 @@
           if (seenCiteLabels.has(label)) return;
           seenCiteLabels.add(label);
           var matched = lastValidator ? lastValidator.isCitationMatched(p.firstAuthor, p.year || null) : null;
-          citeItems.push({ label: label, matched: matched !== false });
+          citeItems.push({ label: label, matched: matched !== false, linkKey: mapLinkKey(p.firstAuthor, p.year) });
         });
       } else {
         var label2 = (c.authors||'-') + (c.year ? ', ' + c.year : '');
@@ -647,14 +559,41 @@
         seenCiteLabels.add(label2);
         var firstTok = splitFirstToken(c.authors);
         var matched2 = lastValidator ? lastValidator.isCitationMatched(firstTok, c.year || null) : null;
-        citeItems.push({ label: label2, matched: matched2 !== false });
+        citeItems.push({ label: label2, matched: matched2 !== false, linkKey: mapLinkKey(firstTok, c.year) });
       }
     });
     var refItems = result.references.map(function(r){
       var cited = lastValidator ? lastValidator.isReferenceCited(r) : null;
-      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: cited !== false };
+      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: cited !== false, linkKey: mapLinkKey(r.firstAuthor, r.year) };
     });
     panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
+    wireMapLinks(panel);
+  }
+
+  // Clicking a matched citation jumps to & flashes its matched reference (and vice versa).
+  // Only "matched" items get a clickable counterpart — unmatched ones have nothing to jump to.
+  function wireMapLinks(panel) {
+    panel.querySelectorAll('.map-item.matched[data-link-key]').forEach(function(el) {
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('role', 'button');
+      el.setAttribute('title', 'Klik untuk lompat ke pasangannya');
+      el.addEventListener('click', function() { jumpToMapPair(panel, el); });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jumpToMapPair(panel, el); }
+      });
+    });
+  }
+
+  function jumpToMapPair(panel, sourceEl) {
+    var key = sourceEl.getAttribute('data-link-key');
+    var side = sourceEl.getAttribute('data-side');
+    var targets = panel.querySelectorAll('.map-item[data-link-key="' + CSS.escape(key) + '"][data-side="' + (side === 'cite' ? 'ref' : 'cite') + '"]');
+    if (!targets.length) return;
+    var target = targets[0];
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('flash'); void target.offsetWidth; // restart animation if clicked repeatedly
+    target.classList.add('flash');
+    target.focus({ preventScroll: true });
   }
 
   function splitFirstToken(authorsStr) {
@@ -670,14 +609,20 @@
       items.forEach(function(i){ seen.set(i.label, i); });
       return Array.from(seen.values());
     }
+    function itemHTML(i, side) {
+      var keyAttr = i.matched ? ' data-link-key="' + esc(i.linkKey) + '" data-side="' + side + '"' : '';
+      return '<div class="map-item ' + (i.matched?'matched':'unmatched') + '"' + keyAttr + '><span class="d"></span>' + esc(i.label) + '</div>';
+    }
     var a = uniq(itemsA), b = uniq(itemsB);
-    return '<h3 style="font-family:\'Space Grotesk\',sans-serif;font-size:15px;margin:0 0 14px;">📊 Peta Sitasi ↔ Referensi</h3><div class="map-grid">' +
+    return '<h3 style="font-family:\'Space Grotesk\',sans-serif;font-size:15px;margin:0 0 14px;">📊 Peta Sitasi ↔ Referensi</h3>' +
+      '<p style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin:-6px 0 14px;">💡 Klik entri berwarna hijau untuk lompat ke pasangannya.</p>' +
+      '<div class="map-grid">' +
       '<div class="map-col"><h4>' + labelA + ' (' + a.length + ')</h4>' +
       (a.length===0?'<p style="color:var(--text-dim);font-size:12px;">Tidak ada sitasi terdeteksi</p>':'') +
-      a.map(function(i){return '<div class="map-item '+(i.matched?'matched':'unmatched')+'"><span class="d"></span>'+esc(i.label)+'</div>';}).join('') +
+      a.map(function(i){return itemHTML(i, 'cite');}).join('') +
       '</div><div class="map-col"><h4>' + labelB + ' (' + b.length + ')</h4>' +
       (b.length===0?'<p style="color:var(--text-dim);font-size:12px;">Tidak ada referensi</p>':'') +
-      b.map(function(i){return '<div class="map-item '+(i.matched?'matched':'unmatched')+'"><span class="d"></span>'+esc(i.label)+'</div>';}).join('') +
+      b.map(function(i){return itemHTML(i, 'ref');}).join('') +
       '</div></div>';
   }
 
