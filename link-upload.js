@@ -12,6 +12,8 @@
     fileSize: document.getElementById('fileSize'),
     fileRemove: document.getElementById('fileRemove'),
     styleSelect: document.getElementById('styleSelect'),
+    enableColor: document.getElementById('enableColor'),
+    linkColor: document.getElementById('linkColor'),
     processBtn: document.getElementById('processBtn'),
     statusMsg: document.getElementById('statusMsg'),
     results: document.getElementById('results'),
@@ -104,7 +106,25 @@
     return { text: text, segments: segments };
   }
 
-  function makeRun(xmlDoc, templateRunEl, textValue) {
+  function applyColorToRun(xmlDoc, runEl, colorHex) {
+    if (!colorHex) return;
+    var rPrList = runEl.getElementsByTagName('w:rPr');
+    var rPr;
+    if (rPrList.length > 0) { rPr = rPrList[0]; }
+    else { rPr = xmlDoc.createElementNS(W_NS, 'w:rPr'); runEl.insertBefore(rPr, runEl.firstChild); }
+    var existingColor = rPr.getElementsByTagName('w:color');
+    for (var c = existingColor.length - 1; c >= 0; c--) existingColor[c].parentNode.removeChild(existingColor[c]);
+    var colorEl = xmlDoc.createElementNS(W_NS, 'w:color');
+    colorEl.setAttributeNS(W_NS, 'w:val', colorHex.replace('#', '').toUpperCase());
+    rPr.appendChild(colorEl);
+    var existingU = rPr.getElementsByTagName('w:u');
+    for (var u = existingU.length - 1; u >= 0; u--) existingU[u].parentNode.removeChild(existingU[u]);
+    var uEl = xmlDoc.createElementNS(W_NS, 'w:u');
+    uEl.setAttributeNS(W_NS, 'w:val', 'single');
+    rPr.appendChild(uEl);
+  }
+
+  function makeRun(xmlDoc, templateRunEl, textValue, colorHex) {
     if (!textValue) return null;
     var newRun = templateRunEl.cloneNode(true);
     var tNodes = newRun.getElementsByTagName('w:t');
@@ -117,41 +137,102 @@
     }
     tNode.textContent = textValue;
     tNode.setAttributeNS(XML_NS, 'xml:space', 'preserve');
+    applyColorToRun(xmlDoc, newRun, colorHex);
     return newRun;
   }
 
   // Wraps the run(s) touched by [start,end) in a <w:hyperlink w:anchor="bookmarkName"> element,
   // splitting the boundary runs so every OTHER run/formatting stays byte-for-byte untouched —
-  // same split-and-clone technique upload.js uses for highlighting, but wrapping in a hyperlink
-  // element instead of recoloring, so the visible text/formatting never changes.
-  function wrapRangeInHyperlink(xmlDoc, index, start, end, bookmarkName) {
-    var touched = index.segments.filter(function(seg) { return seg.start < end && seg.end > start; });
-    if (touched.length === 0) return false;
-    var hyperlinkRuns = [];
-    var containerParagraph = null;
+  // same split-and-clone technique upload.js uses for highlighting. If colorHex is given, the
+  // wrapped runs are recolored + underlined like a standard Word hyperlink; leave it null/empty
+  // to keep the citation's original appearance completely untouched.
+  function isInsideExistingHyperlink(node) {
+    var n = node;
+    while (n) {
+      if (n.nodeName === 'w:hyperlink') return n;
+      if (n.nodeName === 'w:p') return null;
+      n = n.parentNode;
+    }
+    return null;
+  }
+
+  // Documents produced with a reference-manager Word plugin (Mendeley, Zotero, EndNote) very
+  // commonly already wrap EVERY in-text citation in its own <w:hyperlink> — sometimes already
+  // pointing at a matching bookmark, sometimes pointing nowhere useful. Rather than creating an
+  // invalid NESTED <w:hyperlink> (not legal OOXML) or silently giving up on a citation that's
+  // already 90% of the way there, retarget the existing wrapper's anchor to our resolved
+  // bookmark instead of building a new one.
+  function retargetExistingHyperlink(hyperlinkEl, bookmarkName) {
+    hyperlinkEl.removeAttributeNS(W_NS, 'anchor');
+    hyperlinkEl.removeAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+    hyperlinkEl.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
+    hyperlinkEl.setAttributeNS(W_NS, 'w:history', '1');
+  }
+
+  // Splits every touched run into before/mid/after pieces in place (mid gets colorHex applied),
+  // leaving each piece as a child of whatever the original run's parent was — a paragraph, an
+  // existing hyperlink, doesn't matter to this function. Returns the list of "mid" runs so the
+  // caller can either wrap them in a brand-new <w:hyperlink> or leave them where they are (already
+  // inside an existing one). Requires every touched run to share one common parent; returns null
+  // otherwise since splitting across an unknown structural boundary isn't safe.
+  function splitTouchedRuns(xmlDoc, touched, start, end, colorHex) {
+    var parents = touched.map(function(seg) { return seg.node.parentNode; });
+    if (parents.some(function(p) { return !p || !p.parentNode; })) return null;
+    var commonGrandparent = parents[0].parentNode;
+    if (!parents.every(function(p) { return p.parentNode === commonGrandparent; })) return null;
+
+    var midRuns = [];
     touched.forEach(function(seg) {
       var runEl = seg.node.parentNode;
-      if (!runEl || !runEl.parentNode) return;
       var fullText = seg.node.textContent;
       var s = Math.max(start, seg.start) - seg.start;
       var e = Math.min(end, seg.end) - seg.start;
       var before = fullText.slice(0, s), mid = fullText.slice(s, e), after = fullText.slice(e);
-      var beforeRun = makeRun(xmlDoc, runEl, before);
-      var midRun = makeRun(xmlDoc, runEl, mid);
-      var afterRun = makeRun(xmlDoc, runEl, after);
+      var beforeRun = makeRun(xmlDoc, runEl, before, null);
+      var midRun = makeRun(xmlDoc, runEl, mid, colorHex);
+      var afterRun = makeRun(xmlDoc, runEl, after, null);
       var parent = runEl.parentNode;
       if (beforeRun) parent.insertBefore(beforeRun, runEl);
-      if (midRun) { parent.insertBefore(midRun, runEl); hyperlinkRuns.push(midRun); containerParagraph = parent; }
+      if (midRun) { parent.insertBefore(midRun, runEl); midRuns.push(midRun); }
       if (afterRun) parent.insertBefore(afterRun, runEl);
       parent.removeChild(runEl);
     });
-    if (hyperlinkRuns.length === 0 || !containerParagraph) return false;
+    return midRuns;
+  }
+
+  function wrapRangeInHyperlink(xmlDoc, index, start, end, bookmarkName, colorHex) {
+    var touched = index.segments.filter(function(seg) { return seg.start < end && seg.end > start; });
+    if (touched.length === 0) return false;
+
+    // Case A: exactly one DISTINCT existing <w:hyperlink> is touched (surrounding plain
+    // punctuation like the "(" ")" around a citation is common and fine to leave alone) —
+    // retarget that hyperlink instead of nesting a new one inside it.
+    var enclosingHyperlinks = touched.map(function(seg) {
+      var runEl = seg.node.parentNode;
+      return runEl ? isInsideExistingHyperlink(runEl) : null;
+    });
+    var distinctHyperlinks = [];
+    enclosingHyperlinks.forEach(function(h) { if (h && distinctHyperlinks.indexOf(h) === -1) distinctHyperlinks.push(h); });
+    if (distinctHyperlinks.length > 1) return false; // genuinely ambiguous — skip rather than guess
+    if (distinctHyperlinks.length === 1) {
+      // Only split/color the segments that actually belong to that one hyperlink — segments
+      // with no enclosing hyperlink (bare punctuation) are left completely untouched.
+      var inHyperlinkSegs = touched.filter(function(seg, i) { return enclosingHyperlinks[i] === distinctHyperlinks[0]; });
+      if (inHyperlinkSegs.length > 0) splitTouchedRuns(xmlDoc, inHyperlinkSegs, start, end, colorHex);
+      retargetExistingHyperlink(distinctHyperlinks[0], bookmarkName);
+      return true;
+    }
+
+    // Case B: no existing hyperlink involved at all — split, then wrap in a brand new one.
+    var midRuns = splitTouchedRuns(xmlDoc, touched, start, end, colorHex);
+    if (!midRuns || midRuns.length === 0) return false;
+    var containerParagraph = midRuns[0].parentNode;
     var hyperlinkEl = xmlDoc.createElementNS(W_NS, 'w:hyperlink');
     hyperlinkEl.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
     hyperlinkEl.setAttributeNS(W_NS, 'w:history', '1');
-    var firstRun = hyperlinkRuns[0];
+    var firstRun = midRuns[0];
     containerParagraph.insertBefore(hyperlinkEl, firstRun);
-    hyperlinkRuns.forEach(function(r) { hyperlinkEl.appendChild(r); });
+    midRuns.forEach(function(r) { hyperlinkEl.appendChild(r); });
     return true;
   }
 
@@ -187,8 +268,30 @@
     return arr[0] || cleaned;
   }
 
+  // Narrows a citation's [start,end) span down to just the year token inside it, e.g.
+  // "Smith (2020)" -> just "2020". Works uniformly for narrative AND parenthetical citations
+  // since both always carry the year as a literal 4-digit run somewhere inside `raw` — no need
+  // to special-case each citation type's internal structure.
+  // Narrows a grouped multi-citation span like "(Ghazalat et al., 2023; Le, 2025)" down to just
+  // the FIRST author-year segment's own text — needed because each individual citation inside a
+  // semicolon-grouped parenthetical is commonly wrapped in its OWN separate existing hyperlink
+  // (one per reference-manager field), so trying to wrap/retarget the WHOLE group at once touches
+  // multiple distinct hyperlinks and has to be rejected as ambiguous.
+  function narrowToFirstPart(citeStart, raw, firstPartRaw) {
+    if (!firstPartRaw) return null;
+    var idx = raw.indexOf(firstPartRaw);
+    if (idx === -1) return null;
+    return { start: citeStart + idx, end: citeStart + idx + firstPartRaw.length };
+  }
+
+  function narrowToYear(start, raw) {
+    var m = raw.match(/\d{4}[a-z]?/);
+    if (!m) return null;
+    return { start: start + m.index, end: start + m.index + m[0].length };
+  }
+
   // ---------- Core: build the citation<->reference link plan, then write it into the XML ----------
-  function buildLinkedDocx(file, styleId) {
+  function buildLinkedDocx(file, styleId, colorHex, scope) {
     return file.arrayBuffer()
       .then(function(buf) { return JSZip.loadAsync(buf); })
       .then(function(zip) {
@@ -254,8 +357,13 @@
           //    {citeStart, citeEnd, refPosition} link job. Collected first, applied after (in
           //    reverse document order) so earlier edits never shift the offsets of later ones.
           var jobs = [];
-          function addJob(citeStart, citeEnd, refPos) {
+          function addJob(citeStart, citeEnd, refPos, raw) {
             if (!refPos) return;
+            if (scope === 'year') {
+              var yearSpan = narrowToYear(citeStart, raw);
+              if (!yearSpan) return; // no locatable year token — skip rather than fall back to linking the whole citation
+              citeStart = yearSpan.start; citeEnd = yearSpan.end;
+            }
             jobs.push({ citeStart: citeStart, citeEnd: citeEnd, refPos: refPos });
           }
 
@@ -266,22 +374,32 @@
               // A single "[3, 5, 7]" style citation can reference multiple numbers — link the
               // WHOLE bracketed citation to the first number's reference (linking each individual
               // number separately would require splitting inside the brackets, which risks
-              // corrupting the visible punctuation for a rarely-needed edge case).
+              // corrupting the visible punctuation for a rarely-needed edge case). Numeric styles
+              // have no "year" to narrow to, so the scope option has no effect on this family.
               var firstNum = c.numbers && c.numbers[0];
-              if (firstNum != null && refByNum[firstNum]) addJob(start, end, refByNum[firstNum]);
+              if (firstNum != null && refByNum[firstNum]) jobs.push({ citeStart: start, citeEnd: end, refPos: refByNum[firstNum] });
             });
           } else {
             result.citations.forEach(function(c) {
               var raw = c.raw || '';
               var start = c.position, end = c.position + raw.length;
               if (c.parts) {
-                // Parenthetical, possibly multiple "; "-separated authors — link the whole
-                // parenthetical to the FIRST author's reference (same reasoning as numeric above).
+                // Parenthetical, possibly multiple "; "-separated authors — resolve to the
+                // FIRST author's reference. If there's more than one grouped citation, narrow
+                // the span down to just that first citation's own text (see narrowToFirstPart)
+                // rather than the whole bracketed group, since each grouped citation commonly
+                // has its own separate existing hyperlink.
                 var first = c.parts[0];
-                if (first) addJob(start, end, refByKey[linkKey(first.firstAuthor, first.year)]);
+                if (!first) { return; }
+                var citeSpanStart = start, citeSpanEnd = end;
+                if (c.parts.length > 1) {
+                  var narrowed = narrowToFirstPart(start, raw, first.raw);
+                  if (narrowed) { citeSpanStart = narrowed.start; citeSpanEnd = narrowed.end; }
+                }
+                addJob(citeSpanStart, citeSpanEnd, refByKey[linkKey(first.firstAuthor, first.year)], raw.slice(citeSpanStart - start, citeSpanEnd - start));
               } else {
                 var firstTok = splitFirstToken(c.authors);
-                addJob(start, end, refByKey[linkKey(firstTok, c.year)]);
+                addJob(start, end, refByKey[linkKey(firstTok, c.year)], raw);
               }
             });
           }
@@ -311,7 +429,7 @@
               bookmarkNameByRefStart[refStart] = bookmarkName;
               nextBookmarkId++;
             }
-            var wrapped = wrapRangeInHyperlink(xmlDoc, index, job.citeStart, job.citeEnd, bookmarkName);
+            var wrapped = wrapRangeInHyperlink(xmlDoc, index, job.citeStart, job.citeEnd, bookmarkName, colorHex);
             if (wrapped) linkedCount++;
           });
 
@@ -339,13 +457,20 @@
       });
   }
 
+  els.enableColor.addEventListener('change', function() {
+    els.linkColor.disabled = !els.enableColor.checked;
+  });
+
   els.processBtn.addEventListener('click', function() {
     if (!state.file) return;
     els.processBtn.disabled = true;
     setStatus('⏳ Membaca struktur .docx dan menautkan sitasi...', 'info');
     els.results.classList.remove('active');
 
-    buildLinkedDocx(state.file, els.styleSelect.value)
+    var colorHex = els.enableColor.checked ? els.linkColor.value : null;
+    var scopeEl = document.querySelector('input[name="linkScope"]:checked');
+    var scope = scopeEl ? scopeEl.value : 'full';
+    buildLinkedDocx(state.file, els.styleSelect.value, colorHex, scope)
       .then(function(stats) {
         state.lastLinkedBlob = stats.blob;
         state.lastStats = stats;

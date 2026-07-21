@@ -107,6 +107,28 @@
       <option value="vancouver">Vancouver</option>
     </select>
 
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">3</span>Warna Tautan</div>
+    <div class="row">
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--text-dim);">
+        <input type="checkbox" id="enableColor" checked style="accent-color:var(--cyan);width:15px;height:15px;">
+        Warnai sitasi yang tertaut
+      </label>
+      <input type="color" id="linkColor" value="#0000FF" style="width:44px;height:32px;padding:2px;border:1px solid var(--hairline);border-radius:6px;background:var(--input-bg);cursor:pointer;">
+      <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint);">Default: biru murni (gaya hyperlink standar Word)</span>
+    </div>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">4</span>Cakupan Tautan</div>
+    <div class="row">
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--text-dim);cursor:pointer;">
+        <input type="radio" name="linkScope" value="full" id="scopeFull" checked style="accent-color:var(--cyan);width:15px;height:15px;">
+        Seluruh sitasi <span style="color:var(--text-faint);">— mis. "(Smith, 2020)"</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--text-dim);cursor:pointer;">
+        <input type="radio" name="linkScope" value="year" id="scopeYear" style="accent-color:var(--cyan);width:15px;height:15px;">
+        Hanya tahun <span style="color:var(--text-faint);">— mis. "(Smith, <u>2020</u>)"</span>
+      </label>
+    </div>
+
     <div class="row" style="margin-top:24px;">
       <button class="primary" id="processBtn" disabled>🔗 Tautkan Sitasi ke Referensi</button>
       <span class="status info" id="statusMsg" role="status" aria-live="polite"></span>
