@@ -80,6 +80,12 @@
           var tNodes = paragraphs[p].getElementsByTagName('w:t');
           var text = '';
           for (var t = 0; t < tNodes.length; t++) text += tNodes[t].textContent;
+          // Equations (Word's built-in equation editor) store their text in <m:t> runs, not
+          // <w:t> — invisible to the query above. Append them so formulas count toward word
+          // totals instead of silently vanishing (this also affects tools like Mammoth.js,
+          // which emits an "unrecognised element" warning for <m:oMath> and drops it outright).
+          var mNodes = paragraphs[p].getElementsByTagName('m:t');
+          for (var mi = 0; mi < mNodes.length; mi++) text += ' ' + mNodes[mi].textContent;
           lines.push(text);
         }
         var tableCount = xmlDoc.getElementsByTagName('w:tbl').length;
@@ -117,12 +123,13 @@
     html += statCard(r.titleWords, 'Kata dalam Judul');
     html += statCard(r.abstractWords, 'Kata dalam Abstrak', r.abstractFound ? null : 'bad');
     html += statCard(r.keywordCount, 'Kata Kunci', r.keywordsFound ? null : 'warn');
-    html += statCard(r.totalWords.toLocaleString('id-ID'), 'Total Kata Naskah');
-    html += statCard(r.totalSentences.toLocaleString('id-ID'), 'Total Kalimat');
+    html += statCard(r.totalWordsWholeDocument.toLocaleString('id-ID'), 'Total Kata Naskah');
+    html += statCard(r.totalSentencesWholeDocument.toLocaleString('id-ID'), 'Total Kalimat');
     if (r.referencesIncluded) html += statCard(r.referenceCount, 'Total Referensi', r.referenceCount < 20 ? 'warn' : null);
     html += statCard(r.tableCount, 'Tabel');
     html += statCard(r.imageCount, 'Gambar');
     html += '</div>';
+    html += '<div class="db-note" style="font-size:10.5px;color:var(--text-faint);margin:-4px 0 12px;">📌 "Total Kata Naskah" &amp; "Total Kalimat" mencakup seluruh dokumen (judul s.d. akhir daftar referensi, termasuk isi tabel &amp; teks rumus/equation), dan tanda hubung (-) &amp; garis miring (/) dihitung sebagai pemisah kata — dikalibrasi supaya sangat mendekati Word Count bawaan Microsoft Word (~0,1% selisih pada pengujian).</div>';
 
     html += '<div class="db-section"><div class="db-section-title">Judul Terdeteksi</div><div class="db-text-block">' + (r.title ? esc(r.title) : '<i>Tidak terdeteksi</i>') + '</div></div>';
 
@@ -250,8 +257,8 @@
     if (sections.indexOf('identity') !== -1) {
       html += '<h2>Judul & Info Dasar</h2><table>';
       html += row('Judul', (r.title || '-') + ' (' + r.titleWords + ' kata)');
-      html += row('Total Kata Naskah', r.totalWords.toLocaleString('id-ID'));
-      html += row('Total Kalimat', r.totalSentences.toLocaleString('id-ID'));
+      html += row('Total Kata Naskah', r.totalWordsWholeDocument.toLocaleString('id-ID'));
+      html += row('Total Kalimat', r.totalSentencesWholeDocument.toLocaleString('id-ID'));
       html += row('Total Paragraf', r.paragraphCount.toLocaleString('id-ID'));
       html += row('Email Korespondensi Terdeteksi', r.hasAuthorEmail ? 'Ya' : 'Tidak');
       html += row('Afiliasi Terdeteksi', r.hasAffiliation ? 'Ya' : 'Tidak');

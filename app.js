@@ -350,7 +350,7 @@
     var result = lastResult, doiIssues = lastDoiIssues || [];
     var sections = getSelectedReportSections();
     var style = STYLES[result.styleId];
-    var yr = currentYearRange || CE.YearRange.presetToRange(10);
+    var yr = currentYearRange || CE.YearRange.presetToRange(5);
     var stats = computeYearRange(result.references, yr.from, yr.to);
     var html = '';
 
@@ -440,7 +440,7 @@
     currentYearRange = CE.YearRange.presetToRange(years);
     els.yrFrom.value = ''; els.yrTo.value = '';
     setActivePreset(years);
-    if (lastResult) renderYearRange(lastResult);
+    if (lastResult) { renderYearRange(lastResult); renderReportPreview(); }
   }
 
   document.querySelectorAll('.yr-preset').forEach(function(btn) {
@@ -456,7 +456,7 @@
     if (from > to) { var t = from; from = to; to = t; }
     currentYearRange = { from: from, to: to, label: 'Custom (' + from + '–' + to + ')' };
     setActivePreset(null);
-    if (lastResult) renderYearRange(lastResult);
+    if (lastResult) { renderYearRange(lastResult); renderReportPreview(); }
   });
 
   function renderYearRange(result) {
