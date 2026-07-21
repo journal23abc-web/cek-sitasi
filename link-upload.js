@@ -1,8 +1,5 @@
-(function() {
-  var CE = window.CitationEngine;
-  var STYLES = CE.STYLES;
-  var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
-  var XML_NS = 'http://www.w3.org/XML/1998/namespace';
+(function () {
+  'use strict';
 
   var els = {
     dropzone: document.getElementById('dropzone'),
@@ -12,510 +9,194 @@
     fileSize: document.getElementById('fileSize'),
     fileRemove: document.getElementById('fileRemove'),
     styleSelect: document.getElementById('styleSelect'),
-    enableColor: document.getElementById('enableColor'),
+    linkScope: document.getElementById('linkScope'),
+    applyColor: document.getElementById('applyColor'),
     linkColor: document.getElementById('linkColor'),
+    narrowToHighlight: document.getElementById('narrowToHighlight'),
+    onlyHighlighted: document.getElementById('onlyHighlighted'),
     processBtn: document.getElementById('processBtn'),
     statusMsg: document.getElementById('statusMsg'),
     results: document.getElementById('results'),
+    parseBanner: document.getElementById('parseBanner'),
     summaryGrid: document.getElementById('summaryGrid'),
-    unmatchedSection: document.getElementById('unmatchedSection'),
     downloadBtn: document.getElementById('downloadBtn'),
     downloadStatus: document.getElementById('downloadStatus'),
+    citeReport: document.getElementById('citeReport'),
   };
 
-  var state = {
-    file: null,
-    lastLinkedBlob: null,
-    lastStats: null,
-  };
+  var state = { file: null, outputBlob: null, outputName: 'naskah-tertaut.docx' };
 
-  function esc(t) { return CE.esc(t); }
-
-  function setStatus(msg, kind) {
-    els.statusMsg.textContent = msg || '';
-    els.statusMsg.className = 'status ' + (kind || 'info');
+  function setStatus(el, msg, kind) {
+    el.textContent = msg || '';
+    el.className = 'status ' + (kind || 'info');
   }
 
   function formatSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   }
 
-  // ---------- File selection ----------
-  els.dropzone.addEventListener('click', function() { els.fileInput.click(); });
-  els.dropzone.addEventListener('dragover', function(e) { e.preventDefault(); els.dropzone.classList.add('drag'); });
-  els.dropzone.addEventListener('dragleave', function() { els.dropzone.classList.remove('drag'); });
-  els.dropzone.addEventListener('drop', function(e) {
-    e.preventDefault();
-    els.dropzone.classList.remove('drag');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  els.applyColor.addEventListener('change', function () {
+    els.linkColor.disabled = !els.applyColor.checked;
   });
-  els.fileInput.addEventListener('change', function() {
-    if (els.fileInput.files && els.fileInput.files[0]) handleFile(els.fileInput.files[0]);
+
+  // ---------- file selection ----------
+  els.dropzone.addEventListener('click', function () { els.fileInput.click(); });
+  els.dropzone.addEventListener('dragover', function (e) { e.preventDefault(); els.dropzone.classList.add('drag'); });
+  els.dropzone.addEventListener('dragleave', function () { els.dropzone.classList.remove('drag'); });
+  els.dropzone.addEventListener('drop', function (e) {
+    e.preventDefault(); els.dropzone.classList.remove('drag');
+    if (e.dataTransfer.files.length) selectFile(e.dataTransfer.files[0]);
   });
-  els.fileRemove.addEventListener('click', function(e) {
+  els.fileInput.addEventListener('change', function (e) {
+    if (e.target.files.length) selectFile(e.target.files[0]);
+  });
+  els.fileRemove.addEventListener('click', function (e) {
     e.stopPropagation();
     state.file = null;
     els.fileChip.classList.remove('show');
     els.processBtn.disabled = true;
-    els.fileInput.value = '';
-    setStatus('', 'info');
+    els.results.classList.remove('active');
   });
 
-  function handleFile(file) {
-    if (!file.name.toLowerCase().endsWith('.docx')) {
-      setStatus('⚠️ Hanya file .docx yang didukung (dibutuhkan struktur XML asli untuk menulis hyperlink internal).', 'err');
+  function selectFile(f) {
+    if (!/\.docx$/i.test(f.name)) {
+      setStatus(els.statusMsg, '⚠️ Mohon pilih file .docx', 'warn');
       return;
     }
-    if (file.size > 25 * 1024 * 1024) {
-      setStatus('⚠️ Ukuran file melebihi batas 25MB.', 'err');
-      return;
-    }
-    state.file = file;
-    els.fileName.textContent = file.name;
-    els.fileSize.textContent = '(' + formatSize(file.size) + ')';
+    state.file = f;
+    els.fileName.textContent = f.name;
+    els.fileSize.textContent = formatSize(f.size);
     els.fileChip.classList.add('show');
     els.processBtn.disabled = false;
     els.results.classList.remove('active');
-    setStatus('✅ File siap diproses. Klik "Tautkan Sitasi ke Referensi".', 'ok');
+    setStatus(els.statusMsg, '', 'info');
   }
 
-  // ---------- DOCX XML helpers (same technique used by upload.js's highlighted-export) ----------
-  function escapeXml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-  }
-
-  // Concatenates every <w:t> node's text (document order) into one string, keeping a
-  // position -> node map so we can later find exactly which run(s) a text match touches.
-  function buildDocxTextIndex(xmlDoc) {
-    var segments = [];
-    var text = '';
-    var paragraphs = xmlDoc.getElementsByTagName('w:p');
-    for (var p = 0; p < paragraphs.length; p++) {
-      var wts = paragraphs[p].getElementsByTagName('w:t');
-      for (var i = 0; i < wts.length; i++) {
-        var node = wts[i];
-        var t = node.textContent || '';
-        if (t.length === 0) continue;
-        segments.push({ start: text.length, end: text.length + t.length, node: node });
-        text += t;
-      }
-      text += '\n';
-    }
-    return { text: text, segments: segments };
-  }
-
-  function applyColorToRun(xmlDoc, runEl, colorHex) {
-    if (!colorHex) return;
-    var rPrList = runEl.getElementsByTagName('w:rPr');
-    var rPr;
-    if (rPrList.length > 0) { rPr = rPrList[0]; }
-    else { rPr = xmlDoc.createElementNS(W_NS, 'w:rPr'); runEl.insertBefore(rPr, runEl.firstChild); }
-    var existingColor = rPr.getElementsByTagName('w:color');
-    for (var c = existingColor.length - 1; c >= 0; c--) existingColor[c].parentNode.removeChild(existingColor[c]);
-    var colorEl = xmlDoc.createElementNS(W_NS, 'w:color');
-    colorEl.setAttributeNS(W_NS, 'w:val', colorHex.replace('#', '').toUpperCase());
-    rPr.appendChild(colorEl);
-    var existingU = rPr.getElementsByTagName('w:u');
-    for (var u = existingU.length - 1; u >= 0; u--) existingU[u].parentNode.removeChild(existingU[u]);
-    var uEl = xmlDoc.createElementNS(W_NS, 'w:u');
-    uEl.setAttributeNS(W_NS, 'w:val', 'single');
-    rPr.appendChild(uEl);
-  }
-
-  function makeRun(xmlDoc, templateRunEl, textValue, colorHex) {
-    if (!textValue) return null;
-    var newRun = templateRunEl.cloneNode(true);
-    var tNodes = newRun.getElementsByTagName('w:t');
-    var tNode = tNodes[0];
-    if (!tNode) {
-      tNode = xmlDoc.createElementNS(W_NS, 'w:t');
-      newRun.appendChild(tNode);
-    } else {
-      for (var i = tNodes.length - 1; i >= 1; i--) tNodes[i].parentNode.removeChild(tNodes[i]);
-    }
-    tNode.textContent = textValue;
-    tNode.setAttributeNS(XML_NS, 'xml:space', 'preserve');
-    applyColorToRun(xmlDoc, newRun, colorHex);
-    return newRun;
-  }
-
-  // Wraps the run(s) touched by [start,end) in a <w:hyperlink w:anchor="bookmarkName"> element,
-  // splitting the boundary runs so every OTHER run/formatting stays byte-for-byte untouched —
-  // same split-and-clone technique upload.js uses for highlighting. If colorHex is given, the
-  // wrapped runs are recolored + underlined like a standard Word hyperlink; leave it null/empty
-  // to keep the citation's original appearance completely untouched.
-  function isInsideExistingHyperlink(node) {
-    var n = node;
-    while (n) {
-      if (n.nodeName === 'w:hyperlink') return n;
-      if (n.nodeName === 'w:p') return null;
-      n = n.parentNode;
-    }
-    return null;
-  }
-
-  // Documents produced with a reference-manager Word plugin (Mendeley, Zotero, EndNote) very
-  // commonly already wrap EVERY in-text citation in its own <w:hyperlink> — sometimes already
-  // pointing at a matching bookmark, sometimes pointing nowhere useful. Rather than creating an
-  // invalid NESTED <w:hyperlink> (not legal OOXML) or silently giving up on a citation that's
-  // already 90% of the way there, retarget the existing wrapper's anchor to our resolved
-  // bookmark instead of building a new one.
-  function retargetExistingHyperlink(hyperlinkEl, bookmarkName) {
-    hyperlinkEl.removeAttributeNS(W_NS, 'anchor');
-    hyperlinkEl.removeAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
-    hyperlinkEl.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
-    hyperlinkEl.setAttributeNS(W_NS, 'w:history', '1');
-  }
-
-  // Splits every touched run into before/mid/after pieces in place (mid gets colorHex applied),
-  // leaving each piece as a child of whatever the original run's parent was — a paragraph, an
-  // existing hyperlink, doesn't matter to this function. Returns the list of "mid" runs so the
-  // caller can either wrap them in a brand-new <w:hyperlink> or leave them where they are (already
-  // inside an existing one). Requires every touched run to share one common parent; returns null
-  // otherwise since splitting across an unknown structural boundary isn't safe.
-  function splitTouchedRuns(xmlDoc, touched, start, end, colorHex) {
-    var parents = touched.map(function(seg) { return seg.node.parentNode; });
-    if (parents.some(function(p) { return !p || !p.parentNode; })) return null;
-    var commonGrandparent = parents[0].parentNode;
-    if (!parents.every(function(p) { return p.parentNode === commonGrandparent; })) return null;
-
-    var midRuns = [];
-    touched.forEach(function(seg) {
-      var runEl = seg.node.parentNode;
-      var fullText = seg.node.textContent;
-      var s = Math.max(start, seg.start) - seg.start;
-      var e = Math.min(end, seg.end) - seg.start;
-      var before = fullText.slice(0, s), mid = fullText.slice(s, e), after = fullText.slice(e);
-      var beforeRun = makeRun(xmlDoc, runEl, before, null);
-      var midRun = makeRun(xmlDoc, runEl, mid, colorHex);
-      var afterRun = makeRun(xmlDoc, runEl, after, null);
-      var parent = runEl.parentNode;
-      if (beforeRun) parent.insertBefore(beforeRun, runEl);
-      if (midRun) { parent.insertBefore(midRun, runEl); midRuns.push(midRun); }
-      if (afterRun) parent.insertBefore(afterRun, runEl);
-      parent.removeChild(runEl);
-    });
-    return midRuns;
-  }
-
-  function wrapRangeInHyperlink(xmlDoc, index, start, end, bookmarkName, colorHex) {
-    var touched = index.segments.filter(function(seg) { return seg.start < end && seg.end > start; });
-    if (touched.length === 0) return false;
-
-    // Case A: exactly one DISTINCT existing <w:hyperlink> is touched (surrounding plain
-    // punctuation like the "(" ")" around a citation is common and fine to leave alone) —
-    // retarget that hyperlink instead of nesting a new one inside it.
-    var enclosingHyperlinks = touched.map(function(seg) {
-      var runEl = seg.node.parentNode;
-      return runEl ? isInsideExistingHyperlink(runEl) : null;
-    });
-    var distinctHyperlinks = [];
-    enclosingHyperlinks.forEach(function(h) { if (h && distinctHyperlinks.indexOf(h) === -1) distinctHyperlinks.push(h); });
-    if (distinctHyperlinks.length > 1) return false; // genuinely ambiguous — skip rather than guess
-    if (distinctHyperlinks.length === 1) {
-      // Only split/color the segments that actually belong to that one hyperlink — segments
-      // with no enclosing hyperlink (bare punctuation) are left completely untouched.
-      var inHyperlinkSegs = touched.filter(function(seg, i) { return enclosingHyperlinks[i] === distinctHyperlinks[0]; });
-      if (inHyperlinkSegs.length > 0) splitTouchedRuns(xmlDoc, inHyperlinkSegs, start, end, colorHex);
-      retargetExistingHyperlink(distinctHyperlinks[0], bookmarkName);
-      return true;
-    }
-
-    // Case B: no existing hyperlink involved at all — split, then wrap in a brand new one.
-    var midRuns = splitTouchedRuns(xmlDoc, touched, start, end, colorHex);
-    if (!midRuns || midRuns.length === 0) return false;
-    var containerParagraph = midRuns[0].parentNode;
-    var hyperlinkEl = xmlDoc.createElementNS(W_NS, 'w:hyperlink');
-    hyperlinkEl.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
-    hyperlinkEl.setAttributeNS(W_NS, 'w:history', '1');
-    var firstRun = midRuns[0];
-    containerParagraph.insertBefore(hyperlinkEl, firstRun);
-    midRuns.forEach(function(r) { hyperlinkEl.appendChild(r); });
-    return true;
-  }
-
-  // Inserts a zero-width bookmark (start immediately followed by end) right before the run
-  // touching `at` — enough for Word to navigate to, without needing to split/wrap any text.
-  function insertBookmarkAt(xmlDoc, index, at, id, name) {
-    var seg = index.segments.find(function(s) { return at >= s.start && at < s.end; }) || index.segments.find(function(s) { return at <= s.end; });
-    if (!seg) return false;
-    var runEl = seg.node.parentNode;
-    if (!runEl || !runEl.parentNode) return false;
-    var startEl = xmlDoc.createElementNS(W_NS, 'w:bookmarkStart');
-    startEl.setAttributeNS(W_NS, 'w:id', String(id));
-    startEl.setAttributeNS(W_NS, 'w:name', name);
-    var endEl = xmlDoc.createElementNS(W_NS, 'w:bookmarkEnd');
-    endEl.setAttributeNS(W_NS, 'w:id', String(id));
-    runEl.parentNode.insertBefore(startEl, runEl);
-    runEl.parentNode.insertBefore(endEl, runEl);
-    return true;
-  }
-
-  function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-  function flexiblePattern(term, flags) {
-    var t = (term || '').replace(/\s+/g, ' ').trim();
-    if (!t) return null;
-    var pattern = t.split(' ').map(escapeRegex).join('\\s+');
-    try { return new RegExp(pattern, flags || 'i'); } catch (e) { return null; }
-  }
-
-  function splitFirstToken(authorsStr) {
-    if (!authorsStr) return authorsStr;
-    var cleaned = authorsStr.replace(/\s*et\s+al\.?/i, '');
-    var arr = CE.splitOnSeparators(cleaned);
-    return arr[0] || cleaned;
-  }
-
-  // Narrows a citation's [start,end) span down to just the year token inside it, e.g.
-  // "Smith (2020)" -> just "2020". Works uniformly for narrative AND parenthetical citations
-  // since both always carry the year as a literal 4-digit run somewhere inside `raw` — no need
-  // to special-case each citation type's internal structure.
-  // Narrows a grouped multi-citation span like "(Ghazalat et al., 2023; Le, 2025)" down to just
-  // the FIRST author-year segment's own text — needed because each individual citation inside a
-  // semicolon-grouped parenthetical is commonly wrapped in its OWN separate existing hyperlink
-  // (one per reference-manager field), so trying to wrap/retarget the WHOLE group at once touches
-  // multiple distinct hyperlinks and has to be rejected as ambiguous.
-  function narrowToFirstPart(citeStart, raw, firstPartRaw) {
-    if (!firstPartRaw) return null;
-    var idx = raw.indexOf(firstPartRaw);
-    if (idx === -1) return null;
-    return { start: citeStart + idx, end: citeStart + idx + firstPartRaw.length };
-  }
-
-  function narrowToYear(start, raw) {
-    var m = raw.match(/\d{4}[a-z]?/);
-    if (!m) return null;
-    return { start: start + m.index, end: start + m.index + m[0].length };
-  }
-
-  // ---------- Core: build the citation<->reference link plan, then write it into the XML ----------
-  function buildLinkedDocx(file, styleId, colorHex, scope) {
-    return file.arrayBuffer()
-      .then(function(buf) { return JSZip.loadAsync(buf); })
-      .then(function(zip) {
-        var docPath = 'word/document.xml';
-        if (!zip.file(docPath)) throw new Error('word/document.xml tidak ditemukan di dalam file .docx.');
-        return zip.file(docPath).async('string').then(function(xmlString) {
-          var xmlDoc = new DOMParser().parseFromString(xmlString, 'application/xml');
-          if (xmlDoc.getElementsByTagName('parsererror').length > 0) throw new Error('Gagal membaca struktur XML .docx.');
-          var index = buildDocxTextIndex(xmlDoc);
-          var fullText = index.text;
-
-          var split = CE.splitDocumentByReferences(fullText);
-          if (!split.references) throw new Error('Heading daftar referensi tidak terdeteksi otomatis di naskah ini.');
-          var articleText = split.article; // starts at offset 0 of fullText
-          var referencesText = split.references;
-          var refZoneStart = fullText.indexOf(referencesText);
-          if (refZoneStart === -1) throw new Error('Gagal menentukan lokasi daftar referensi di dalam dokumen.');
-
-          var actualStyleId = styleId;
-          var confidence = null;
-          if (styleId === 'auto') {
-            var detection = CE.FormatDetector.detect(articleText, referencesText);
-            actualStyleId = detection.styleId;
-            confidence = detection.confidence;
-          }
-
-          var validator = new CE.MultiFormatValidator(articleText, referencesText, actualStyleId);
-          var result = validator.validate();
-          var style = STYLES[actualStyleId];
-
-          // 1) Locate each reference's absolute position in fullText (sequential cursor keeps
-          //    entries in document order even if two references share very similar wording).
-          var cursor = refZoneStart;
-          var refPositions = result.references.map(function(r) {
-            var anchorTerm = (r.raw || r.firstAuthor || '').split(/\s+/).slice(0, 8).join(' ');
-            var anchorRe = flexiblePattern(anchorTerm, 'i');
-            if (!anchorRe) return null;
-            var slice = fullText.slice(cursor);
-            var localMatch = slice.match(anchorRe);
-            if (!localMatch) return null;
-            var absStart = cursor + localMatch.index;
-            cursor = absStart + localMatch[0].length;
-            return { ref: r, start: absStart };
-          });
-
-          // 2) Build a lookup from a normalized "surname|year" key to that reference's position —
-          //    same key shape the Peta Sitasi cross-link feature uses, so behavior stays consistent.
-          function linkKey(author, year) {
-            var surnameOnly = String(author || '').split(',')[0];
-            return surnameOnly.toLowerCase().replace(/[^a-z0-9]+/g, '') + '|' + String(year || '');
-          }
-          var refByKey = {};
-          refPositions.forEach(function(rp) {
-            if (!rp) return;
-            refByKey[linkKey(rp.ref.firstAuthor, rp.ref.year)] = rp;
-          });
-          var refByNum = {};
-          result.references.forEach(function(r, i) {
-            if (r.numLabel != null) refByNum[r.numLabel] = refPositions[i];
-          });
-
-          // 3) Walk every in-text citation, resolve it to a reference position, and record a
-          //    {citeStart, citeEnd, refPosition} link job. Collected first, applied after (in
-          //    reverse document order) so earlier edits never shift the offsets of later ones.
-          var jobs = [];
-          function addJob(citeStart, citeEnd, refPos, raw) {
-            if (!refPos) return;
-            if (scope === 'year') {
-              var yearSpan = narrowToYear(citeStart, raw);
-              if (!yearSpan) return; // no locatable year token — skip rather than fall back to linking the whole citation
-              citeStart = yearSpan.start; citeEnd = yearSpan.end;
-            }
-            jobs.push({ citeStart: citeStart, citeEnd: citeEnd, refPos: refPos });
-          }
-
-          if (style.family === 'numeric') {
-            result.citations.forEach(function(c) {
-              var raw = c.raw || '';
-              var start = c.position, end = c.position + raw.length;
-              // A single "[3, 5, 7]" style citation can reference multiple numbers — link the
-              // WHOLE bracketed citation to the first number's reference (linking each individual
-              // number separately would require splitting inside the brackets, which risks
-              // corrupting the visible punctuation for a rarely-needed edge case). Numeric styles
-              // have no "year" to narrow to, so the scope option has no effect on this family.
-              var firstNum = c.numbers && c.numbers[0];
-              if (firstNum != null && refByNum[firstNum]) jobs.push({ citeStart: start, citeEnd: end, refPos: refByNum[firstNum] });
-            });
-          } else {
-            result.citations.forEach(function(c) {
-              var raw = c.raw || '';
-              var start = c.position, end = c.position + raw.length;
-              if (c.parts) {
-                // Parenthetical, possibly multiple "; "-separated authors — resolve to the
-                // FIRST author's reference. If there's more than one grouped citation, narrow
-                // the span down to just that first citation's own text (see narrowToFirstPart)
-                // rather than the whole bracketed group, since each grouped citation commonly
-                // has its own separate existing hyperlink.
-                var first = c.parts[0];
-                if (!first) { return; }
-                var citeSpanStart = start, citeSpanEnd = end;
-                if (c.parts.length > 1) {
-                  var narrowed = narrowToFirstPart(start, raw, first.raw);
-                  if (narrowed) { citeSpanStart = narrowed.start; citeSpanEnd = narrowed.end; }
-                }
-                addJob(citeSpanStart, citeSpanEnd, refByKey[linkKey(first.firstAuthor, first.year)], raw.slice(citeSpanStart - start, citeSpanEnd - start));
-              } else {
-                var firstTok = splitFirstToken(c.authors);
-                addJob(start, end, refByKey[linkKey(firstTok, c.year)], raw);
-              }
-            });
-          }
-
-          // 4) Assign one bookmark per REFERENCE (not per citation — several citations can point
-          //    at the same reference and should share one bookmark), then apply hyperlinks.
-          var bookmarkNameByRefStart = {};
-          var nextBookmarkId = 0;
-          var linkedCount = 0, skippedOverlap = 0;
-
-          // Apply in reverse document order so each edit's DOM splitting never invalidates the
-          // still-pending offsets of earlier matches.
-          jobs.sort(function(a, b) { return b.citeStart - a.citeStart; });
-          var seenSpans = [];
-          jobs.forEach(function(job) {
-            // Guard against overlapping citation spans (e.g. mis-detected nested matches).
-            var overlaps = seenSpans.some(function(s) { return job.citeStart < s.end && job.citeEnd > s.start; });
-            if (overlaps) { skippedOverlap++; return; }
-            seenSpans.push({ start: job.citeStart, end: job.citeEnd });
-
-            var refStart = job.refPos.start;
-            var bookmarkName = bookmarkNameByRefStart[refStart];
-            if (!bookmarkName) {
-              bookmarkName = 'cite_ref_' + (nextBookmarkId + 1);
-              var ok = insertBookmarkAt(xmlDoc, index, refStart, nextBookmarkId, bookmarkName);
-              if (!ok) return;
-              bookmarkNameByRefStart[refStart] = bookmarkName;
-              nextBookmarkId++;
-            }
-            var wrapped = wrapRangeInHyperlink(xmlDoc, index, job.citeStart, job.citeEnd, bookmarkName, colorHex);
-            if (wrapped) linkedCount++;
-          });
-
-          var totalCitations = result.citations.length;
-          var unmatchedCount = Math.max(0, totalCitations - linkedCount);
-
-          var newXml = new XMLSerializer().serializeToString(xmlDoc.documentElement);
-          if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
-          zip.file(docPath, newXml);
-
-          return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-            .then(function(blob) {
-              return {
-                blob: blob,
-                styleName: style.name,
-                confidence: confidence,
-                totalCitations: totalCitations,
-                totalReferences: result.references.length,
-                linkedCount: linkedCount,
-                unmatchedCount: unmatchedCount,
-                skippedOverlap: skippedOverlap,
-              };
-            });
-        });
-      });
-  }
-
-  els.enableColor.addEventListener('change', function() {
-    els.linkColor.disabled = !els.enableColor.checked;
-  });
-
-  els.processBtn.addEventListener('click', function() {
+  // ---------- processing ----------
+  els.processBtn.addEventListener('click', function () {
     if (!state.file) return;
     els.processBtn.disabled = true;
-    setStatus('⏳ Membaca struktur .docx dan menautkan sitasi...', 'info');
-    els.results.classList.remove('active');
+    setStatus(els.statusMsg, '', 'info');
+    els.statusMsg.innerHTML = '<span class="spinner"></span>Memproses dokumen…';
+    els.statusMsg.className = 'status info';
 
-    var colorHex = els.enableColor.checked ? els.linkColor.value : null;
-    var scopeEl = document.querySelector('input[name="linkScope"]:checked');
-    var scope = scopeEl ? scopeEl.value : 'full';
-    buildLinkedDocx(state.file, els.styleSelect.value, colorHex, scope)
-      .then(function(stats) {
-        state.lastLinkedBlob = stats.blob;
-        state.lastStats = stats;
-        setStatus('✅ Selesai. ' + stats.linkedCount + ' dari ' + stats.totalCitations + ' sitasi berhasil ditautkan.', 'ok');
-        renderResults(stats);
-        els.results.classList.add('active');
+    if (typeof JSZip === 'undefined') {
+      setStatus(els.statusMsg, '⚠️ Library JSZip gagal dimuat (masalah jaringan/CDN). Coba muat ulang halaman.', 'err');
+      els.processBtn.disabled = false;
+      return;
+    }
+
+    state.file.arrayBuffer()
+      .then(function (buf) { return JSZip.loadAsync(buf); })
+      .then(function (zip) {
+        var docFile = zip.file('word/document.xml');
+        if (!docFile) throw new Error('word/document.xml tidak ditemukan — file mungkin bukan .docx yang valid.');
+        return docFile.async('string').then(function (xmlStr) { return { zip: zip, xmlStr: xmlStr }; });
       })
-      .catch(function(err) {
+      .then(function (bundle) {
+        var xmlDoc = new DOMParser().parseFromString(bundle.xmlStr, 'application/xml');
+        if (xmlDoc.getElementsByTagName('parsererror').length) {
+          throw new Error('Gagal mem-parsing XML dokumen.');
+        }
+        var styleId = els.styleSelect.value;
+        var result = window.CitationLinker.linkDocx(xmlDoc, {
+          styleId: styleId,
+          linkScope: els.linkScope.value,
+          linkColor: els.applyColor.checked ? els.linkColor.value : null,
+          narrowToHighlight: els.narrowToHighlight.checked,
+          onlyHighlighted: els.onlyHighlighted.checked
+        });
+        if (result.error === 'NO_HEADING') {
+          throw new Error('Heading daftar referensi tidak ditemukan. Pastikan ada paragraf tersendiri bertuliskan "References" / "Daftar Pustaka" / "Bibliography" sebelum daftar referensi dimulai.');
+        }
+        var serializer = new XMLSerializer();
+        var newXmlStr = serializer.serializeToString(xmlDoc);
+        bundle.zip.file('word/document.xml', newXmlStr);
+        return bundle.zip.generateAsync({
+          type: 'blob',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        }).then(function (blob) { return { blob: blob, result: result }; });
+      })
+      .then(function (out) {
+        state.outputBlob = out.blob;
+        state.outputName = state.file.name.replace(/\.docx$/i, '') + '-tertaut.docx';
+        renderReport(out.result);
+        setStatus(els.statusMsg, '✅ Selesai.', 'ok');
+      })
+      .catch(function (err) {
         console.error(err);
-        setStatus('❌ Gagal memproses: ' + (err && err.message ? err.message : String(err)), 'err');
+        setStatus(els.statusMsg, '❌ ' + err.message, 'err');
       })
-      .finally(function() {
+      .finally(function () {
         els.processBtn.disabled = false;
       });
   });
 
-  function renderResults(stats) {
-    els.summaryGrid.innerHTML =
-      '<div class="sum-card fmt"><div class="n">' + esc(stats.styleName) + '</div><div class="l">Gaya' + (stats.confidence != null ? ' (' + stats.confidence + '%)' : '') + '</div></div>' +
-      '<div class="sum-card ok"><div class="n">' + stats.linkedCount + '</div><div class="l">Sitasi Ditautkan</div></div>' +
-      '<div class="sum-card warn"><div class="n">' + stats.unmatchedCount + '</div><div class="l">Tidak Ditautkan</div></div>' +
-      '<div class="sum-card ok"><div class="n">' + stats.totalReferences + '</div><div class="l">Referensi</div></div>';
-
-    if (stats.unmatchedCount > 0) {
-      els.unmatchedSection.innerHTML =
-        '<div class="field-label" style="margin-top:16px;">Kenapa Ada yang Tidak Tertaut?</div>' +
-        '<div class="unmatched-item">Sitasi yang tidak punya pasangan jelas di daftar referensi (nama/tahun tidak cocok persis) sengaja TIDAK ditautkan secara paksa — daripada menautkan ke referensi yang salah, sistem membiarkannya seperti semula. Cek dengan Validator Sitasi untuk detail sitasi mana saja yang tidak cocok.</div>';
-    } else {
-      els.unmatchedSection.innerHTML = '';
-    }
-  }
-
-  els.downloadBtn.addEventListener('click', function() {
-    if (!state.lastLinkedBlob) return;
+  els.downloadBtn.addEventListener('click', function () {
+    if (!state.outputBlob) return;
+    var url = URL.createObjectURL(state.outputBlob);
     var a = document.createElement('a');
-    var baseName = (state.file.name || 'naskah').replace(/\.docx$/i, '');
-    a.href = URL.createObjectURL(state.lastLinkedBlob);
-    a.download = baseName + '-tertaut.docx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    els.downloadStatus.textContent = '✅ Diunduh sebagai "' + a.download + '"';
-    els.downloadStatus.className = 'status ok';
+    a.href = url; a.download = state.outputName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   });
 
-  // Debug/test-only hook — does not affect normal page behavior.
-  window.__linkUploadInternal = { buildLinkedDocx: buildLinkedDocx };
+  // ---------- report rendering ----------
+  function renderReport(result) {
+    els.results.classList.add('active');
+
+    var bannerClass = result.unmatched.length === 0 ? 'ok' : 'ok';
+    var styleLabel = result.styleName + (result.detected ? ' (auto-detect, keyakinan ' + result.detected.confidence + '%)' : ' (dipilih manual)');
+    var hlNote = '';
+    if (result.docHasHighlight) {
+      hlNote = '<div class="pb-stats" style="margin-top:4px;">🖍️ ';
+      if (result.narrowedToHighlight) hlNote += result.narrowedToHighlight + ' sitasi dipersempit ke bagian yang di-highlight';
+      if (result.skippedNotHighlighted) hlNote += (result.narrowedToHighlight ? ' &middot; ' : '') + result.skippedNotHighlighted + ' sitasi dilewati (tidak di-highlight)';
+      if (!result.narrowedToHighlight && !result.skippedNotHighlighted) hlNote += 'Ada highlight di naskah, tapi tidak beririsan dengan sitasi manapun';
+      hlNote += '</div>';
+    }
+    els.parseBanner.innerHTML =
+      '<div class="parse-banner ' + bannerClass + '">' +
+      '<div class="pb-title">Gaya sitasi: ' + escHtml(styleLabel) + '</div>' +
+      '<div class="pb-stats">' + result.refCount + ' referensi terdeteksi &middot; ' + result.linked + ' sitasi tertaut &middot; ' + result.unmatched.length + ' tidak cocok</div>' +
+      hlNote +
+      '</div>';
+
+    els.summaryGrid.innerHTML =
+      '<div class="sum-card"><div class="n">' + result.refCount + '</div><div class="l">Referensi</div></div>' +
+      '<div class="sum-card ok"><div class="n">' + result.linked + '</div><div class="l">Tertaut</div></div>' +
+      '<div class="sum-card ' + (result.unmatched.length ? 'warn' : 'ok') + '"><div class="n">' + result.unmatched.length + '</div><div class="l">Tidak Cocok</div></div>' +
+      '<div class="sum-card fmt"><div class="n">' + escHtml(result.styleName) + '</div><div class="l">Gaya</div></div>';
+
+    var html = '';
+    if (result.unmatched.length) {
+      html += '<h3>Sitasi yang tidak berhasil ditautkan — cek manual</h3>';
+      result.unmatched.slice(0, 40).forEach(function (u) {
+        html += '<div class="cite-row"><span>' + escHtml(u) + '</span><span class="tag bad">tidak cocok</span></div>';
+      });
+      if (result.unmatched.length > 40) html += '<div class="more-note">...dan ' + (result.unmatched.length - 40) + ' lainnya.</div>';
+    }
+    if (result.linkedList.length) {
+      html += '<h3>Contoh sitasi yang berhasil ditautkan</h3>';
+      result.linkedList.slice(0, 15).forEach(function (l) {
+        html += '<div class="cite-row"><span>' + escHtml(l) + '</span><span class="tag ok">tertaut</span></div>';
+      });
+      if (result.linkedList.length > 15) html += '<div class="more-note">...dan ' + (result.linkedList.length - 15) + ' lainnya.</div>';
+    }
+    if (result.refParseFailed && result.refParseFailed.length) {
+      html += '<h3>Baris referensi yang tidak terbaca (gaya "' + escHtml(result.styleName) + '")</h3>';
+      result.refParseFailed.slice(0, 20).forEach(function (f) {
+        html += '<div class="cite-row"><span>' + escHtml(f.text) + '</span><span class="tag bad">baris ' + f.lineNumber + '</span></div>';
+      });
+    }
+    els.citeReport.innerHTML = html;
+  }
 })();
