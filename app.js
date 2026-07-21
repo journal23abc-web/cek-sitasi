@@ -519,7 +519,10 @@
   function esc(t) { return CE.esc(t); }
 
   function mapLinkKey(author, year) {
-    return String(author || '').toLowerCase().replace(/[^a-z0-9]+/g, '') + '|' + String(year || '');
+    // Reference firstAuthor is often "Surname, Initial" while a citation's parsed firstAuthor
+    // is just "Surname" — strip anything after a comma so both sides normalize to the same key.
+    var surnameOnly = String(author || '').split(',')[0];
+    return surnameOnly.toLowerCase().replace(/[^a-z0-9]+/g, '') + '|' + String(year || '');
   }
 
   function renderCitationMap(result) {

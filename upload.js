@@ -31,6 +31,7 @@
     originalHlPanel: document.getElementById('originalHlPanel'),
     downloadOriginalBtn: document.getElementById('downloadOriginalBtn'),
     downloadOriginalStatus: document.getElementById('downloadOriginalStatus'),
+    citationMapPanel: document.getElementById('citationMapPanel'),
   };
 
   var state = {
@@ -42,6 +43,7 @@
     lastDoiIssues: [],
     lastStyleId: null,
     lastConfidence: null,
+    lastValidator: null,
   };
 
   function setStatus(msg, kind) {
@@ -203,13 +205,21 @@
     var combined = (articleText || '').length + (referenceText || '').length;
     function runOnMainThread() {
       var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
-      return validator.validate();
+      var result = validator.validate();
+      state.lastValidator = validator; // needed by renderCitationMap() for matched/unmatched lookups
+      return result;
     }
     if (combined < WORKER_THRESHOLD || typeof Worker === 'undefined') {
       return Promise.resolve(runOnMainThread());
     }
     var worker = getWorker();
     if (!worker) return Promise.resolve(runOnMainThread());
+    // A Web Worker only gives back plain serialized data, never a live class instance with
+    // methods — so state.lastValidator can't be populated on this path. renderCitationMap()
+    // treats a null validator the same way it already does before any validation has run
+    // (falls back to "matched"), so this only affects the map's coloring for very large
+    // documents, not the actual validation results.
+    state.lastValidator = null;
     return new Promise(function(resolve) {
       var settled = false;
       var timeoutId = setTimeout(function() {
@@ -373,6 +383,123 @@
     renderReportPreview(result, doiIssues);
     els.originalHlPanel.style.display = state.originalFile ? '' : 'none';
     els.downloadOriginalStatus.textContent = state.originalFile ? '' : '(Hanya tersedia untuk file .docx yang diunggah — file .txt tidak punya format asli untuk dipertahankan.)';
+    renderCitationMap(result);
+  }
+
+  // ---------- Peta Sitasi (citation map) with click-to-jump cross-linking ----------
+  function mapLinkKey(author, year) {
+    // Reference firstAuthor is often "Surname, Initial" while a citation's parsed firstAuthor
+    // is just "Surname" — strip anything after a comma so both sides normalize to the same key.
+    var surnameOnly = String(author || '').split(',')[0];
+    return surnameOnly.toLowerCase().replace(/[^a-z0-9]+/g, '') + '|' + String(year || '');
+  }
+
+  function splitFirstToken(authorsStr) {
+    if (!authorsStr) return authorsStr;
+    var cleaned = authorsStr.replace(/\s*et\s+al\.?/i, '');
+    var arr = CE.splitOnSeparators(cleaned);
+    return arr[0] || cleaned;
+  }
+
+  function renderCitationMap(result) {
+    var style = STYLES[result.styleId];
+    var panel = els.citationMapPanel;
+    if (!panel) return;
+    if (style.family === 'numeric') {
+      var refByNum = {};
+      result.references.forEach(function(r){ if (r.numLabel!=null) refByNum[r.numLabel]=r; });
+      var citedNums = new Set();
+      result.citations.forEach(function(c){ c.numbers.forEach(function(n){citedNums.add(n);}); });
+      var citeItems = Array.from(citedNums).sort(function(a,b){return a-b;}).map(function(n){
+        return { label: '[' + n + ']', matched: !!refByNum[n], linkKey: 'num|' + n };
+      });
+      var refItems = result.references.map(function(r){
+        return { label: '[' + r.numLabel + '] ' + (r.firstAuthor||'-') + (r.year?' ('+r.year+')':''), matched: citedNums.has(r.numLabel), linkKey: 'num|' + r.numLabel };
+      });
+      panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
+      wireMapLinks(panel);
+      return;
+    }
+
+    // author-date / author-page: use the validator's real match index when available (main
+    // thread path) — falls back to "matched" (green) for very large documents that ran through
+    // the Web Worker, same as before any validation has run. See runValidation() for why.
+    var lastValidator = state.lastValidator;
+    var citeItems = [];
+    var seenCiteLabels = new Set();
+    result.citations.forEach(function(c) {
+      if (c.parts) {
+        c.parts.forEach(function(p) {
+          var label = (p.firstAuthor||'-') + (p.year ? ', ' + p.year : (p.page ? ' p.' + p.page : ''));
+          if (seenCiteLabels.has(label)) return;
+          seenCiteLabels.add(label);
+          var matched = lastValidator ? lastValidator.isCitationMatched(p.firstAuthor, p.year || null) : null;
+          citeItems.push({ label: label, matched: matched !== false, linkKey: mapLinkKey(p.firstAuthor, p.year) });
+        });
+      } else {
+        var label2 = (c.authors||'-') + (c.year ? ', ' + c.year : '');
+        if (seenCiteLabels.has(label2)) return;
+        seenCiteLabels.add(label2);
+        var firstTok = splitFirstToken(c.authors);
+        var matched2 = lastValidator ? lastValidator.isCitationMatched(firstTok, c.year || null) : null;
+        citeItems.push({ label: label2, matched: matched2 !== false, linkKey: mapLinkKey(firstTok, c.year) });
+      }
+    });
+    var refItems = result.references.map(function(r){
+      var cited = lastValidator ? lastValidator.isReferenceCited(r) : null;
+      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: cited !== false, linkKey: mapLinkKey(r.firstAuthor, r.year) };
+    });
+    panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
+    wireMapLinks(panel);
+  }
+
+  // Clicking a matched citation jumps to & flashes its matched reference (and vice versa).
+  // Only "matched" items get a clickable counterpart — unmatched ones have nothing to jump to.
+  function wireMapLinks(panel) {
+    panel.querySelectorAll('.map-item.matched[data-link-key]').forEach(function(el) {
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('role', 'button');
+      el.setAttribute('title', 'Klik untuk lompat ke pasangannya');
+      el.addEventListener('click', function() { jumpToMapPair(panel, el); });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jumpToMapPair(panel, el); }
+      });
+    });
+  }
+
+  function jumpToMapPair(panel, sourceEl) {
+    var key = sourceEl.getAttribute('data-link-key');
+    var side = sourceEl.getAttribute('data-side');
+    var targets = panel.querySelectorAll('.map-item[data-link-key="' + CSS.escape(key) + '"][data-side="' + (side === 'cite' ? 'ref' : 'cite') + '"]');
+    if (!targets.length) return;
+    var target = targets[0];
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('flash'); void target.offsetWidth; // restart animation if clicked repeatedly
+    target.classList.add('flash');
+    target.focus({ preventScroll: true });
+  }
+
+  function mapHTML(labelA, itemsA, labelB, itemsB) {
+    function uniq(items) {
+      var seen = new Map();
+      items.forEach(function(i){ seen.set(i.label, i); });
+      return Array.from(seen.values());
+    }
+    function itemHTML(i, side) {
+      var keyAttr = i.matched ? ' data-link-key="' + esc(i.linkKey) + '" data-side="' + side + '"' : '';
+      return '<div class="map-item ' + (i.matched?'matched':'unmatched') + '"' + keyAttr + '><span class="d"></span>' + esc(i.label) + '</div>';
+    }
+    var a = uniq(itemsA), b = uniq(itemsB);
+    return '<h3 style="font-family:\'Space Grotesk\',sans-serif;font-size:15px;margin:0 0 14px;">📊 Peta Sitasi ↔ Referensi</h3>' +
+      '<p style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin:-6px 0 14px;">💡 Klik entri berwarna hijau untuk lompat ke pasangannya.</p>' +
+      '<div class="map-grid">' +
+      '<div class="map-col"><h4>' + labelA + ' (' + a.length + ')</h4>' +
+      (a.length===0?'<p style="color:var(--text-dim);font-size:12px;">Tidak ada sitasi terdeteksi</p>':'') +
+      a.map(function(i){return itemHTML(i, 'cite');}).join('') +
+      '</div><div class="map-col"><h4>' + labelB + ' (' + b.length + ')</h4>' +
+      (b.length===0?'<p style="color:var(--text-dim);font-size:12px;">Tidak ada referensi</p>':'') +
+      b.map(function(i){return itemHTML(i, 'ref');}).join('') +
+      '</div></div>';
   }
 
   // ---------- HTML report preview + print-to-PDF export ----------

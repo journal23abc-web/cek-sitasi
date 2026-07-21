@@ -127,6 +127,20 @@
   .an-yearchart text{ fill:var(--text-dim); font-family:var(--font-mono); }
   .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
 
+  .map-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:700px){ .map-grid{ grid-template-columns:1fr; } }
+  .map-col h4{ font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin:0 0 10px; }
+  .map-item{ display:flex; align-items:center; gap:8px; padding:6px 10px; border-radius:6px; font-size:12px; font-family:var(--font-mono); margin-bottom:4px; }
+  .map-item.matched{ background:rgba(62,217,143,.08); color:var(--green); }
+  .map-item.unmatched{ background:rgba(242,109,109,.08); color:var(--red); }
+  .map-item .d{ width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  .map-item.matched .d{ background:var(--green); } .map-item.unmatched .d{ background:var(--red); }
+  .map-item.matched{ cursor:pointer; transition:box-shadow .15s ease, transform .1s ease; }
+  .map-item.matched:hover{ box-shadow:0 0 0 1px var(--cyan) inset; }
+  .map-item.matched:focus-visible{ outline:2px solid var(--cyan); outline-offset:1px; }
+  .map-item.flash{ animation:mapFlash 1.1s ease; }
+  @keyframes mapFlash{ 0%,100%{ box-shadow:none; } 25%{ box-shadow:0 0 0 2px var(--cyan) inset; background:rgba(79,227,232,.16); } }
+
   .parse-banner{ border-radius:8px; padding:14px 16px; margin-bottom:16px; font-family:var(--font-mono); font-size:12px; line-height:1.7; }
   .parse-banner.ok{ background:rgba(62,217,143,.08); border:1px solid rgba(62,217,143,.3); color:var(--green); }
   .parse-banner.fail{ background:rgba(242,109,109,.08); border:1px solid rgba(242,109,109,.35); color:var(--text); }
@@ -243,12 +257,10 @@
       <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah berubah langsung sesuai bagian yang Anda centang — itulah yang akan tercetak/tersimpan.</div>
     </div>
 
-    <div class="preview-shell">
-      <div class="preview-toolbar">
-        <span>👁️ Pratinjau Laporan Ringkasan</span>
-      </div>
-      <div class="report-page" id="reportPreview"></div>
-    </div>
+    <details class="collapsible" id="citationMapDetails" open>
+      <summary>🗺️ Peta Sitasi (Teks ↔ Referensi)</summary>
+      <div class="collapsible-content"><div id="citationMapPanel"></div></div>
+    </details>
 
     <div class="panel" id="originalHlPanel" style="display:none;">
       <div class="field-label">Naskah Asli dengan Highlight + Komentar Word</div>
@@ -262,6 +274,13 @@
         <span><span class="d" style="background:var(--amber);"></span>Tahun tidak diketahui</span>
         <span><span class="d" style="background:var(--cyan);"></span>Saran</span>
       </div>
+    </div>
+
+    <div class="preview-shell">
+      <div class="preview-toolbar">
+        <span>👁️ Pratinjau Laporan Ringkasan</span>
+      </div>
+      <div class="report-page" id="reportPreview"></div>
     </div>
   </div>
 </div>

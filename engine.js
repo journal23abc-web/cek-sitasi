@@ -121,11 +121,22 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan|of|for|the)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   while ((m = narrativeRegex.exec(text)) !== null) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
     var year = m[2].trim();
+    if (!authors) continue;
+    // The bare-whitespace chaining above (needed for space-joined names/orgs with no comma,
+    // e.g. "van Dijk" or "Institute of International Finance") doesn't know about sentence
+    // boundaries, so it can also glue on the tail of the PREVIOUS sentence when it ends right
+    // before the citation, e.g. "...regarding Indonesian MSMEs. Suseno (2025)" would otherwise
+    // capture "Indonesian MSMEs. Suseno" as the author. Real chained name/org words only ever
+    // sit right before a short abbreviation/initial (<=3 letters, e.g. "J." or "al.") when a
+    // period is involved — a period after a longer word marks the end of a sentence, not a
+    // name, so drop everything up through the LAST such boundary.
+    var sentenceBreak = authors.match(/^(?:.*[a-zA-Z]{4,})\.\s+(.+)$/);
+    if (sentenceBreak) authors = sentenceBreak[1];
     if (!authors) continue;
     // Strip a leading discourse/transition word so it isn't glued onto the real author
     // list, e.g. "However, Riand and Radil (2022)" -> "Riand and Radil (2022)". Without
@@ -142,7 +153,14 @@ function extractAuthorDateCitations(text) {
     if (openP > closeP) continue;
     var firstWord = authors.split(/[\s,]+/)[0].toLowerCase();
     if (skipWords.has(firstWord)) continue;
-    citations.push({ type: 'narrative', raw: authors + ' (' + year + ')', authors: authors, year: year, position: m.index });
+    // `authors` may have had leading text stripped above (sentence fragments, discourse words,
+    // "The/A/An"), so it's no longer necessarily positioned at m.index — every stripping step
+    // only ever removes a prefix, though, so `authors` is still a verbatim substring of the
+    // original match; re-locate it so `position` stays accurate for anything that needs the
+    // real on-page location (e.g. writing hyperlinks back into the source document).
+    var authorsPos = text.indexOf(authors, m.index);
+    var position = authorsPos !== -1 ? authorsPos : m.index;
+    citations.push({ type: 'narrative', raw: authors + ' (' + year + ')', authors: authors, year: year, position: position });
   }
   return citations;
 }

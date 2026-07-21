@@ -69,6 +69,28 @@ test('n.d. (no date) citation matches', () => {
   assert.strictEqual(r.errors.length, 0);
 });
 
+test('narrative citation does not swallow the end of the previous sentence (regression)', () => {
+  const r = CE.extractAuthorDateCitations(
+    'Ini menjadi tantangan besar bagi Indonesian MSMEs. Suseno (2025) menyatakan bahwa hal ini penting.');
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].authors, 'Suseno');
+});
+
+test('narrative citation keeps "of/for/the" inside an institutional author name (regression)', () => {
+  const r = CE.extractAuthorDateCitations(
+    'Menurut Institute of International Finance and Deloitte (2023), pertumbuhan sektor ini pesat.');
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].authors, 'Institute of International Finance and Deloitte');
+});
+
+test('narrative citation position points at the actual author text, not a stripped-away prefix (regression)', () => {
+  const text = 'may be insufficient in certain contexts. Conversely, Mwangi (2024) document a negative relationship.';
+  const r = CE.extractAuthorDateCitations(text);
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].authors, 'Mwangi');
+  assert.strictEqual(text.slice(r[0].position, r[0].position + r[0].raw.length), r[0].raw);
+});
+
 console.log('\n=== Unicode / international names ===');
 
 test('normalizeTitle preserves accented Latin letters', () => {
