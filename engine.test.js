@@ -91,6 +91,25 @@ test('narrative citation position points at the actual author text, not a stripp
   assert.strictEqual(text.slice(r[0].position, r[0].position + r[0].raw.length), r[0].raw);
 });
 
+test('a statistical result reported in parentheses is not mistaken for a citation (regression)', () => {
+  const r1 = CE.extractAuthorDateCitations('(Effect = \u22120.0509, p = 0.4330, 95% CI [\u22120.1808; 0.0789])');
+  assert.strictEqual(r1.length, 0);
+  const r2 = CE.extractAuthorDateCitations('(Effect = \u22120.1023, BootSE = 0.0568, 95% BootCI [\u22120.2098; \u22120.0162])');
+  assert.strictEqual(r2.length, 0);
+  // sanity: a real citation right next to similar-looking decimals still works
+  const r3 = CE.extractAuthorDateCitations('as shown by the model (R\u00b2 = 0.45) (Smith, 2020).');
+  assert.strictEqual(r3.length, 1);
+  assert.strictEqual(r3[0].parts[0].year, '2020');
+});
+
+test('a short acronym citation matches its reference even with a trailing period (regression)', () => {
+  const r = validate(
+    'Internet penetration is defined per country-year (GEM, 2022), following established practice.',
+    'GEM. (2022). GEM 2022. Global Entrepreneurship Monitor. https://www.gemconsortium.org/data/sets?id=aps');
+  assert.strictEqual(r.errors.some(e => e.title === 'Sitasi tidak ada di daftar referensi'), false);
+  assert.strictEqual(r.errors.some(e => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
 console.log('\n=== Unicode / international names ===');
 
 test('normalizeTitle preserves accented Latin letters', () => {

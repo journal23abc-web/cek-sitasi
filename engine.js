@@ -50,7 +50,12 @@ function looksLikePersonalName(str) {
 
 function isInstitutionalAuthor(str) {
   if (!str) return false;
-  var s = str.trim();
+  // A trailing period is a formatting artifact (reference-list author fields like "GEM." from
+  // "GEM. (2022). ..." commonly carry one, citation tokens like "GEM" from "(GEM, 2022)" don't)
+  // — strip it before testing so both sides of a match agree on whether an acronym like "GEM"
+  // counts as institutional. Leaving this asymmetric caused real acronym citations/references to
+  // silently fail to match each other even when they were textually identical.
+  var s = str.trim().replace(/\.$/, '');
   if (ACRONYM_PATTERN.test(s)) return true;
   if (INSTITUTION_KEYWORDS.test(s)) return true;
   if (looksLikePersonalName(s)) return false;
@@ -110,7 +115,10 @@ function extractAuthorDateCitations(text) {
   var editorialMetaRegex = /^(received|revised|accepted|submitted|published|available\s+online|in\s+press|first\s+published)\s*:/i;
   while ((m = parenRegex.exec(text)) !== null) {
     var content = m[1].trim();
-    if (!/\b\d{4}[a-z]?\b/.test(content) && !/\bn\.d\./i.test(content)) continue;
+    // A "year" immediately preceded by a decimal point is really just the tail of a decimal
+    // fraction (e.g. "p = 0.4330" or "Effect = −0.0509") — common in statistics/regression
+    // results reported in parentheses — not a citation year, so it doesn't count here.
+    if (!/(?<![.\d])\d{4}[a-z]?\b/.test(content) && !/\bn\.d\./i.test(content)) continue;
     if (/^[\d\s,.\-–:;]+$/.test(content)) continue;
     // Journal manuscripts commonly carry a "(Received: ...; Revised: ...; Accepted: ...)"
     // line near the title/abstract. Every ";"-segment there matches "Word: Date", which
@@ -183,7 +191,7 @@ function parseParentheticalAuthorDate(content) {
 function parseSingleAuthorDate(text) {
   text = text.trim();
   if (!text) return null;
-  var yearMatch = text.match(/,?\s*(\d{4}[a-z]?|n\.d\.)(?:\s*[,:]\s*(.+))?$/);
+  var yearMatch = text.match(/,?\s*(?<![.\d])(\d{4}[a-z]?|n\.d\.)(?:\s*[,:]\s*(.+))?$/);
   if (!yearMatch) return null;
   var year = yearMatch[1];
   var tail = yearMatch[2] ? yearMatch[2].trim() : null;
@@ -226,7 +234,7 @@ function extractAuthorPageCitations(text) {
   var m;
   while ((m = parenRegex.exec(text)) !== null) {
     var content = m[1].trim();
-    if (/\b\d{4}\b/.test(content)) continue; // has a 4-digit year -> not MLA author-page
+    if (/(?<![.\d])\d{4}\b/.test(content)) continue; // has a 4-digit year -> not MLA author-page
     var parts = content.split(';').map(function(s) { return s.trim(); });
     var parsedParts = [];
     parts.forEach(function(part) {
