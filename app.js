@@ -37,7 +37,21 @@
     toast: document.getElementById('toast'),
     btnCopyReport: document.getElementById('btnCopyReport'),
     btnCopyFixes: document.getElementById('btnCopyFixes'),
+    jrMinCountEnabled: document.getElementById('jrMinCountEnabled'),
+    jrMinCountValue: document.getElementById('jrMinCountValue'),
+    jrYearRangeEnabled: document.getElementById('jrYearRangeEnabled'),
+    jrYearRangeMinPercent: document.getElementById('jrYearRangeMinPercent'),
+    jrYearRangeYears: document.getElementById('jrYearRangeYears'),
+    jrSourceTypeEnabled: document.getElementById('jrSourceTypeEnabled'),
+    jrSourceTypeMinPercent: document.getElementById('jrSourceTypeMinPercent'),
+    jrSourceTypeType: document.getElementById('jrSourceTypeType'),
+    jrOriginEnabled: document.getElementById('jrOriginEnabled'),
+    jrOriginMinPercent: document.getElementById('jrOriginMinPercent'),
+    jrApplyBtn: document.getElementById('jrApplyBtn'),
+    jrResultsPanel: document.getElementById('jrResultsPanel'),
   };
+
+  var jrOverrides = {}; // { referenceIndex: 'local'|'international' } — resets per new validation run
 
   var lastResult = null;
   var lastValidator = null;
@@ -141,6 +155,7 @@
       lastResult = result;
       lastValidator = validator;
       lastDoiIssues = [];
+      jrOverrides = {};
 
       els.loading.classList.remove('active');
       els.results.classList.add('active');
@@ -628,6 +643,65 @@
       b.map(function(i){return itemHTML(i, 'ref');}).join('') +
       '</div></div>';
   }
+
+  // ---------- Aturan Jurnal Custom (optional) ----------
+  function readJournalRulesConfig() {
+    return {
+      minCount: { enabled: els.jrMinCountEnabled.checked, value: parseInt(els.jrMinCountValue.value, 10) || 0 },
+      yearRange: { enabled: els.jrYearRangeEnabled.checked, years: parseInt(els.jrYearRangeYears.value, 10) || 10, minPercent: parseInt(els.jrYearRangeMinPercent.value, 10) || 0 },
+      sourceType: { enabled: els.jrSourceTypeEnabled.checked, type: els.jrSourceTypeType.value, minPercent: parseInt(els.jrSourceTypeMinPercent.value, 10) || 0 },
+      origin: { enabled: els.jrOriginEnabled.checked, minInternationalPercent: parseInt(els.jrOriginMinPercent.value, 10) || 0 },
+    };
+  }
+
+  function renderJournalRules() {
+    if (!lastResult) return;
+    var JR = window.JournalRulesEngine;
+    var rules = readJournalRulesConfig();
+    var evalResult = JR.evaluateRules(lastResult.references, rules, jrOverrides);
+    var classified = JR.classifyReferencesOrigin(lastResult.references, jrOverrides);
+
+    var html = '';
+    if (evalResult.totalRules === 0) {
+      html += '<p style="color:var(--text-dim);font-size:12px;">Aktifkan minimal satu aturan di atas, lalu klik "Terapkan Aturan".</p>';
+    } else {
+      html += '<div class="jr-summary ' + (evalResult.overallPass ? 'pass' : 'fail') + '">' +
+        (evalResult.overallPass ? '✅' : '⚠️') + ' ' + evalResult.passCount + ' dari ' + evalResult.totalRules + ' aturan terpenuhi' + '</div>';
+      evalResult.checks.forEach(function(c) {
+        html += '<div class="jr-check ' + (c.pass ? 'pass' : 'fail') + '">' +
+          '<span class="ic">' + (c.pass ? '✅' : '❌') + '</span>' +
+          '<div><div class="t">' + esc(c.label) + '</div><div class="d">' + c.detail + '</div></div>' +
+          '</div>';
+      });
+    }
+
+    html += '<div class="field-label" style="margin-top:18px;">Klasifikasi Asal Referensi (bisa dikoreksi manual)</div>' +
+      '<table class="jr-origin-table"><thead><tr><th>Referensi</th><th>Asal</th><th>Keyakinan</th></tr></thead><tbody>';
+    classified.forEach(function(c) {
+      var label = (c.ref.firstAuthor || '-') + (c.ref.year ? ' (' + c.ref.year + ')' : '');
+      html += '<tr>' +
+        '<td>' + esc(label) + (c.signal ? '<br><span style="color:var(--text-faint);font-size:10.5px;">' + esc(c.signal) + '</span>' : '') + '</td>' +
+        '<td><select data-ref-index="' + c.index + '">' +
+          '<option value="international"' + (c.origin === 'international' ? ' selected' : '') + '>🌍 Internasional</option>' +
+          '<option value="local"' + (c.origin === 'local' ? ' selected' : '') + '>🇮🇩 Lokal (Indonesia)</option>' +
+        '</select></td>' +
+        '<td><span class="jr-conf ' + c.confidence + '">' + (c.confidence === 'manual' ? 'Manual' : c.confidence === 'high' ? 'Tinggi' : 'Rendah') + '</span></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+
+    els.jrResultsPanel.innerHTML = html;
+
+    els.jrResultsPanel.querySelectorAll('select[data-ref-index]').forEach(function(sel) {
+      sel.addEventListener('change', function() {
+        var idx = parseInt(sel.getAttribute('data-ref-index'), 10);
+        jrOverrides[idx] = sel.value;
+        renderJournalRules(); // re-evaluate live so the origin-percentage check updates immediately
+      });
+    });
+  }
+
+  els.jrApplyBtn.addEventListener('click', renderJournalRules);
 
   function renderDetected(result) {
     var html = '<h4 style="color:var(--text);margin:0 0 10px;font-size:12.5px;">📝 In-Text Citations:</h4>';
