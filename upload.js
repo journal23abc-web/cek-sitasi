@@ -569,11 +569,15 @@
         var idx = parseInt(sel.getAttribute('data-ref-index'), 10);
         state.jrOverrides[idx] = sel.value;
         renderJournalRules(); // re-evaluate live so the origin-percentage check updates immediately
+        if (state.lastResult) renderReportPreview(state.lastResult, state.lastDoiIssues);
       });
     });
   }
 
-  els.jrApplyBtn.addEventListener('click', renderJournalRules);
+  els.jrApplyBtn.addEventListener('click', function() {
+    renderJournalRules();
+    if (state.lastResult) renderReportPreview(state.lastResult, state.lastDoiIssues);
+  });
 
   // ---------- HTML report preview + print-to-PDF export ----------
   function getSelectedReportSections() {
@@ -638,6 +642,19 @@
         html += '<li>' + (cls ? '<mark class="' + cls + '">[' + esc(d.status.toUpperCase()) + ']</mark>' : '[' + esc(d.status.toUpperCase()) + ']') + ' ' + esc(d.title) + ' — ' + esc(d.description) + '</li>';
       });
       html += '</ul>';
+    }
+
+    if (sections.indexOf('journalrules') !== -1 && window.JournalRulesEngine) {
+      var jrConfig = readJournalRulesConfig();
+      var jrEval = window.JournalRulesEngine.evaluateRules(result.references, jrConfig, state.jrOverrides);
+      if (jrEval.totalRules > 0) {
+        html += '<h2>Aturan Jurnal Custom</h2>';
+        html += '<p class="rp-meta">' + (jrEval.overallPass ? '✅' : '⚠️') + ' ' + jrEval.passCount + ' dari ' + jrEval.totalRules + ' aturan terpenuhi</p><ul>';
+        jrEval.checks.forEach(function(c) {
+          html += '<li>' + (c.pass ? '<mark class="hl-green">[LOLOS]</mark>' : '<mark class="hl-red">[TIDAK LOLOS]</mark>') + ' <b>' + esc(c.label) + '</b> — ' + c.detail + '</li>';
+        });
+        html += '</ul>';
+      }
     }
 
     html += '<div class="rp-foot">Laporan ini dihasilkan otomatis berdasarkan pola teks (heuristik), bukan pemeriksaan tata bahasa penuh atau penilaian editorial. Bagian yang di-highlight menandai hal yang perlu diperiksa ulang secara manual, bukan kesalahan pasti. Selalu tinjau kembali sebelum mengirimkan naskah ke jurnal.</div>';

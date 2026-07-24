@@ -421,6 +421,19 @@
       html += '</ul>';
     }
 
+    if (sections.indexOf('journalrules') !== -1 && window.JournalRulesEngine) {
+      var jrConfig = readJournalRulesConfig();
+      var jrEval = window.JournalRulesEngine.evaluateRules(result.references, jrConfig, jrOverrides);
+      if (jrEval.totalRules > 0) {
+        html += '<h2>Aturan Jurnal Custom</h2>';
+        html += '<p class="rp-meta">' + (jrEval.overallPass ? '✅' : '⚠️') + ' ' + jrEval.passCount + ' dari ' + jrEval.totalRules + ' aturan terpenuhi</p><ul>';
+        jrEval.checks.forEach(function(c) {
+          html += '<li>' + (c.pass ? '<mark class="hl-green">[LOLOS]</mark>' : '<mark class="hl-red">[TIDAK LOLOS]</mark>') + ' <b>' + esc(c.label) + '</b> — ' + c.detail + '</li>';
+        });
+        html += '</ul>';
+      }
+    }
+
     html += '<div class="rp-foot">Laporan ini dihasilkan otomatis berdasarkan pola teks (heuristik), bukan pemeriksaan tata bahasa penuh atau penilaian editorial. Bagian yang di-highlight menandai hal yang perlu diperiksa ulang secara manual, bukan kesalahan pasti. Selalu tinjau kembali sebelum mengirimkan naskah ke jurnal.</div>';
 
     els.reportPreview.innerHTML = html;
@@ -697,11 +710,12 @@
         var idx = parseInt(sel.getAttribute('data-ref-index'), 10);
         jrOverrides[idx] = sel.value;
         renderJournalRules(); // re-evaluate live so the origin-percentage check updates immediately
+        renderReportPreview();
       });
     });
   }
 
-  els.jrApplyBtn.addEventListener('click', renderJournalRules);
+  els.jrApplyBtn.addEventListener('click', function() { renderJournalRules(); renderReportPreview(); });
 
   function renderDetected(result) {
     var html = '<h4 style="color:var(--text);margin:0 0 10px;font-size:12.5px;">📝 In-Text Citations:</h4>';
