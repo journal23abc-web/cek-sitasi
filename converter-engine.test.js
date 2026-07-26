@@ -141,9 +141,22 @@ test('paren number -> bracket number, same index preserved via reference order',
 
 console.log('\n=== Range compression ===');
 
-test('compressRanges collapses consecutive runs', () => {
+test('compressRanges only merges runs of 3+ consecutive numbers (IEEE convention)', () => {
+  // [1,2,3] -> 3 consecutive -> merged into "1-3".
+  // [5,6] -> only 2 consecutive -> IEEE writes these separately ("[5], [6]"), not "5-6".
+  // [8] -> lone number, unchanged.
   const out = CC._internal.compressRanges([1,2,3,5,6,8]);
-  assert.deepStrictEqual(out, ['1-3', '5-6', '8']);
+  assert.deepStrictEqual(out, ['1-3', '5', '6', '8']);
+});
+
+test('formatNumeric: exactly two consecutive citations use a comma, not an en-dash range', () => {
+  const out = CC._internal.formatNumeric([1, 2], 'ieee');
+  assert.strictEqual(out, '[1], [2]');
+});
+
+test('formatNumeric: three or more consecutive citations use an en-dash range', () => {
+  const out = CC._internal.formatNumeric([1, 2, 3], 'ieee');
+  assert.strictEqual(out, '[1]\u2013[3]');
 });
 
 console.log('\n=== citationSpans (for UI preview) ===');
@@ -160,6 +173,18 @@ test('citationSpans covers matched and unmatched citations with correct coordina
   const second = r.citationSpans[1];
   assert.strictEqual(second.matched, false);
   assert.strictEqual(article.slice(second.start, second.end), second.original);
+});
+
+console.log('\n=== Hyphenated given-name initials (e.g. "T.-J.") ===');
+
+test('hyphenated initial pair stays as ONE author, not split in two', () => {
+  const article = 'Metode ini diperkenalkan (Yang et al., 2018) untuk adaptasi platform.';
+  const refs = 'Yang, T.-J., Howard, A., Chen, B., Zhang, X., Go, A., Sandler, M., Sze, V., & Adam, H. (2018). NetAdapt. Journal X, 1(1), 1-9.';
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.strictEqual(r.unmatched.length, 0, 'Yang et al. should resolve cleanly to the reference');
+  assert.ok(r.convertedArticle.includes('[1]'), r.convertedArticle);
+  // First author's initials ("T.-J.") should survive intact in the converted reference line.
+  assert.ok(r.referenceLines[0].line.includes('T.-J. Yang') || r.referenceLines[0].line.includes('T. J. Yang'), r.referenceLines[0].line);
 });
 
 console.log(`\n${pass} passed, ${fail} failed.\n`);

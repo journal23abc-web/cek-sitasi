@@ -324,7 +324,12 @@ var AuthorParsers = {
     var parts = splitOnSeparators(cleaned);
     var authors = [];
     var buffer = null;
-    var initialsOnly = /^([A-Z]\.\s*)*[A-Z]\.?$/;
+    // Matches a run of initials, e.g. "J.", "J. M.", or a hyphenated given name written as
+    // two initials joined by a dash (e.g. "T.-J." for "Tien-Ju") — common in APA/Harvard
+    // reference lists. The period is required on the first letter of each whitespace-
+    // separated cluster (so real surnames like "Yang" or all-caps acronyms like "NASA"
+    // still correctly fail to match), but optional on a hyphen-joined trailing letter.
+    var initialsOnly = /^(?:[A-Z]\.(?:-[A-Z]\.?)*\s*)*[A-Z]\.?(?:-[A-Z]\.?)*$/;
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
       if (initialsOnly.test(p)) {

@@ -285,6 +285,26 @@ test('journal article is classified as journal-article (DOI expected)', () => {
   assert.ok(!CE.DOI_NOT_EXPECTED_TYPES[t]);
 });
 
+console.log('\n=== Author-list parsing (hyphenated given-name initials) ===');
+
+test('hyphenated initial pair ("T.-J.") stays as ONE author, not split in two', () => {
+  const r = CE.parseAuthorsForStyle('Yang, T.-J., Howard, A., Chen, B.', 'apa7');
+  assert.strictEqual(r.authors.length, 3);
+  assert.strictEqual(r.authors[0], 'Yang, T.-J.');
+});
+
+test('plain multi-initial ("Smith, J. M.") still parses as one author (no regression)', () => {
+  const r = CE.parseAuthorsForStyle('Smith, J. M., Doe, A.', 'apa7');
+  assert.strictEqual(r.authors.length, 2);
+  assert.strictEqual(r.authors[0], 'Smith, J. M.');
+});
+
+test('a bare surname with no following initials is still its own (incomplete) entry, not merged', () => {
+  const r = CE.parseAuthorsForStyle('Yang, Howard, A.', 'apa7');
+  assert.strictEqual(r.authors.length, 2);
+  assert.strictEqual(r.authors[0], 'Yang');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

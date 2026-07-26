@@ -65,18 +65,41 @@
     return String(pageInfo).replace(/^pp?\.\s*/i, '').trim() || null;
   }
 
+  // Formats a single given-name token as initials, preserving a hyphenated pair like "T.-J."
+  // (for a hyphenated first name such as "Tien-Ju") as "T.-J." instead of collapsing it down
+  // to just the first letter — each hyphen-joined part gets its own initial+period.
+  function formatInitialToken(t) {
+    var raw = (t || '').trim();
+    if (!raw) return '';
+    if (raw.indexOf('-') !== -1) {
+      return raw.split('-').map(function(part) {
+        var c = part.replace(/\./g, '').trim();
+        return c ? c.charAt(0).toUpperCase() + '.' : '';
+      }).filter(Boolean).join('-');
+    }
+    var c = raw.replace(/\./g, '').trim();
+    return c ? c.charAt(0).toUpperCase() + '.' : '';
+  }
+  // Same idea, but returns bare letters with no periods/hyphens — for Vancouver's glued
+  // initials block (e.g. "T.-J." -> "TJ", not just "T").
+  function initialLettersFromToken(t) {
+    var raw = (t || '').trim();
+    if (!raw) return '';
+    return raw.split('-').map(function(part) {
+      var c = part.replace(/\./g, '').trim();
+      return c ? c.charAt(0).toUpperCase() : '';
+    }).join('');
+  }
+
   function renderGivenAsInitials(givenTokens) {
-    return givenTokens.map(function(t) {
-      var c = (t || '').replace(/\./g, '').trim();
-      return c ? c.charAt(0).toUpperCase() + '.' : '';
-    }).filter(Boolean).join(' ');
+    return givenTokens.map(formatInitialToken).filter(Boolean).join(' ');
   }
   // Keeps full-name tokens as-is (only normalizes bare initials to "X."); used for styles
   // whose convention is a full given name (Chicago, MLA) so we don't downgrade information
   // the source actually had.
   function renderGivenNatural(givenTokens) {
     return givenTokens.map(function(t) {
-      if (isInitialToken(t)) { var c = t.replace(/\./g, ''); return c ? c.toUpperCase() + '.' : ''; }
+      if (isInitialToken(t)) return formatInitialToken(t);
       return t;
     }).filter(Boolean).join(' ');
   }
@@ -96,10 +119,7 @@
         return (ini2 ? ini2 + ' ' : '') + last;
       }
       case 'vancouver': { // "Last FM" (no dots/spaces)
-        var block = givenTokens.map(function(t) {
-          var c = (t || '').replace(/\./g, '');
-          return c ? c.charAt(0).toUpperCase() : '';
-        }).join('');
+        var block = givenTokens.map(initialLettersFromToken).join('');
         return last + (block ? ' ' + block : '');
       }
       case 'first-inverted': { // Chicago / MLA
@@ -201,15 +221,22 @@
   }
 
   // Compresses a sorted-or-unsorted list of numbers into IEEE/Vancouver-style groups,
-  // e.g. [1,2,3,5] -> ["1-3","5"]. Used so consecutive citation runs collapse into a range
-  // instead of listing every number, matching standard numeric-citation editorial practice.
+  // e.g. [1,2,3,5] -> ["1-3","5"]. Only collapses a run into a range when it has THREE OR
+  // MORE consecutive numbers — standard IEEE editorial practice writes exactly two
+  // consecutive citations as "[1], [2]", not "[1]-[2]"; a dash range is reserved for 3+
+  // (e.g. "[1]-[3]"). Vancouver follows the same convention.
   function compressRanges(nums) {
     var sorted = nums.slice().sort(function(a, b) { return a - b; });
     var out = [], i = 0;
     while (i < sorted.length) {
       var start = sorted[i], end = start;
       while (i + 1 < sorted.length && sorted[i + 1] === end + 1) { end = sorted[i + 1]; i++; }
-      out.push(start === end ? String(start) : (start + '-' + end));
+      var runLength = end - start + 1;
+      if (runLength >= 3) {
+        out.push(start + '-' + end);
+      } else {
+        for (var n = start; n <= end; n++) out.push(String(n));
+      }
       i++;
     }
     return out;

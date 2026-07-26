@@ -327,9 +327,11 @@
   // ==================================================================================
   function buildDocxTextIndex(xmlDoc) {
     var segments = [];
+    var paragraphInfo = [];
     var text = '';
     var paragraphs = xmlDoc.getElementsByTagName('w:p');
     for (var p = 0; p < paragraphs.length; p++) {
+      var paraStart = text.length;
       var wts = paragraphs[p].getElementsByTagName('w:t');
       for (var i = 0; i < wts.length; i++) {
         var node = wts[i];
@@ -339,8 +341,38 @@
         text += t;
       }
       text += '\n';
+      paragraphInfo.push({ element: paragraphs[p], start: paraStart, end: text.length });
     }
-    return { text: text, segments: segments };
+    return { text: text, segments: segments, paragraphs: paragraphInfo };
+  }
+
+  // Finds the <w:p> element whose text range contains a given offset into the flat index text.
+  function paragraphAtOffset(index, offset) {
+    for (var i = 0; i < index.paragraphs.length; i++) {
+      var pi = index.paragraphs[i];
+      if (offset >= pi.start && offset < pi.end) return pi.element;
+    }
+    return null;
+  }
+
+  // Physically reorders a set of <w:p> elements to match `orderedElements` (target order),
+  // in place, right where the FIRST of them currently sits — so the printed/visible order in
+  // Word matches the new numbering exactly (e.g. IEEE/Vancouver reference lists must read
+  // [1], [2], [3]... top to bottom, not just have that text baked in while the paragraphs stay
+  // in their original (e.g. alphabetical) order). Entries that couldn't be located in the
+  // original document (null) are simply skipped — left wherever they were, same as before.
+  function reorderParagraphs(xmlDoc, orderedElements) {
+    var valid = orderedElements.filter(Boolean);
+    if (valid.length === 0) return 0;
+    var first = valid[0];
+    var parent = first.parentNode;
+    if (!parent) return 0;
+    var placeholder = xmlDoc.createComment('ref-reorder-anchor');
+    parent.insertBefore(placeholder, first);
+    valid.forEach(function(el) { if (el.parentNode) el.parentNode.removeChild(el); });
+    valid.forEach(function(el) { parent.insertBefore(el, placeholder); });
+    parent.removeChild(placeholder);
+    return valid.length;
   }
 
   function loadDocxTextIndex(file) {
@@ -460,29 +492,39 @@
             });
           }
 
-          // Reference list: find each original reference line verbatim in the reference zone
-          // and swap in the converted line (numbering/author format only) — paragraph order
-          // in the .docx is NOT changed, only each entry's own text (see disclaimer in UI).
+          // Reference list: find each original reference line verbatim in the reference zone,
+          // swap in the converted line (numbering/author format), AND remember which <w:p> it
+          // lives in — captured BEFORE any text mutation, using the ORIGINAL positions, so the
+          // paragraph elements can be physically reordered afterward to match `referenceLines`'
+          // target order (numbering isn't just text — the printed order has to match it too).
           var headingInfo = CE.findReferencesHeading(fullText);
           var refZoneStart = headingInfo ? headingInfo.offset : (articleOffset !== -1 ? articleOffset + state.docxOriginalArticleText.length : 0);
+          var refParagraphsInTargetOrder = [];
           result.referenceLines.forEach(function(rl) {
             var idx = fullText.indexOf(rl.original, refZoneStart);
-            if (idx === -1) return;
+            if (idx === -1) { refParagraphsInTargetOrder.push(null); return; }
             matches.push({ start: idx, end: idx + rl.original.length, text: rl.line });
+            refParagraphsInTargetOrder.push(paragraphAtOffset(index, idx));
           });
 
           matches.sort(function(a, b) { return a.start - b.start; });
           var clean = [], lastEnd = -1;
           matches.forEach(function(m) { if (m.start >= lastEnd) { clean.push(m); lastEnd = m.end; } });
 
-          if (clean.length === 0) return { blob: null, count: 0 };
+          if (clean.length === 0) return { blob: null, count: 0, reordered: 0 };
 
           var count = applyPlainReplacements(xmlDoc, index, clean);
+          // Physically move the reference paragraphs into the new target order (harmless if
+          // they already happen to be in that order — reorderParagraphs is a no-op-equivalent
+          // in that case, just re-inserting each element where an equivalent one already was).
+          var locatedCount = refParagraphsInTargetOrder.filter(Boolean).length;
+          var reorderedCount = locatedCount >= 2 ? reorderParagraphs(xmlDoc, refParagraphsInTargetOrder) : 0;
+
           var newXml = new XMLSerializer().serializeToString(xmlDoc.documentElement);
           if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
           zip.file(docPath, newXml);
           return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-            .then(function(blob) { return { blob: blob, count: count }; });
+            .then(function(blob) { return { blob: blob, count: count, reordered: reorderedCount, totalRefs: result.referenceLines.length }; });
         });
       })
       .then(function(res) {
@@ -490,7 +532,12 @@
         if (!res.blob) { setExportStatus('⚠️ Tidak ada bagian yang bisa dicocokkan/diganti di file aslinya.', 'warn'); return; }
         var dateStr = new Date().toISOString().slice(0, 10);
         triggerDownload(res.blob, (state.originalFile.name || 'naskah').replace(/\.docx$/i, '') + '-KONVERSI-' + dateStr + '.docx');
-        setExportStatus('✅ Berhasil — ' + res.count + ' bagian diganti di dalam file asli (format tetap terjaga).', 'ok');
+        var msg = '✅ Berhasil — ' + res.count + ' bagian diganti di dalam file asli (format tetap terjaga).';
+        if (res.reordered > 0) {
+          msg += ' Urutan paragraf referensi disesuaikan (' + res.reordered + '/' + res.totalRefs + ' entri ditemukan & diurutkan ulang) supaya penomoran berurut dari 1 sesuai urutan tampil.';
+          if (res.reordered < res.totalRefs) msg += ' Sisanya tidak ditemukan persis di teks aslinya — cek posisinya manual.';
+        }
+        setExportStatus(msg, 'ok');
       })
       .catch(function(err) {
         els.btnExportDocxOriginal.disabled = false;
