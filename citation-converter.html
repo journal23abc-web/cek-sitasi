@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Konversi Sitasi Antar Gaya</title>
+<script>
+(function(){
+  try {
+    var saved = localStorage.getItem('citationValidatorTheme');
+    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="shared.css?v=3">
+<style>
+  .wrap{ max-width:1200px; margin:0 auto; position:relative; z-index:1; }
+  a{ color:var(--cyan); }
+
+  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
+  h1{ font-family:var(--font-display); font-weight:700; font-size:28px; margin:0; letter-spacing:-0.01em; }
+  .status-pill{ display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; color:var(--text-dim); border:1px solid var(--hairline); border-radius:20px; padding:6px 12px; background:var(--panel); }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px 1px var(--glow-cyan); animation:pulse 2s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  .ghost-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; cursor:pointer; transition:all .15s ease; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+  .ghost-link:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  .format-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px; }
+  .format-row label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); }
+  select{ font-family:var(--font-mono); font-size:13px; color:var(--text); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
+  select:focus{ border-color:var(--cyan); }
+  .confidence-badge{ font-family:var(--font-mono); font-size:11px; padding:4px 10px; border-radius:12px; border:1px solid var(--hairline); color:var(--text-dim); display:none; }
+  .confidence-badge.show{ display:inline-flex; align-items:center; gap:6px; }
+  .confidence-badge .bar{ width:40px; height:4px; background:var(--hairline); border-radius:2px; overflow:hidden; }
+  .confidence-badge .fill{ height:100%; background:linear-gradient(90deg, var(--cyan), var(--violet)); }
+
+  .swap-btn{ font-size:16px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:50%; width:34px; height:34px; cursor:pointer; color:var(--cyan); display:inline-flex; align-items:center; justify-content:center; transition:all .15s ease; }
+  .swap-btn:hover{ border-color:var(--cyan); transform:rotate(180deg); }
+
+  .input-mode-tab{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.04em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:7px; padding:8px 14px; cursor:pointer; transition:all .15s ease; }
+  .input-mode-tab:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .input-mode-tab.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
+  .input-mode-pane{ display:none; }
+  .input-mode-pane.active{ display:block; }
+  .input-mode-tabs{ display:flex; gap:8px; margin:16px 0 14px; flex-wrap:wrap; }
+
+  .input-grid{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media(max-width:860px){ .input-grid{ grid-template-columns:1fr; } }
+  .field-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  textarea{ width:100%; min-height:260px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:14px; color:var(--text); font-family:var(--font-mono); font-size:12.5px; line-height:1.7; resize:vertical; outline:none; transition:border-color .15s ease, box-shadow .15s ease; }
+  textarea:focus{ border-color:var(--cyan); box-shadow:0 0 0 3px rgba(79,227,232,.12); }
+  textarea::placeholder{ color:var(--text-faint); }
+  textarea[readonly]{ background:var(--panel); color:var(--text); }
+
+  .actions{ display:flex; align-items:center; gap:16px; margin:22px 0; flex-wrap:wrap; }
+  button.primary{ font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
+  button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
+  button.primary:active{ transform:translateY(1px); }
+  button.ghost{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; cursor:pointer; transition:all .15s ease; }
+  button.ghost:hover{ border-color:var(--cyan); color:var(--cyan); }
+  button.ghost.copied{ border-color:var(--green); color:var(--green); }
+
+  .loading{ display:none; text-align:center; padding:30px; font-family:var(--font-mono); color:var(--text-dim); font-size:12.5px; }
+  .loading.active{ display:block; }
+  .spinner{ width:32px; height:32px; border:3px solid var(--hairline); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; margin:0 auto 12px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .results{ display:none; }
+  .results.active{ display:block; }
+
+  .summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:18px; }
+  .sum-card{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center; }
+  .sum-card .n{ font-family:var(--font-display); font-size:22px; font-weight:700; }
+  .sum-card .l{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:2px; }
+  .sum-card.warn .n{ color:var(--amber); } .sum-card.ok .n{ color:var(--green); } .sum-card.fmt .n{ font-size:14px; color:var(--violet); }
+
+  .output-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+
+  .issue-list{ display:flex; flex-direction:column; gap:8px; }
+  .issue-item{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:11px 14px; border-left:3px solid var(--amber); font-size:12px; }
+  .issue-item .raw{ font-family:var(--font-mono); color:var(--text); margin-bottom:3px; }
+  .issue-item .note{ color:var(--text-dim); font-size:11.5px; }
+
+  .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.7; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+  .disclaimer b{ color:var(--text); }
+  .disclaimer ul{ margin:8px 0; padding-left:20px; }
+  .disclaimer li{ margin-bottom:4px; }
+
+  .toast{ position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--panel-raised); border:1px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:var(--font-mono); font-size:12px; z-index:1000; transition:transform .3s ease; }
+  .toast.show{ transform:translateX(-50%) translateY(0); }
+
+  .scope-note{ background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:14px 16px; margin-bottom:18px; font-size:12px; color:var(--text-dim); line-height:1.7; }
+  .scope-note b{ color:var(--text); }
+
+  details.collapsible{ background:var(--panel); border:1px solid var(--hairline); border-radius:10px; padding:4px 18px; margin-bottom:16px; }
+  details.collapsible summary{ cursor:pointer; padding:14px 0; font-family:var(--font-mono); font-size:12.5px; letter-spacing:.04em; color:var(--text); list-style:none; }
+  details.collapsible summary::-webkit-details-marker{ display:none; }
+  details.collapsible summary::before{ content:'▸ '; color:var(--cyan); }
+  details.collapsible[open] summary::before{ content:'▾ '; }
+  .collapsible-content{ padding-bottom:16px; }
+</style>
+</head>
+<body>
+<div class="watermark" aria-hidden="true"><span>JOURNAL TOOLS</span></div>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
+      <h1>Konversi Sitasi Antar Gaya</h1>
+    </div>
+    <div class="status-pill" style="gap:14px;">
+      <a href="index.html" class="ghost-link">🏠 Beranda</a>
+      <button id="themeToggle" class="ghost-link" style="cursor:pointer;">☀️ Terang</button>
+      <a href="validator-copy.html" class="ghost-link">✏️ Validator Sitasi</a>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot"></span>ENGINE READY</span>
+    </div>
+  </header>
+
+  <div class="scope-note">
+    <b>Yang dikonversi:</b> sitasi in-text (parenthetical maupun naratif) — nama penulis, "&"/"and", ambang "et al.", nomor referensi, dsb — dicocokkan ke daftar referensi seperti yang dipakai Validator Sitasi, supaya hasilnya konsisten.
+    Sitasi yang <b>tidak bisa dicocokkan dengan pasti ke satu referensi tetap dibiarkan seperti aslinya</b> dan ditandai untuk dicek manual, daripada ditebak dan salah.
+    <b>Daftar referensi:</b> penomoran/urutan &amp; format nama penulis ikut disesuaikan; bagian judul/jurnal/halaman <b>sengaja tidak diubah</b> (lihat catatan di bawah hasil).
+  </div>
+
+  <div class="panel">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+
+    <div class="format-row">
+      <label for="sourceStyleSelect">Dari Gaya</label>
+      <select id="sourceStyleSelect">
+        <option value="auto">🔍 Auto-detect</option>
+        <option value="apa7" selected>APA 7th Edition</option>
+        <option value="mla9">MLA 9th Edition</option>
+        <option value="chicago">Chicago (Author-Date)</option>
+        <option value="harvard">Harvard</option>
+        <option value="ieee">IEEE</option>
+        <option value="vancouver">Vancouver</option>
+      </select>
+      <span class="confidence-badge" id="confBadge">
+        <span id="confText">-</span>
+        <span class="bar"><span class="fill" id="confFill" style="width:0%"></span></span>
+      </span>
+      <button type="button" class="swap-btn" id="swapBtn" title="Tukar gaya sumber &amp; tujuan">⇄</button>
+      <label for="targetStyleSelect">Ke Gaya</label>
+      <select id="targetStyleSelect">
+        <option value="apa7">APA 7th Edition</option>
+        <option value="mla9">MLA 9th Edition</option>
+        <option value="chicago">Chicago (Author-Date)</option>
+        <option value="harvard">Harvard</option>
+        <option value="ieee" selected>IEEE</option>
+        <option value="vancouver">Vancouver</option>
+      </select>
+    </div>
+
+    <div class="input-mode-tabs" role="tablist" aria-label="Cara memasukkan naskah">
+      <button class="input-mode-tab active" data-mode="paste" role="tab" aria-selected="true" aria-controls="pane-paste" id="tab-btn-paste">📋 Tempel Dokumen Lengkap</button>
+      <button class="input-mode-tab" data-mode="manual" role="tab" aria-selected="false" aria-controls="pane-manual" id="tab-btn-manual" tabindex="-1">✏️ Isi Manual (Artikel + Referensi)</button>
+    </div>
+
+    <div class="input-mode-pane active" id="pane-paste" role="tabpanel" aria-labelledby="tab-btn-paste">
+      <div class="field-label">Tempel Dokumen Lengkap (Introduction — References), lalu klik Pisahkan</div>
+      <textarea id="fullDocText" style="min-height:110px;" placeholder="Tempel seluruh naskah di sini, dari Introduction sampai daftar Referensi/Daftar Pustaka. Sistem akan otomatis mendeteksi heading referensi dan memisahkannya ke dua kolom di tab &quot;Isi Manual&quot;."></textarea>
+      <div class="actions" style="margin:10px 0 4px;">
+        <button class="ghost" id="btnAutoSplit">✂️ Pisahkan Otomatis</button>
+        <span id="splitStatus" role="status" aria-live="polite" style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);"></span>
+      </div>
+    </div>
+
+    <div class="input-mode-pane" id="pane-manual" role="tabpanel" aria-labelledby="tab-btn-manual">
+      <div class="input-grid">
+        <div>
+          <div class="field-label">Teks Artikel (In-Text Citations)</div>
+          <textarea id="articleText" style="min-height:200px;" placeholder="Tempel seluruh teks artikel Anda di sini..."></textarea>
+        </div>
+        <div>
+          <div class="field-label">Daftar Referensi (satu entri per baris, gaya SUMBER)</div>
+          <textarea id="referenceText" style="min-height:200px;" placeholder="Tempel daftar referensi Anda di sini, satu per baris..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="convertBtn">Konversi Sitasi</button>
+      <span id="topStatus" style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);"></span>
+    </div>
+
+    <div class="disclaimer">
+      Sama seperti Validator Sitasi, alat ini bekerja berdasarkan pola teks (heuristik), bukan parser gaya-sitasi formal. Untuk gaya author-date yang mirip (APA/Harvard/Chicago), auto-detect memakai perbedaan tanda kutip &amp; posisi tahun — kalau dirasa salah deteksi, pilih gaya secara manual. <b>Selalu periksa ulang hasil konversi sebelum dipakai</b>, terutama sitasi yang ditandai "tidak diubah".
+    </div>
+  </div>
+
+  <div class="loading" id="loading"><div class="spinner"></div>Mengonversi sitasi...</div>
+
+  <div class="results" id="results">
+    <div class="summary-grid" id="summaryGrid"></div>
+
+    <details class="collapsible" id="unmatchedDetails">
+      <summary>⚠️ Sitasi Tidak Diubah (perlu dicek manual) — <span id="unmatchedCount">0</span></summary>
+      <div class="collapsible-content"><div class="issue-list" id="unmatchedList"></div></div>
+    </details>
+
+    <div class="panel">
+      <div class="output-header">
+        <div class="field-label" style="margin-bottom:0;">Artikel — Sitasi Sudah Dikonversi</div>
+        <button class="ghost" id="btnCopyArticle">📋 Copy Teks Artikel</button>
+      </div>
+      <textarea id="convertedArticleOut" readonly style="min-height:320px;"></textarea>
+    </div>
+
+    <div class="panel">
+      <div class="output-header">
+        <div class="field-label" style="margin-bottom:0;">Daftar Referensi — Diberi Nomor/Urutan &amp; Format Nama Penulis Baru</div>
+        <button class="ghost" id="btnCopyRefs">📋 Copy Daftar Referensi</button>
+      </div>
+      <textarea id="convertedRefsOut" readonly style="min-height:220px;"></textarea>
+      <div class="disclaimer">
+        <b>Yang diubah pada daftar referensi:</b>
+        <ul>
+          <li>Urutan entri — alfabetis untuk APA/Harvard/Chicago/MLA, urutan kemunculan sitasi pertama di teks untuk IEEE/Vancouver.</li>
+          <li>Penomoran <code>[1]</code>/<code>1.</code> untuk gaya numerik (IEEE/Vancouver).</li>
+          <li>Format nama penulis — urutan "Nama Belakang, Inisial" ⇄ "Inisial Nama Belakang" ⇄ "Nama Belakang IN", pemisah "&amp;"/"and", ambang "et al." sesuai gaya tujuan.</li>
+        </ul>
+        <b>Yang TIDAK diubah (perlu disunting manual):</b> penempatan tahun, tanda kutip judul, format volume/nomor/halaman, dan detail lain — karena itu berbeda-beda per jenis sumber dan berisiko salah kalau dibuat otomatis tanpa nama depan lengkap penulis (yang tidak selalu tersedia dari gaya sumber). Setelah disunting manual, jalankan lagi lewat <a href="validator-copy.html">Validator Sitasi</a> untuk memastikan formatnya benar.
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script src="theme.js?v=1"></script>
+<script src="engine.js?v=13"></script>
+<script src="converter-engine.js?v=1"></script>
+<script src="convert-ui.js?v=1"></script>
+</body>
+</html>

@@ -10,15 +10,22 @@ index.html             Beranda (hub "Journal Tools") — pilih mau pakai tool ya
 validator-copy.html    Validator sitasi via copy-paste teks — tempel & validasi langsung
 validator-upload.html  Validator sitasi via upload .docx — ekspor laporan PDF / docx ber-highlight
 preliminary-check.html Preliminary check naskah (upload .docx) — dashboard IMRAD & checklist
+link-upload.html       Tautkan sitasi in-text ke entri referensi (hyperlink internal) di .docx
+citation-converter.html Konversi sitasi in-text (parenthetical & naratif) antar gaya, mis. APA7 → IEEE
 shared.css              Design tokens, watermark & komponen yang identik di semua halaman
 theme.js                 Toggle dark/light mode, dipakai semua halaman
 engine.js                Mesin inti validator sitasi: parsing referensi, deteksi gaya, matching
 docstats-engine.js       Mesin analisis struktur naskah (judul/abstrak/IMRAD) untuk Preliminary Check
+link-engine.js            Mesin penautan sitasi <-> referensi untuk link-upload.html
+converter-engine.js       Mesin konversi sitasi antar gaya — memakai ulang parsing & matching engine.js
 app.js                    UI logic untuk validator-copy.html
 upload.js                 UI logic untuk validator-upload.html (JSZip + Mammoth.js)
 preliminary.js            UI logic untuk preliminary-check.html (JSZip)
+link-upload.js            UI logic untuk link-upload.html (JSZip + Mammoth.js)
+convert-ui.js             UI logic untuk citation-converter.html
 validator-worker.js     Web Worker — menjalankan validasi berat di background thread
-tests/                  Automated test suite (Node, tanpa dependency)
+engine.test.js, docstats-engine.test.js, journal-rules-engine.test.js, converter-engine.test.js
+                        Automated test suite (Node, tanpa dependency) — lihat catatan di bawah
 ```
 
 `index.html` sengaja dibuat sesederhana mungkin (cuma kartu-kartu tautan) supaya gampang
@@ -28,14 +35,22 @@ tautan/isinya, tanpa perlu mengubah apa pun di halaman tool lainnya.
 ## Menjalankan tes
 
 ```
-node tests/engine.test.js
-node tests/docstats-engine.test.js
+node engine.test.js
+node docstats-engine.test.js
+node journal-rules-engine.test.js
+node converter-engine.test.js
 ```
 
-Tidak perlu `npm install` — `engine.js` dan `docstats-engine.js` murni JavaScript tanpa
-dependency, tes memakai modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal
-(aman dipakai di CI). (Sebelumnya `engine.test.js` sempat salah tempat di root proyek
-padahal require path & instruksinya mengasumsikan `tests/` — sudah diperbaiki.)
+Tidak perlu `npm install` — semua *-engine.js murni JavaScript tanpa dependency, tes memakai
+modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal (aman dipakai di CI).
+
+> **Catatan:** file-file `*.test.js` sebenarnya ada di root proyek (bukan di folder `tests/`),
+> tapi `require`-nya masih menulis `path.join(__dirname, '..', 'engine.js')` — itu menunjuk ke
+> SATU LEVEL DI ATAS root proyek, sehingga `node engine.test.js` gagal dengan
+> `Cannot find module`. Ini bukan sesuatu yang berubah lewat perubahan di dokumen ini; perlu
+> perbaikan terpisah (ubah requirenya jadi `path.join(__dirname, 'engine.js')`, atau benar-benar
+> pindahkan file test ke folder `tests/`) sebelum instruksi di atas benar-benar bisa dijalankan.
+> `converter-engine.test.js` (baru) sudah memakai path yang benar sejak awal.
 
 ## Gaya sitasi yang didukung
 
@@ -92,6 +107,15 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
 - **DOI check** bergantung API publik CrossRef — hasil "tidak ditemukan" atau
   "metadata beda" bisa juga karena DOI belum terindeks CrossRef, bukan berarti DOI-nya
   salah (khususnya jurnal kecil/baru).
+- **Konversi Sitasi Antar Gaya** hanya mengubah sitasi in-text yang bisa dicocokkan
+  dengan pasti ke satu entri di daftar referensi (memakai mesin pencocokan yang sama
+  dengan Validator Sitasi) — sitasi ambigu atau tak dikenali dibiarkan seperti aslinya
+  dan ditandai, bukan ditebak. Untuk daftar referensi, tool ini hanya menata ulang
+  penomoran/urutan entri dan format nama penulis; bagian tahun, tanda kutip judul, dan
+  detail bibliografi lain **sengaja tidak diubah**, karena penempatannya beda-beda per
+  gaya dan gaya sumber seperti APA/IEEE/Vancouver biasanya cuma menyimpan inisial nama
+  depan (bukan nama lengkap) — mengarang nama lengkap untuk gaya tujuan yang butuh itu
+  (Chicago/MLA) berisiko salah, jadi tidak dilakukan.
 - **Copy-paste dari Word** ke kotak teks validator-copy.html cuma membawa teks polos (tanpa
   italic). Kalau butuh cek format italic yang akurat, gunakan halaman Upload —
   itu membaca format asli langsung dari file `.docx`.
