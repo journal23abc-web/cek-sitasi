@@ -146,6 +146,22 @@ test('compressRanges collapses consecutive runs', () => {
   assert.deepStrictEqual(out, ['1-3', '5-6', '8']);
 });
 
+console.log('\n=== citationSpans (for UI preview) ===');
+
+test('citationSpans covers matched and unmatched citations with correct coordinates', () => {
+  const article = 'A (Smith, 2020) dan B (Nobody, 2099).';
+  const refs = 'Smith, J. (2020). Title. Journal A, 1(1), 1-10.';
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.strictEqual(r.citationSpans.length, 2);
+  const first = r.citationSpans[0];
+  assert.strictEqual(article.slice(first.start, first.end), first.original);
+  assert.strictEqual(first.matched, true);
+  assert.strictEqual(first.replacement, '[1]');
+  const second = r.citationSpans[1];
+  assert.strictEqual(second.matched, false);
+  assert.strictEqual(article.slice(second.start, second.end), second.original);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));

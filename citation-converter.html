@@ -45,6 +45,18 @@
   .input-mode-pane.active{ display:block; }
   .input-mode-tabs{ display:flex; gap:8px; margin:16px 0 14px; flex-wrap:wrap; }
 
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:30px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .icon{ font-size:30px; margin-bottom:10px; }
+  .dropzone .main{ font-size:13.5px; color:var(--text); margin-bottom:4px; }
+  .dropzone .sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); }
+  .file-chip{ display:none; align-items:center; gap:10px; margin-top:12px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:var(--font-mono); font-size:12px; }
+  .file-chip.show{ display:flex; }
+  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
+  .file-chip .x:hover{ color:var(--red); }
+  .status{ font-family:var(--font-mono); font-size:11.5px; }
+  .status.err{ color:var(--red); } .status.ok{ color:var(--green); } .status.warn{ color:var(--amber); } .status.info{ color:var(--text-dim); }
+
   .input-grid{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
   @media(max-width:860px){ .input-grid{ grid-template-columns:1fr; } }
   .field-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
@@ -76,6 +88,19 @@
   .sum-card.warn .n{ color:var(--amber); } .sum-card.ok .n{ color:var(--green); } .sum-card.fmt .n{ font-size:14px; color:var(--violet); }
 
   .output-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+
+  .preview-box{ background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:16px; font-family:var(--font-mono); font-size:12.5px; line-height:1.9; white-space:pre-wrap; word-break:break-word; max-height:420px; overflow:auto; margin-bottom:14px; }
+  .preview-box mark.hit{ background:rgba(62,217,143,.22); color:var(--text); border-radius:3px; padding:0 2px; text-decoration:none; }
+  .preview-box mark.miss{ background:rgba(242,184,75,.22); color:var(--text); border-radius:3px; padding:0 2px; text-decoration:underline wavy var(--amber); }
+  .preview-legend{ display:flex; gap:16px; flex-wrap:wrap; font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-bottom:10px; }
+  .preview-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .preview-legend .sw{ width:10px; height:10px; border-radius:2px; display:inline-block; }
+  .preview-legend .sw.hit{ background:rgba(62,217,143,.5); } .preview-legend .sw.miss{ background:rgba(242,184,75,.5); }
+
+  .edit-note{ font-size:11px; color:var(--text-faint); margin:6px 0 12px; font-style:italic; }
+  .export-row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+  .export-row button.ghost:disabled{ opacity:.45; cursor:not-allowed; }
+  .export-note{ font-size:11px; color:var(--text-faint); margin-top:8px; line-height:1.6; }
 
   .issue-list{ display:flex; flex-direction:column; gap:8px; }
   .issue-item{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:11px 14px; border-left:3px solid var(--amber); font-size:12px; }
@@ -121,6 +146,8 @@
     <b>Yang dikonversi:</b> sitasi in-text (parenthetical maupun naratif) — nama penulis, "&"/"and", ambang "et al.", nomor referensi, dsb — dicocokkan ke daftar referensi seperti yang dipakai Validator Sitasi, supaya hasilnya konsisten.
     Sitasi yang <b>tidak bisa dicocokkan dengan pasti ke satu referensi tetap dibiarkan seperti aslinya</b> dan ditandai untuk dicek manual, daripada ditebak dan salah.
     <b>Daftar referensi:</b> penomoran/urutan &amp; format nama penulis ikut disesuaikan; bagian judul/jurnal/halaman <b>sengaja tidak diubah</b> (lihat catatan di bawah hasil).
+    <br><br>
+    Bisa <b>tempel teks</b>, <b>unggah .docx</b>, atau isi manual. Hasilnya ada <b>pratinjau berwarna</b> (sitasi yang berubah vs yang tidak), dan kedua kotak hasil <b>bisa disunting langsung</b> sebelum diekspor. Ekspor tersedia sebagai .docx (format asli dipertahankan, khusus dari unggahan), .docx teks polos, atau .txt.
   </div>
 
   <div class="panel">
@@ -155,7 +182,27 @@
 
     <div class="input-mode-tabs" role="tablist" aria-label="Cara memasukkan naskah">
       <button class="input-mode-tab active" data-mode="paste" role="tab" aria-selected="true" aria-controls="pane-paste" id="tab-btn-paste">📋 Tempel Dokumen Lengkap</button>
+      <button class="input-mode-tab" data-mode="upload" role="tab" aria-selected="false" aria-controls="pane-upload" id="tab-btn-upload" tabindex="-1">📁 Upload .docx</button>
       <button class="input-mode-tab" data-mode="manual" role="tab" aria-selected="false" aria-controls="pane-manual" id="tab-btn-manual" tabindex="-1">✏️ Isi Manual (Artikel + Referensi)</button>
+    </div>
+
+    <div class="input-mode-pane" id="pane-upload" role="tabpanel" aria-labelledby="tab-btn-upload">
+      <div class="dropzone" id="dropzone">
+        <div class="icon">📄</div>
+        <div class="main">Klik untuk pilih file .docx, atau seret &amp; lepas di sini</div>
+        <div class="sub">DIPROSES SEPENUHNYA DI BROWSER ANDA, TIDAK DIUNGGAH KE SERVER MANA PUN</div>
+        <input type="file" id="fileInput" accept=".docx" style="display:none;">
+      </div>
+      <div class="file-chip" id="fileChip">
+        <span id="fileIcon">📘</span>
+        <span id="fileName"></span>
+        <span id="fileSize" style="color:var(--text-dim);"></span>
+        <span class="x" id="fileRemove">✕</span>
+      </div>
+      <span id="uploadStatus" class="status info" role="status" aria-live="polite"></span>
+      <div class="disclaimer" style="margin-top:12px;">
+        Naskah dari file diambil langsung dari struktur .docx-nya (bukan lewat copy-paste), lalu dipisah otomatis jadi Artikel &amp; Daftar Referensi di tab "Isi Manual" — periksa &amp; sunting dulu di sana sebelum klik Konversi. Karena file aslinya tersimpan, tombol <b>"Unduh .docx (format asli dipertahankan)"</b> di hasil nanti akan tersedia.
+      </div>
     </div>
 
     <div class="input-mode-pane active" id="pane-paste" role="tabpanel" aria-labelledby="tab-btn-paste">
@@ -205,7 +252,19 @@
         <div class="field-label" style="margin-bottom:0;">Artikel — Sitasi Sudah Dikonversi</div>
         <button class="ghost" id="btnCopyArticle">📋 Copy Teks Artikel</button>
       </div>
-      <textarea id="convertedArticleOut" readonly style="min-height:320px;"></textarea>
+
+      <div class="preview-legend">
+        <span><span class="sw hit"></span>Dikonversi</span>
+        <span><span class="sw miss"></span>Tidak diubah (perlu dicek manual)</span>
+      </div>
+      <div class="preview-box" id="articlePreview" aria-label="Pratinjau sitasi yang berubah"></div>
+
+      <div class="field-label">Teks Bisa Disunting Manual</div>
+      <textarea id="convertedArticleOut" style="min-height:280px;"></textarea>
+      <div class="edit-note">💡 Kotak di atas bisa diedit langsung — misalnya kalau ada sitasi yang tidak berhasil dicocokkan dan Anda mau perbaiki manual. Pratinjau berwarna di atasnya dibuat saat tombol Konversi ditekan dan tidak ikut berubah otomatis kalau Anda mengedit teks di kotak ini.</div>
+      <div class="export-row">
+        <button class="ghost" id="btnResetArticle">↺ Kembalikan ke Hasil Otomatis</button>
+      </div>
     </div>
 
     <div class="panel">
@@ -213,7 +272,11 @@
         <div class="field-label" style="margin-bottom:0;">Daftar Referensi — Diberi Nomor/Urutan &amp; Format Nama Penulis Baru</div>
         <button class="ghost" id="btnCopyRefs">📋 Copy Daftar Referensi</button>
       </div>
-      <textarea id="convertedRefsOut" readonly style="min-height:220px;"></textarea>
+      <textarea id="convertedRefsOut" style="min-height:200px;"></textarea>
+      <div class="edit-note">💡 Kotak ini juga bisa diedit manual sebelum diekspor.</div>
+      <div class="export-row">
+        <button class="ghost" id="btnResetRefs">↺ Kembalikan ke Hasil Otomatis</button>
+      </div>
       <div class="disclaimer">
         <b>Yang diubah pada daftar referensi:</b>
         <ul>
@@ -224,11 +287,26 @@
         <b>Yang TIDAK diubah (perlu disunting manual):</b> penempatan tahun, tanda kutip judul, format volume/nomor/halaman, dan detail lain — karena itu berbeda-beda per jenis sumber dan berisiko salah kalau dibuat otomatis tanpa nama depan lengkap penulis (yang tidak selalu tersedia dari gaya sumber). Setelah disunting manual, jalankan lagi lewat <a href="validator-copy.html">Validator Sitasi</a> untuk memastikan formatnya benar.
       </div>
     </div>
+
+    <div class="panel">
+      <div class="field-label">Ekspor Hasil</div>
+      <div class="export-row">
+        <button class="ghost" id="btnExportDocxOriginal" disabled>📘 Unduh .docx (format asli dipertahankan)</button>
+        <button class="ghost" id="btnExportDocxPlain">📘 Unduh .docx (teks polos)</button>
+        <button class="ghost" id="btnExportTxt">📄 Unduh .txt</button>
+      </div>
+      <span id="exportStatus" class="status info" role="status" aria-live="polite"></span>
+      <div class="export-note">
+        <b>.docx format asli dipertahankan</b> — hanya aktif kalau naskah diunggah lewat tab "Upload .docx". Sitasi diganti langsung di dalam XML aslinya (paragraf, heading, font, dsb. tidak tersentuh), tapi ini SELALU mencerminkan hasil konversi <b>otomatis</b> — perubahan manual yang Anda ketik di kotak teks di atas <b>tidak ikut terbawa</b> ke file ini. Daftar referensi juga hanya diberi teks pengganti di tempatnya masing-masing; urutan paragraf referensi TIDAK dipindah (kalau target gaya butuh urutan sitasi seperti IEEE/Vancouver, sesuaikan urutannya manual di Word).<br>
+        <b>.docx / .txt teks polos</b> — dibuat baru dari isi kotak teks saat ini (jadi IKUT membawa perubahan manual Anda), tapi tanpa format asli naskah (heading, bold, italic, dst. — cuma teks).
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
 <script src="engine.js?v=13"></script>
 <script src="converter-engine.js?v=1"></script>

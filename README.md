@@ -11,7 +11,7 @@ validator-copy.html    Validator sitasi via copy-paste teks — tempel & validas
 validator-upload.html  Validator sitasi via upload .docx — ekspor laporan PDF / docx ber-highlight
 preliminary-check.html Preliminary check naskah (upload .docx) — dashboard IMRAD & checklist
 link-upload.html       Tautkan sitasi in-text ke entri referensi (hyperlink internal) di .docx
-citation-converter.html Konversi sitasi in-text (parenthetical & naratif) antar gaya, mis. APA7 → IEEE
+citation-converter.html Konversi sitasi in-text (parenthetical & naratif) antar gaya, mis. APA7 → IEEE — tempel/upload .docx/isi manual, pratinjau, edit manual, ekspor .docx/.txt
 shared.css              Design tokens, watermark & komponen yang identik di semua halaman
 theme.js                 Toggle dark/light mode, dipakai semua halaman
 engine.js                Mesin inti validator sitasi: parsing referensi, deteksi gaya, matching
@@ -116,6 +116,15 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
   gaya dan gaya sumber seperti APA/IEEE/Vancouver biasanya cuma menyimpan inisial nama
   depan (bukan nama lengkap) — mengarang nama lengkap untuk gaya tujuan yang butuh itu
   (Chicago/MLA) berisiko salah, jadi tidak dilakukan.
+- **Ekspor .docx "format asli dipertahankan"** (di Konversi Sitasi Antar Gaya) mengedit
+  XML file .docx yang diunggah langsung di tempat teks sitasi berada, jadi heading/bold/
+  italic/dst. di sekitarnya tidak tersentuh. Tapi ini SELALU dihitung ulang dari hasil
+  konversi **otomatis** — kalau Anda mengedit manual di kotak teks hasil, edit itu tidak
+  ikut ke file .docx ini (dipakai tombol ekspor .docx/.txt "teks polos" untuk itu, tapi
+  formatnya jadi teks polos tanpa heading/bold/italic asli). Urutan paragraf referensi di
+  file asli juga tidak dipindah — hanya isi teksnya yang diganti di tempat, jadi kalau
+  gaya tujuannya numerik (IEEE/Vancouver) dan urutan kemunculan sitasinya beda dari urutan
+  paragraf referensi asli, urutan paragrafnya perlu dipindah manual di Word.
 - **Copy-paste dari Word** ke kotak teks validator-copy.html cuma membawa teks polos (tanpa
   italic). Kalau butuh cek format italic yang akurat, gunakan halaman Upload —
   itu membaca format asli langsung dari file `.docx`.

@@ -412,8 +412,9 @@
     });
 
     // Build converted article text
+    var sortedSpans = spans.slice().sort(function(a, b) { return a.start - b.start; });
     var out = '', cursor = 0;
-    spans.slice().sort(function(a, b) { return a.start - b.start; }).forEach(function(s) {
+    sortedSpans.forEach(function(s) {
       if (s.start < cursor) return; // guard against any residual overlap
       out += articleText.slice(cursor, s.start) + s.replacement;
       cursor = s.end;
@@ -423,6 +424,11 @@
     var changedCount = spans.filter(function(s) { return s.matched && s.raw !== s.replacement; }).length;
     var unmatchedList = spans.filter(function(s) { return !s.matched; }).map(function(s) {
       return { raw: s.raw, note: s.note };
+    });
+    // Full ordered span list (matched + unmatched) with original article-text coordinates —
+    // used by the UI to render an inline before/after preview (e.g. <mark> around each span).
+    var citationSpans = sortedSpans.map(function(s) {
+      return { start: s.start, end: s.end, original: s.raw, replacement: s.replacement, matched: s.matched, note: s.note };
     });
 
     // ---------- Reference list: renumber/reorder + rebuild author segment only ----------
@@ -462,6 +468,7 @@
       changedCount: changedCount,
       totalCitationsFound: spans.length,
       unmatched: unmatchedList,
+      citationSpans: citationSpans,
       referenceLines: referenceLines,
       uncitedCount: uncitedRefs.length,
       parseStats: v.parseStats,
