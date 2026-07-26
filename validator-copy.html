@@ -369,21 +369,6 @@
       <button class="ghost" id="btnCopyFixes">✅ Copy Semua Koreksi</button>
     </div>
 
-    <div class="panel">
-      <div class="field-label">Ekspor Laporan (PDF)</div>
-      <div class="export-options" id="reportSections">
-        <label class="export-check"><input type="checkbox" value="summary" checked> Ringkasan</label>
-        <label class="export-check"><input type="checkbox" value="yearrange" checked> Rentang Tahun Referensi</label>
-        <label class="export-check"><input type="checkbox" value="errors" checked> Perlu Diperbaiki</label>
-        <label class="export-check"><input type="checkbox" value="suggestions" checked> Saran</label>
-        <label class="export-check"><input type="checkbox" value="doi" checked> Validasi DOI</label>
-        <label class="export-check"><input type="checkbox" value="journalrules" checked> Aturan Jurnal Custom</label>
-      </div>
-      <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
-      <span class="status info" id="downloadStatus" role="status" aria-live="polite"></span>
-      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah berubah langsung sesuai bagian yang Anda centang — itulah yang akan tercetak/tersimpan.</div>
-    </div>
-
     <details class="collapsible" id="citationMapDetails" open>
       <summary>🗺️ Peta Sitasi (Teks ↔ Referensi)</summary>
       <div class="collapsible-content"><div id="citationMapPanel"></div></div>
@@ -476,6 +461,21 @@
         <div class="jr-results" id="jrResultsPanel"></div>
       </div>
     </details>
+
+    <div class="panel">
+      <div class="field-label">Ekspor Laporan (PDF)</div>
+      <div class="export-options" id="reportSections">
+        <label class="export-check"><input type="checkbox" value="summary" checked> Ringkasan</label>
+        <label class="export-check"><input type="checkbox" value="yearrange" checked> Rentang Tahun Referensi</label>
+        <label class="export-check"><input type="checkbox" value="errors" checked> Perlu Diperbaiki</label>
+        <label class="export-check"><input type="checkbox" value="suggestions" checked> Saran</label>
+        <label class="export-check"><input type="checkbox" value="doi" checked> Validasi DOI</label>
+        <label class="export-check"><input type="checkbox" value="journalrules" checked> Aturan Jurnal Custom</label>
+      </div>
+      <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
+      <span class="status info" id="downloadStatus" role="status" aria-live="polite"></span>
+      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah berubah langsung sesuai bagian yang Anda centang — itulah yang akan tercetak/tersimpan.</div>
+    </div>
 
     <div class="preview-shell">
       <div class="preview-toolbar"><span>👁️ Pratinjau Laporan</span></div>

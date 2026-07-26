@@ -445,6 +445,16 @@
     return applied;
   }
 
+  // Date + time-of-day stamp (not just the date) so downloading more than once on the same day
+  // always produces a distinct filename instead of silently overwriting the previous download.
+  function fileTimestamp() {
+    var now = new Date();
+    var dateStr = now.toISOString().slice(0, 10);
+    var timeStr = [now.getHours(), now.getMinutes(), now.getSeconds()]
+      .map(function(n) { return String(n).padStart(2, '0'); }).join('');
+    return dateStr + '-' + timeStr;
+  }
+
   function triggerDownload(blob, filename) {
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
@@ -538,7 +548,7 @@
       .then(function(res) {
         els.btnExportDocxOriginal.disabled = false;
         if (!res.blob) { setExportStatus('⚠️ Tidak ada bagian yang bisa dicocokkan/diganti di file aslinya.', 'warn'); return; }
-        var dateStr = new Date().toISOString().slice(0, 10);
+        var dateStr = fileTimestamp();
         triggerDownload(res.blob, (state.originalFile.name || 'naskah').replace(/\.docx$/i, '') + '-KONVERSI-' + dateStr + '.docx');
         var msg = '✅ Berhasil — ' + res.count + ' bagian diganti di dalam file asli (format tetap terjaga).';
         if (res.reordered > 0) {
@@ -594,7 +604,7 @@
     setExportStatus('Membuat file .docx...', 'info');
     buildMinimalDocx(article, refs)
       .then(function(blob) {
-        var dateStr = new Date().toISOString().slice(0, 10);
+        var dateStr = fileTimestamp();
         triggerDownload(blob, 'sitasi-konversi-' + dateStr + '.docx');
         setExportStatus('✅ File .docx (teks polos) berhasil diunduh.', 'ok');
       })
@@ -608,7 +618,7 @@
     if (!article) { setExportStatus('⚠️ Belum ada hasil konversi untuk diekspor.', 'warn'); return; }
     var content = article + '\n\nREFERENCES\n' + refs + '\n';
     var blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    var dateStr = new Date().toISOString().slice(0, 10);
+    var dateStr = fileTimestamp();
     triggerDownload(blob, 'sitasi-konversi-' + dateStr + '.txt');
     setExportStatus('✅ File .txt berhasil diunduh.', 'ok');
   });

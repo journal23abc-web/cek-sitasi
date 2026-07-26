@@ -215,6 +215,20 @@ test('single consistent style is NOT flagged as mixed', () => {
   assert.ok(!errorTitles(r).includes('Gaya sitasi tidak konsisten'));
 });
 
+test('stats-heavy APA prose with incidental "(1)"-style table/CI numbers is NOT false-flagged as mixed style', () => {
+  const article = Array(30).fill('Prior work (Smith, 2020) supports this.').join(' ') +
+    ' Model A achieved (1) 94.31% vs (2) 90.60%, with CI (3), (4), (5), (6), (7), (8), (9), (10).';
+  const r = validate(article, 'Smith, J. (2020). Some title. Journal A, 1(1), 1-10.');
+  assert.ok(!errorTitles(r).includes('Gaya sitasi tidak konsisten'), JSON.stringify(r.errors.filter(e => e.title.includes('konsisten'))));
+});
+
+test('genuine high-volume mix of numeric "(1)" and author-date citations is still flagged', () => {
+  const article = Array(10).fill('Prior work (Smith, 2020) supports this.').join(' ') +
+    ' ' + Array(20).fill('Other studies (1) confirm this finding.').join(' ');
+  const r = validate(article, 'Smith, J. (2020). Some title. Journal A, 1(1), 1-10.');
+  assert.ok(errorTitles(r).includes('Gaya sitasi tidak konsisten'));
+});
+
 console.log('\n=== Style auto-detection ===');
 
 test('clean APA7 reference list detected as apa7, not tied with harvard', () => {
@@ -231,6 +245,22 @@ test('clean Harvard reference list (quoted title, pp.) detected as harvard', () 
     'Menurut penelitian (Smith, 2020), hal ini benar.',
     "Smith, J. (2020) 'Some title about things', Journal A, 1(1), pp. 1-10.");
   assert.strictEqual(d.styleId, 'harvard');
+});
+
+test('numeric-heavy in-text but clearly APA-inverted reference list still detects apa7, not ieee (regression: this used to mis-detect ieee and shred every "Last, F." author into garbage when parsed as IEEE\'s "F. Last")', () => {
+  const article = 'The method was validated [1] and confirmed [2], [3] in later work.';
+  const refs = [
+    'Adilazuarda, M. F., Wijanarko, M. I., & Susanto, L. (2025). Some multimodal benchmark study. Proceedings of Something, 1-10.',
+    'Baso, Y. S., & Agussalim, A. (2021). Computerization of local language characters. International Journal, 12(12).',
+    'Everson, M. (2003). Revised final proposal for encoding a script. ISO Report N2633R.',
+  ].join('\n');
+  const d = CE.FormatDetector.detect(article, refs);
+  assert.strictEqual(d.styleId, 'apa7');
+  // Parsing these references AS IEEE (the old wrong outcome) would shred "Adilazuarda, M. F." down
+  // to firstAuthor "Adilazuarda" with title garbage like "F., Wijanarko, M" — verify the DETECTED
+  // style parses this reference sanely instead.
+  const parsed = CE.parseReferenceLine(refs.split('\n')[0], d.styleId);
+  assert.strictEqual(parsed.firstAuthor, 'Adilazuarda, M. F.');
 });
 
 console.log('\n=== Reference formatting check (italic / case) ===');

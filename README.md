@@ -92,7 +92,14 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
   pendek bisa tampak "mirip" padahal jelas beda topik).
 - **Auto-detect gaya sitasi** memakai skor berbasis pola (tanda kutip, "pp.", dst.) —
   untuk dokumen yang formatnya sangat tidak konsisten, hasil deteksi bisa meleset;
-  selalu tersedia opsi pilih gaya manual di dropdown.
+  selalu tersedia opsi pilih gaya manual di dropdown. Sejak perbaikan terbaru, pola
+  penulis terbalik APA/Harvard ("Nama, F.") secara aktif menurunkan skor IEEE/Vancouver
+  (yang tidak pernah membalik nama) — ini mencegah skenario nyata yang sempat terjadi:
+  naskah yang sitasinya sudah dikonversi ke IEEE tapi daftar referensinya masih format
+  APA asli sempat terdeteksi sebagai IEEE dan membuat setiap referensi terparse rusak
+  (mis. "Nama Belakang, F. M." terbaca jadi penulis "Nama Belakang" + judul "F. M.").
+  Kalau keyakinan auto-detect rendah (di bawah ~60%), sebaiknya cek manual di dropdown
+  gaya dan pastikan bagian teks & daftar referensi konsisten satu gaya yang sama.
 - **Preliminary Check** mendeteksi judul/abstrak/struktur IMRAD berdasarkan pola heading
   umum (kata "Abstract"/"Introduction", penomoran bab, dst.) — naskah dengan format
   heading tidak lazim mungkin terlewat dan perlu dicek manual. Untuk heading generik yang

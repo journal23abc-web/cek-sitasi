@@ -447,8 +447,15 @@
     els.downloadBtn.addEventListener('click', function() {
       if (!lastResult) return;
       var style = STYLES[lastStyleId];
-      var dateStr = new Date().toISOString().slice(0, 10);
-      var suggestedName = 'Laporan-Validasi-Sitasi-' + style.name.replace(/[^\w]+/g, '-') + '-' + dateStr;
+      var now = new Date();
+      var dateStr = now.toISOString().slice(0, 10);
+      // Include time-of-day (not just the date) so downloading the report more than once on
+      // the same day always produces a distinct filename instead of silently overwriting the
+      // previous one (or relying on the browser's own "(1)", "(2)" auto-suffixing, which isn't
+      // always shown/available depending on the "Save as PDF" destination folder picker).
+      var timeStr = [now.getHours(), now.getMinutes(), now.getSeconds()]
+        .map(function(n) { return String(n).padStart(2, '0'); }).join('');
+      var suggestedName = 'Laporan-Validasi-Sitasi-' + style.name.replace(/[^\w]+/g, '-') + '-' + dateStr + '-' + timeStr;
       var originalTitle = document.title;
       document.title = suggestedName;
       els.downloadStatus.textContent = 'Membuka dialog cetak... pilih tujuan "Simpan sebagai PDF".';
