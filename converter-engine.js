@@ -301,12 +301,27 @@
 
     var sourceStyle = STYLES[sourceStyleId];
     var v = new CE.MultiFormatValidator(articleText, referenceText, sourceStyleId);
-    v.validate(); // populates v.references, v.citations, v.refMap (author-date/page), v.acronymMap
+    v.validate(); // populates v.references, v.citations, v.acronymMap (family-specific refMap/refByNumber not relied on below)
 
-    var refByNumber = {};
-    if (sourceStyle.family === 'numeric') {
-      v.references.forEach(function(r) { if (r.numLabel != null) refByNumber[r.numLabel] = r; });
-    }
+    // ---- Universal reference maps (built regardless of the declared source family) ----
+    // v.references always carries author/year/numLabel fields no matter which family
+    // sourceStyleId parsed them as (parseReferenceLine populates all of them), so these three
+    // maps can resolve a citation written in ANY family's shape against the SAME reference
+    // list — this is what lets the converter also catch and fix "stray" citations that were
+    // already in a different style than the rest of the document (mixed-style source), not
+    // just the ones matching the declared source family. Construction is intentionally
+    // identical to what MultiFormatValidator's own family-specific refMap/refByNumber would
+    // build, so resolution behavior for the PRIMARY family is unchanged from before.
+    var authorDateMap = new Map(), authorPageMap = new Map(), numberMap = {};
+    v.references.forEach(function(r) {
+      var keyAD = v.keyFromRefAuthor(r) + '_' + (r.year || '');
+      if (!authorDateMap.has(keyAD)) authorDateMap.set(keyAD, []);
+      authorDateMap.get(keyAD).push(r);
+      var keyAP = v.keyFromRefAuthor(r);
+      if (!authorPageMap.has(keyAP)) authorPageMap.set(keyAP, []);
+      authorPageMap.get(keyAP).push(r);
+      if (r.numLabel != null) numberMap[r.numLabel] = r;
+    });
 
     var matchedOrder = [];
     var seen = new Set();
@@ -314,39 +329,106 @@
     function numberOf(ref) { register(ref); return matchedOrder.indexOf(ref) + 1; }
 
     function resolveAuthorYear(token, year) {
-      if (!v.refMap) return { status: 'nomatch' };
       var key = v.keyFromCitationToken(token) + '_' + year;
-      if (v.refMap.has(key)) {
-        var refs = v.refMap.get(key);
+      if (authorDateMap.has(key)) {
+        var refs = authorDateMap.get(key);
         return refs.length === 1 ? { status: 'ok', ref: refs[0] } : { status: 'ambiguous', candidates: refs };
       }
-      var fuzzy = v.fuzzyFind(key, v.refMap);
+      var fuzzy = v.fuzzyFind(key, authorDateMap);
       return fuzzy ? { status: 'ok', ref: fuzzy } : { status: 'nomatch' };
     }
     function resolveAuthorOnly(token) { // MLA (no year)
-      if (!v.refMap) return { status: 'nomatch' };
       var key = v.keyFromCitationToken(token);
-      if (v.refMap.has(key)) {
-        var refs = v.refMap.get(key);
+      if (authorPageMap.has(key)) {
+        var refs = authorPageMap.get(key);
         return refs.length === 1 ? { status: 'ok', ref: refs[0] } : { status: 'ambiguous', candidates: refs };
       }
-      var fuzzy = v.fuzzyFind(key, v.refMap);
+      var fuzzy = v.fuzzyFind(key, authorPageMap);
       return fuzzy ? { status: 'ok', ref: fuzzy } : { status: 'nomatch' };
     }
+    function resolveNumbers(numbers) {
+      var refs = numbers.map(function(n) { return numberMap[n]; });
+      if (refs.every(Boolean) && refs.length > 0) return { status: 'ok', refs: refs };
+      return { status: 'nomatch' };
+    }
 
-    // Sort citations by position — extractAuthorDateCitations returns ALL parenthetical
-    // matches first, THEN all narrative matches, so the combined array is not naturally in
-    // reading order even though each sub-pass is. Numeric/author-page extraction is already
-    // single-pass and in order, but sorting is harmless there too.
-    var citations = v.citations.slice().sort(function(a, b) { return a.position - b.position; });
+    // ---- Primary-family citations (the declared source style) ----
+    // Sort by position — extractAuthorDateCitations returns ALL parenthetical matches first,
+    // THEN all narrative matches, so the combined array is not naturally in reading order even
+    // though each sub-pass is. Numeric/author-page extraction is already single-pass and in
+    // order, but sorting is harmless there too.
+    var primaryCitations = v.citations.slice().sort(function(a, b) { return a.position - b.position; })
+      .map(function(c) { return { c: c, family: sourceStyle.family, crossFamily: false }; });
+
+    // ---- Cross-family citations (mixed-style detection) ----
+    // Scans the article for citation SHAPES belonging to the OTHER two families, in case the
+    // source document already mixes styles (e.g. mostly APA with a few stray IEEE-style
+    // citations) — without this, those strays would never even be considered for conversion,
+    // silently surviving as leftover mixed formatting in the output. Deliberately conservative
+    // to avoid false positives on ordinary prose:
+    //  - numeric: only the unambiguous "[12]" bracket form is scanned, never bare "(12)"
+    //    (which collides with things like "(95% CI)" or "(p < 0.05)").
+    //  - author-page: only kept when the leading token looks like a real personal name, to
+    //    avoid false hits like "(Table 5)" or "(Figure 3)".
+    function scanCrossFamilyBracketNumeric(text) {
+      var out = [];
+      var re = /\[(\d+(?:\s*[,\-\u2013]\s*\d+)*)\]/g;
+      var m;
+      while ((m = re.exec(text)) !== null) {
+        var nums = m[1].split(/\s*[,\-\u2013]\s*/).map(function(n) { return parseInt(n, 10); }).filter(function(n) { return !isNaN(n); });
+        if (nums.length) out.push({ raw: m[0], numbers: nums, position: m.index, form: 'bracket', type: 'numeric-cross' });
+      }
+      return out;
+    }
+    var crossFamilyCitations = [];
+    if (sourceStyle.family !== 'numeric') {
+      scanCrossFamilyBracketNumeric(articleText).forEach(function(c) {
+        crossFamilyCitations.push({ c: c, family: 'numeric', crossFamily: true });
+      });
+    }
+    if (sourceStyle.family !== 'author-date') {
+      CE.extractAuthorDateCitations(articleText).forEach(function(c) {
+        crossFamilyCitations.push({ c: c, family: 'author-date', crossFamily: true });
+      });
+    }
+    if (sourceStyle.family !== 'author-page') {
+      CE.extractAuthorPageCitations(articleText).forEach(function(c) {
+        var looksReal = c.parts.every(function(p) { return !p.firstAuthor || CE.looksLikePersonalName(p.firstAuthor); });
+        if (looksReal) crossFamilyCitations.push({ c: c, family: 'author-page', crossFamily: true });
+      });
+    }
+    // Drop any cross-family find that overlaps a primary-family citation's own span (the
+    // primary extractor already owns that text) — keeps the two sets non-overlapping before
+    // merging, so the shared processing loop below never double-handles the same characters.
+    function eventSpan(ev) {
+      if (ev.family === 'author-date' && ev.c.type === 'narrative') {
+        var span = computeNarrativeSpan(articleText, ev.c.position, ev.c.year);
+        return span ? { start: span.start, end: span.end } : { start: ev.c.position, end: ev.c.position };
+      }
+      return { start: ev.c.position, end: ev.c.position + ev.c.raw.length };
+    }
+    var primarySpansForOverlapCheck = primaryCitations.map(eventSpan);
+    crossFamilyCitations = crossFamilyCitations.filter(function(ev) {
+      var s = eventSpan(ev);
+      return primarySpansForOverlapCheck.every(function(ps) { return s.end <= ps.start || s.start >= ps.end; });
+    });
+
+    var allEvents = primaryCitations.concat(crossFamilyCitations)
+      .sort(function(a, b) { return eventSpan(a).start - eventSpan(b).start; });
+
+    var familyLabel = { 'numeric': 'numerik (IEEE/Vancouver, mis. "[3]")', 'author-date': 'author-date (mis. APA/Harvard/Chicago, "(Penulis, Tahun)")', 'author-page': 'author-page (mis. MLA, "(Penulis Halaman)")' };
 
     var spans = []; // {start,end,replacement,matched,note,originalRaw}
     var lastAcceptedEnd = -1;
 
-    citations.forEach(function(c) {
+    allEvents.forEach(function(ev) {
+      var c = ev.c, family = ev.family, crossFamily = ev.crossFamily;
       var start, end, raw, replacement = null, matched = false, note = null;
+      var mismatchNote = crossFamily
+        ? ('Terlihat seperti sitasi gaya ' + familyLabel[family] + ' yang tercampur dengan gaya utama naskah — ')
+        : '';
 
-      if (sourceStyle.family === 'author-date') {
+      if (family === 'author-date') {
         if (c.type === 'parenthetical') {
           start = c.position; raw = c.raw; end = start + raw.length;
           if (c.parts.length === 1) {
@@ -358,7 +440,7 @@
               replacement = renderForTarget([res.ref], sourceStyleId, targetStyleId, 'parenthetical', { pageInfo: pg, page: pg }, numberOf, null);
               matched = true;
             } else {
-              note = res.status === 'ambiguous' ? 'Sitasi ambigu (beberapa referensi cocok) — tidak diubah, cek manual.' : 'Tidak ditemukan referensi yang cocok — tidak diubah.';
+              note = res.status === 'ambiguous' ? mismatchNote + 'Sitasi ambigu (beberapa referensi cocok) — tidak diubah, cek manual.' : mismatchNote + 'Tidak ditemukan referensi yang cocok — tidak diubah.';
             }
           } else {
             var refs = [], ok = true;
@@ -372,7 +454,7 @@
               replacement = renderForTarget(refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
               matched = true;
             } else {
-              note = 'Salah satu atau lebih sitasi dalam grup ini tidak cocok dengan referensi — seluruh grup tidak diubah.';
+              note = mismatchNote + 'Salah satu atau lebih sitasi dalam grup ini tidak cocok dengan referensi — seluruh grup tidak diubah.';
             }
           }
         } else { // narrative
@@ -388,11 +470,11 @@
               replacement = renderForTarget([res2.ref], sourceStyleId, targetStyleId, 'narrative', {}, numberOf, c.authors);
               matched = true;
             } else {
-              note = res2.status === 'ambiguous' ? 'Sitasi ambigu — tidak diubah, cek manual.' : 'Tidak ditemukan referensi yang cocok — tidak diubah.';
+              note = res2.status === 'ambiguous' ? mismatchNote + 'Sitasi ambigu — tidak diubah, cek manual.' : mismatchNote + 'Tidak ditemukan referensi yang cocok — tidak diubah.';
             }
           }
         }
-      } else if (sourceStyle.family === 'author-page') {
+      } else if (family === 'author-page') {
         start = c.position; raw = c.raw; end = start + raw.length;
         if (c.parts.length === 1) {
           var pp = c.parts[0];
@@ -402,7 +484,7 @@
             replacement = renderForTarget([r3.ref], sourceStyleId, targetStyleId, 'parenthetical', { page: pp.page, pageInfo: pp.page }, numberOf, null);
             matched = true;
           } else {
-            note = r3.status === 'ambiguous' ? 'Sitasi ambigu — tidak diubah, cek manual.' : 'Tidak ditemukan referensi yang cocok — tidak diubah.';
+            note = r3.status === 'ambiguous' ? mismatchNote + 'Sitasi ambigu — tidak diubah, cek manual.' : mismatchNote + 'Tidak ditemukan referensi yang cocok — tidak diubah.';
           }
         } else {
           var refs2 = [], pages2 = [], ok2 = true;
@@ -416,25 +498,25 @@
             replacement = renderForTarget(refs2, sourceStyleId, targetStyleId, 'parenthetical', { pages: pages2 }, numberOf, null);
             matched = true;
           } else {
-            note = 'Salah satu atau lebih sitasi dalam grup ini tidak cocok dengan referensi — seluruh grup tidak diubah.';
+            note = mismatchNote + 'Salah satu atau lebih sitasi dalam grup ini tidak cocok dengan referensi — seluruh grup tidak diubah.';
           }
         }
-      } else { // numeric source
+      } else { // numeric
         start = c.position; raw = c.raw; end = start + raw.length;
-        var refsN = c.numbers.map(function(n) { return refByNumber[n]; });
-        if (refsN.every(Boolean) && refsN.length > 0) {
-          refsN.forEach(register);
-          replacement = renderForTarget(refsN, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
+        var numRes = resolveNumbers(c.numbers);
+        if (numRes.status === 'ok') {
+          numRes.refs.forEach(register);
+          replacement = renderForTarget(numRes.refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
           matched = true;
         } else {
-          note = 'Nomor referensi ' + c.numbers.join(',') + ' tidak ditemukan di daftar referensi — tidak diubah.';
+          note = mismatchNote + 'Nomor referensi ' + c.numbers.join(',') + ' tidak ditemukan di daftar referensi — tidak diubah.';
         }
       }
 
       if (start == null) return;
       var accepted = matched && start >= lastAcceptedEnd;
       if (matched && start < lastAcceptedEnd) { matched = false; note = 'Tumpang tindih dengan sitasi lain yang sudah diproses — dilewati.'; }
-      spans.push({ start: start, end: end, raw: raw, replacement: matched ? replacement : raw, matched: matched, note: note });
+      spans.push({ start: start, end: end, raw: raw, replacement: matched ? replacement : raw, matched: matched, note: note, crossFamily: crossFamily, family: family });
       if (matched) lastAcceptedEnd = Math.max(lastAcceptedEnd, end);
     });
 
@@ -450,8 +532,16 @@
 
     var changedCount = spans.filter(function(s) { return s.matched && s.raw !== s.replacement; }).length;
     var unmatchedList = spans.filter(function(s) { return !s.matched; }).map(function(s) {
-      return { raw: s.raw, note: s.note };
+      return { raw: s.raw, note: s.note, family: s.family, crossFamily: s.crossFamily };
     });
+    // Mixed-style reporting: how many stray citations were found that were ALREADY written in
+    // a different family than the declared source style — split into those we could still
+    // auto-fix (resolved + converted despite not matching the primary family) vs. those left
+    // for manual attention (same as their entry in `unmatched`, just isolated for a clearer
+    // "your document had mixed styles" summary in the UI).
+    var mixedStyleFound = spans.filter(function(s) { return s.crossFamily; });
+    var mixedStyleFixed = mixedStyleFound.filter(function(s) { return s.matched; }).length;
+    var mixedStyleUnresolved = mixedStyleFound.filter(function(s) { return !s.matched; }).length;
     // Full ordered span list (matched + unmatched) with original article-text coordinates —
     // used by the UI to render an inline before/after preview (e.g. <mark> around each span).
     var citationSpans = sortedSpans.map(function(s) {
@@ -499,6 +589,9 @@
       referenceLines: referenceLines,
       uncitedCount: uncitedRefs.length,
       parseStats: v.parseStats,
+      mixedStyleFoundCount: mixedStyleFound.length,
+      mixedStyleFixedCount: mixedStyleFixed,
+      mixedStyleUnresolvedCount: mixedStyleUnresolved,
     };
   }
 

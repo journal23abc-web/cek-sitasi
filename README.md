@@ -115,7 +115,20 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
   detail bibliografi lain **sengaja tidak diubah**, karena penempatannya beda-beda per
   gaya dan gaya sumber seperti APA/IEEE/Vancouver biasanya cuma menyimpan inisial nama
   depan (bukan nama lengkap) — mengarang nama lengkap untuk gaya tujuan yang butuh itu
-  (Chicago/MLA) berisiko salah, jadi tidak dilakukan.
+  (Chicago/MLA) berisiko salah, jadi tidak dilakukan. Untuk sitasi numerik ke IEEE, dua
+  sitasi berurutan ditulis terpisah dengan koma ("[1], [2]"), bukan rentang tanda pisah —
+  rentang ("[1]-[3]") hanya dipakai untuk 3 sitasi berurutan atau lebih, sesuai konvensi
+  editorial IEEE yang sebenarnya.
+- **Deteksi &amp; perbaikan gaya campuran** — kalau naskah sumbernya sendiri sudah bercampur
+  gaya (mis. mayoritas APA tapi ada beberapa sitasi yang kadung ditulis format IEEE/numerik,
+  atau sebaliknya), converter tidak cuma memproses sitasi bergaya sumber yang dipilih —
+  ia juga memindai naskah untuk pola sitasi gaya LAIN dan mencoba mencocokkannya ke daftar
+  referensi yang sama. Yang cocok ikut dikonversi otomatis; yang tidak, ditandai jelas
+  dengan label "GAYA CAMPURAN" di daftar sitasi yang tidak diubah. Pemindaian ini sengaja
+  dibuat konservatif untuk menghindari salah-tuduh: pola numerik hanya dicari dalam bentuk
+  kurung siku `[12]` yang tidak ambigu (bukan `(12)` polos, yang gampang bentrok dengan
+  angka statistik/tabel/persamaan biasa), dan pola author-page (mis. MLA) hanya dihitung
+  kalau kata pertamanya benar-benar terlihat seperti nama orang (bukan "Tabel"/"Gambar" dst).
 - **Parsing nama penulis dengan inisial bertanda hubung** (mis. "Yang, T.-J." untuk nama depan
   "Tien-Ju") sudah didukung sejak perbaikan terbaru — sebelumnya inisial semacam ini bisa
   keliru terbaca sebagai nama belakang yang terpisah (mis. "Yang" dan "T.-J." dianggap dua

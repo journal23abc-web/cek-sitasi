@@ -187,6 +187,46 @@ test('hyphenated initial pair stays as ONE author, not split in two', () => {
   assert.ok(r.referenceLines[0].line.includes('T.-J. Yang') || r.referenceLines[0].line.includes('T. J. Yang'), r.referenceLines[0].line);
 });
 
+console.log('\n=== Mixed-style detection & auto-fix ===');
+
+test('stray already-target-style citation in a source doc gets auto-fixed too (IEEE source, stray APA citation)', () => {
+  const article = 'Metode ini terbukti [1] dan diperkuat oleh (Jones, 2019) dalam studi lanjutan.';
+  const refs = '[1] J. Smith, "Title A," Journal A, vol. 1, no. 1, pp. 1-10, 2020.\n[2] K. Jones, "Title B," Journal B, vol. 2, no. 2, pp. 20-30, 2019.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.convertedArticle.includes('(Jones, 2019)'), r.convertedArticle);
+  assert.strictEqual(r.mixedStyleFoundCount, 1);
+  assert.strictEqual(r.mixedStyleFixedCount, 1);
+  assert.strictEqual(r.mixedStyleUnresolvedCount, 0);
+});
+
+test('unresolvable stray bracket citation (no numbered ref list) is flagged, not guessed', () => {
+  const article = 'Hasil ini (Smith, 2020) konsisten. Studi lain [2] juga mendukung.';
+  const refs = 'Smith, J. (2020). Title A. Journal A, 1(1), 1-10.\nJones, K. (2019). Title B. Journal B, 2(2), 20-30.';
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.ok(r.convertedArticle.includes('[2]'), r.convertedArticle); // left as literal, unresolved
+  assert.strictEqual(r.mixedStyleFoundCount, 1);
+  assert.strictEqual(r.mixedStyleFixedCount, 0);
+  assert.strictEqual(r.mixedStyleUnresolvedCount, 1);
+  assert.ok(r.unmatched[0].crossFamily === true);
+});
+
+test('ordinary prose (stats, table/equation refs) is NOT false-flagged as mixed style', () => {
+  const article = 'Hasil signifikan (p < 0.05) ditemukan (Smith, 2020). Lihat Tabel 3 dan Persamaan (5) untuk detail. Interval kepercayaan 95% (CI: 1.2-3.4) juga dilaporkan.';
+  const refs = 'Smith, J. (2020). Title A. Journal A, 1(1), 1-10.';
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.strictEqual(r.mixedStyleFoundCount, 0);
+  assert.ok(r.convertedArticle.includes('[1]'), r.convertedArticle);
+  assert.ok(r.convertedArticle.includes('Persamaan (5)'), r.convertedArticle);
+  assert.ok(r.convertedArticle.includes('Tabel 3'), r.convertedArticle);
+});
+
+test('when target itself is numeric, stray bracket citations are just normal primary citations, not double-counted as "mixed"', () => {
+  const article = 'Dibuktikan [1] dan [2].';
+  const refs = '[1] J. Smith, "Title A," Journal A, vol. 1, no. 1, pp. 1-10, 2020.\n[2] K. Jones, "Title B," Journal B, vol. 2, no. 2, pp. 20-30, 2019.';
+  const r = CC.convert(article, refs, 'ieee', 'ieee');
+  assert.strictEqual(r.mixedStyleFoundCount, 0);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));

@@ -149,6 +149,13 @@
       { n: result.uncitedCount, l: 'Referensi Tak Disitasi', cls: result.uncitedCount > 0 ? 'warn' : '' },
       { n: STYLES[result.sourceStyleId].name + ' → ' + STYLES[result.targetStyleId].name, l: 'Arah Konversi', cls: 'fmt' },
     ];
+    if (result.mixedStyleFoundCount > 0) {
+      cards.push({
+        n: result.mixedStyleFixedCount + '/' + result.mixedStyleFoundCount,
+        l: 'Gaya Campuran Diperbaiki',
+        cls: result.mixedStyleUnresolvedCount > 0 ? 'warn' : 'ok',
+      });
+    }
     els.summaryGrid.innerHTML = cards.map(function(c) {
       return '<div class="sum-card ' + c.cls + '"><div class="n">' + esc(String(c.n)) + '</div><div class="l">' + esc(c.l) + '</div></div>';
     }).join('');
@@ -162,7 +169,8 @@
       return;
     }
     els.unmatchedList.innerHTML = result.unmatched.map(function(u) {
-      return '<div class="issue-item"><div class="raw">' + esc(u.raw) + '</div><div class="note">' + esc(u.note) + '</div></div>';
+      var badge = u.crossFamily ? '<span class="mixed-badge">GAYA CAMPURAN</span> ' : '';
+      return '<div class="issue-item"><div class="raw">' + badge + esc(u.raw) + '</div><div class="note">' + esc(u.note) + '</div></div>';
     }).join('');
     els.unmatchedDetails.open = true;
   }

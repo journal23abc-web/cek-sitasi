@@ -106,6 +106,7 @@
   .issue-item{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:11px 14px; border-left:3px solid var(--amber); font-size:12px; }
   .issue-item .raw{ font-family:var(--font-mono); color:var(--text); margin-bottom:3px; }
   .issue-item .note{ color:var(--text-dim); font-size:11.5px; }
+  .mixed-badge{ font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; color:var(--violet); background:rgba(139,124,240,.14); border:1px solid rgba(139,124,240,.35); border-radius:10px; padding:2px 7px; margin-right:6px; display:inline-block; vertical-align:middle; }
 
   .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.7; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
   .disclaimer b{ color:var(--text); }
@@ -146,6 +147,8 @@
     <b>Yang dikonversi:</b> sitasi in-text (parenthetical maupun naratif) — nama penulis, "&"/"and", ambang "et al.", nomor referensi, dsb — dicocokkan ke daftar referensi seperti yang dipakai Validator Sitasi, supaya hasilnya konsisten.
     Sitasi yang <b>tidak bisa dicocokkan dengan pasti ke satu referensi tetap dibiarkan seperti aslinya</b> dan ditandai untuk dicek manual, daripada ditebak dan salah.
     <b>Daftar referensi:</b> penomoran/urutan &amp; format nama penulis ikut disesuaikan; bagian judul/jurnal/halaman <b>sengaja tidak diubah</b> (lihat catatan di bawah hasil).
+    <br><br>
+    <b>Gaya campuran:</b> kalau naskah aslinya sudah bercampur — misalnya sebagian besar APA tapi ada beberapa sitasi yang sudah kadung ditulis dalam format IEEE/numerik, atau sebaliknya — sistem otomatis mendeteksi &amp; ikut mengonversi sitasi "nyasar" itu juga (bukan cuma sitasi bergaya sumber yang dipilih), supaya hasil akhirnya benar-benar seragam satu gaya. Yang berhasil dicocokkan otomatis ikut dikonversi; yang tidak, ditandai jelas dengan label <b>GAYA CAMPURAN</b> di daftar "Tidak Diubah" supaya mudah dicek manual.
     <br><br>
     Bisa <b>tempel teks</b>, <b>unggah .docx</b>, atau isi manual. Hasilnya ada <b>pratinjau berwarna</b> (sitasi yang berubah vs yang tidak), dan kedua kotak hasil <b>bisa disunting langsung</b> sebelum diekspor. Ekspor tersedia sebagai .docx (format asli dipertahankan, khusus dari unggahan), .docx teks polos, atau .txt.
   </div>
