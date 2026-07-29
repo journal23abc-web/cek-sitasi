@@ -161,6 +161,30 @@
   // Mendeley/Zotero/EndNote — biasanya bernama seperti nama belakang penulis, mis. "Aini",
   // "Winarno2016", dst.), pakai ulang bookmark itu alih-alih bikin baru. Bookmark internal
   // Word sendiri (nama diawali "_", mis. "_Toc..."/"_heading=...") diabaikan.
+  // Sebagian plugin sitasi (bukan Mendeley/Zotero yang membungkus dengan <w:hyperlink>, tapi
+  // integrasi lain — termasuk beberapa versi EndNote/Word Citations) membungkus tiap in-text
+  // citation dengan <w:sdt><w:sdtContent>...</w:sdtContent></w:sdt> (content control), bukan
+  // hyperlink. Run di dalam w:sdtContent bukan anak langsung <w:p>, jadi tidak "spliceable" dan
+  // sebelumnya dilaporkan sebagai "struktur run tidak didukung" untuk SEMUA sitasi yang naskahnya
+  // dibuat dengan plugin semacam ini. <w:sdt> selalu anak langsung <w:p> (turunan OOXML valid),
+  // jadi cukup aman untuk "dibongkar" — pindahkan seluruh isi <w:sdtContent> jadi anak langsung
+  // <w:p> tepat di posisi <w:sdt> semula, lalu buang wrapper <w:sdt>/<w:sdtPr>/<w:sdtEndPr>-nya.
+  // Teks, urutan run, dan format SETIAP run tetap identik — hanya nesting-nya yang berubah, jadi
+  // ini tidak memengaruhi hitungan posisi karakter (articleText) yang sudah dihitung sebelumnya.
+  function unwrapSdtElements(p) {
+    var sdtNodes = p.getElementsByTagName('w:sdt');
+    var sdtArr = [];
+    for (var i = 0; i < sdtNodes.length; i++) sdtArr.push(sdtNodes[i]);
+    sdtArr.forEach(function (sdt) {
+      if (sdt.parentNode !== p) return; // sdt bersarang di dalam sdt lain — kasus langka, dilewati demi keamanan
+      var contentList = sdt.getElementsByTagName('w:sdtContent');
+      if (!contentList.length) { p.removeChild(sdt); return; }
+      var content = contentList[0];
+      while (content.firstChild) p.insertBefore(content.firstChild, sdt);
+      p.removeChild(sdt);
+    });
+  }
+
   function findExistingBookmarkName(p) {
     var bms = p.getElementsByTagName('w:bookmarkStart');
     for (var i = 0; i < bms.length; i++) {
@@ -313,6 +337,11 @@
 
     var bodyParas = paras.slice(0, headingIdx);
     var refParas = paras.slice(headingIdx + 1);
+    // Flatten any citation-manager content-control wrappers before anything else touches the
+    // DOM — see unwrapSdtElements() for why. Must happen before highlight-range/text extraction
+    // below only in the sense that it should be done once, up front; it doesn't change any text,
+    // so it's safe regardless of exact ordering relative to those reads.
+    bodyParas.forEach(function (p) { unwrapSdtElements(p.el); });
     var highlightRangesByPara = bodyParas.map(function (p) { return buildHighlightRanges(p.el); });
     var docHasHighlight = highlightRangesByPara.some(function (r) { return r.length > 0; });
 
