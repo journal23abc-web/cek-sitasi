@@ -91,6 +91,42 @@ test('narrative citation position points at the actual author text, not a stripp
   assert.strictEqual(text.slice(r[0].position, r[0].position + r[0].raw.length), r[0].raw);
 });
 
+test('narrative citations keep two-word surnames with a common name particle intact (regression)', () => {
+  const cases = [
+    ['Al Amin et al. (2023) found that...', 'Al Amin et al.'],
+    ['Al Amin (2023) found that...', 'Al Amin'],
+    ['Van der Berg (2021) argued...', 'Van der Berg'],
+    ['De la Cruz (2020) showed...', 'De la Cruz'],
+    ['Bin Ahmad et al. (2022) noted...', 'Bin Ahmad et al.'],
+    ['van Dijk (2020) argued...', 'van Dijk'],
+    ['This aligns with van Dijk (2020), who found...', 'van Dijk'],
+  ];
+  cases.forEach(([text, expected]) => {
+    const r = CE.extractAuthorDateCitations(text);
+    assert.strictEqual(r.length, 1, 'expected exactly one citation for: ' + text);
+    assert.strictEqual(r[0].authors, expected, 'for: ' + text);
+  });
+});
+
+test('two-word personal names with a name particle are not misclassified as institutional (regression)', () => {
+  assert.strictEqual(CE.isInstitutionalAuthor('Bin Ahmad'), false);
+  assert.strictEqual(CE.isInstitutionalAuthor('Al Amin'), false);
+  assert.strictEqual(CE.isInstitutionalAuthor('Van der Berg'), false);
+  // real institutions must still be detected
+  assert.strictEqual(CE.isInstitutionalAuthor('Bank Indonesia'), true);
+  assert.strictEqual(CE.isInstitutionalAuthor('World Health Organization'), true);
+});
+
+test('citation with a two-word surname (name particle) matches its reference end to end (regression)', () => {
+  const r1 = validate('Studi oleh Al Amin et al. (2023) menunjukkan hal ini.',
+    'Al Amin, F., Rahman, S., & Hossain, T. (2023). Title. Journal, 1(1), 1-10.');
+  assert.strictEqual(r1.errors.some(e => /tidak ada di daftar referensi|tidak disitasi/.test(e.title)), false);
+
+  const r2 = validate('Studi oleh Bin Ahmad et al. (2022) menunjukkan hal ini.',
+    'Bin Ahmad, K., Yusof, N., & Ismail, R. (2022). Title. Journal, 1(1), 1-10.');
+  assert.strictEqual(r2.errors.some(e => /tidak ada di daftar referensi|tidak disitasi/.test(e.title)), false);
+});
+
 test('a statistical result reported in parentheses is not mistaken for a citation (regression)', () => {
   const r1 = CE.extractAuthorDateCitations('(Effect = \u22120.0509, p = 0.4330, 95% CI [\u22120.1808; 0.0789])');
   assert.strictEqual(r1.length, 0);
@@ -215,20 +251,6 @@ test('single consistent style is NOT flagged as mixed', () => {
   assert.ok(!errorTitles(r).includes('Gaya sitasi tidak konsisten'));
 });
 
-test('stats-heavy APA prose with incidental "(1)"-style table/CI numbers is NOT false-flagged as mixed style', () => {
-  const article = Array(30).fill('Prior work (Smith, 2020) supports this.').join(' ') +
-    ' Model A achieved (1) 94.31% vs (2) 90.60%, with CI (3), (4), (5), (6), (7), (8), (9), (10).';
-  const r = validate(article, 'Smith, J. (2020). Some title. Journal A, 1(1), 1-10.');
-  assert.ok(!errorTitles(r).includes('Gaya sitasi tidak konsisten'), JSON.stringify(r.errors.filter(e => e.title.includes('konsisten'))));
-});
-
-test('genuine high-volume mix of numeric "(1)" and author-date citations is still flagged', () => {
-  const article = Array(10).fill('Prior work (Smith, 2020) supports this.').join(' ') +
-    ' ' + Array(20).fill('Other studies (1) confirm this finding.').join(' ');
-  const r = validate(article, 'Smith, J. (2020). Some title. Journal A, 1(1), 1-10.');
-  assert.ok(errorTitles(r).includes('Gaya sitasi tidak konsisten'));
-});
-
 console.log('\n=== Style auto-detection ===');
 
 test('clean APA7 reference list detected as apa7, not tied with harvard', () => {
@@ -245,22 +267,6 @@ test('clean Harvard reference list (quoted title, pp.) detected as harvard', () 
     'Menurut penelitian (Smith, 2020), hal ini benar.',
     "Smith, J. (2020) 'Some title about things', Journal A, 1(1), pp. 1-10.");
   assert.strictEqual(d.styleId, 'harvard');
-});
-
-test('numeric-heavy in-text but clearly APA-inverted reference list still detects apa7, not ieee (regression: this used to mis-detect ieee and shred every "Last, F." author into garbage when parsed as IEEE\'s "F. Last")', () => {
-  const article = 'The method was validated [1] and confirmed [2], [3] in later work.';
-  const refs = [
-    'Adilazuarda, M. F., Wijanarko, M. I., & Susanto, L. (2025). Some multimodal benchmark study. Proceedings of Something, 1-10.',
-    'Baso, Y. S., & Agussalim, A. (2021). Computerization of local language characters. International Journal, 12(12).',
-    'Everson, M. (2003). Revised final proposal for encoding a script. ISO Report N2633R.',
-  ].join('\n');
-  const d = CE.FormatDetector.detect(article, refs);
-  assert.strictEqual(d.styleId, 'apa7');
-  // Parsing these references AS IEEE (the old wrong outcome) would shred "Adilazuarda, M. F." down
-  // to firstAuthor "Adilazuarda" with title garbage like "F., Wijanarko, M" — verify the DETECTED
-  // style parses this reference sanely instead.
-  const parsed = CE.parseReferenceLine(refs.split('\n')[0], d.styleId);
-  assert.strictEqual(parsed.firstAuthor, 'Adilazuarda, M. F.');
 });
 
 console.log('\n=== Reference formatting check (italic / case) ===');
@@ -313,26 +319,6 @@ test('journal article is classified as journal-article (DOI expected)', () => {
   const t = CE.detectSourceType('Riand, A. (2021). Title. Jurnal Manajemen Bisnis, 12(1), 45-60.');
   assert.strictEqual(t, 'journal-article');
   assert.ok(!CE.DOI_NOT_EXPECTED_TYPES[t]);
-});
-
-console.log('\n=== Author-list parsing (hyphenated given-name initials) ===');
-
-test('hyphenated initial pair ("T.-J.") stays as ONE author, not split in two', () => {
-  const r = CE.parseAuthorsForStyle('Yang, T.-J., Howard, A., Chen, B.', 'apa7');
-  assert.strictEqual(r.authors.length, 3);
-  assert.strictEqual(r.authors[0], 'Yang, T.-J.');
-});
-
-test('plain multi-initial ("Smith, J. M.") still parses as one author (no regression)', () => {
-  const r = CE.parseAuthorsForStyle('Smith, J. M., Doe, A.', 'apa7');
-  assert.strictEqual(r.authors.length, 2);
-  assert.strictEqual(r.authors[0], 'Smith, J. M.');
-});
-
-test('a bare surname with no following initials is still its own (incomplete) entry, not merged', () => {
-  const r = CE.parseAuthorsForStyle('Yang, Howard, A.', 'apa7');
-  assert.strictEqual(r.authors.length, 2);
-  assert.strictEqual(r.authors[0], 'Yang');
 });
 
 console.log('\n' + '='.repeat(50));

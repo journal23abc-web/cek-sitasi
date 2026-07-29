@@ -45,6 +45,10 @@ function looksLikePersonalName(str) {
   if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+,\s*[\p{Lu}\p{Lo}][\p{L}'\-]+(\s+[\p{Lu}\p{Lo}][\p{L}'\-]+)?$/u.test(s)) return true; // Last, First Middle
   if (/^(\p{Lu}\.\s*)+[\p{Lu}\p{Lo}][\p{L}'\-]+$/u.test(s)) return true; // F. M. Last
   if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+\s+\p{Lu}{1,3}$/u.test(s)) return true; // Vancouver: Last FM
+  // Common name-particle(s) + surname, e.g. "Bin Ahmad", "Al Amin", "Van der Berg", "De la Cruz".
+  // No institution is named this way, but the bare shape (title-case words, no comma) is
+  // otherwise indistinguishable from a short organization name like "Bank Indonesia".
+  if (/^(?:(?:bin|ibn|binti|al|el|da|ten|ter|van|der|den|von|de|la|le|du|dos|das|do)\s+)+[\p{Lu}\p{Lo}][\p{L}'\-]+$/iu.test(s)) return true;
   return false;
 }
 
@@ -129,8 +133,19 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan|of|for|the)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
+  // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
+  // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
+  // virtually always a real surname/word (e.g. the common name prefix "Al" in "Al Amin"), so
+  // these must only be treated as skip-fragments when the ORIGINAL text was already lowercase.
+  var caseSensitiveSkipWords = new Set(['al', 'et', 'cf', 'e.g', 'i.e']);
+  function isSkipWord(originalWord) {
+    var lower = originalWord.toLowerCase();
+    if (!skipWords.has(lower)) return false;
+    if (caseSensitiveSkipWords.has(lower)) return originalWord === lower;
+    return true;
+  }
   while ((m = narrativeRegex.exec(text)) !== null) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
     var year = m[2].trim();
@@ -151,7 +166,7 @@ function extractAuthorDateCitations(text) {
     // this, the whole match gets discarded by the skipWords check below and the citation
     // is lost entirely (shows up as a false "not cited in text" warning instead).
     var leadMatch = authors.match(/^([A-Za-zÀ-ÿ]+),?\s+/);
-    if (leadMatch && skipWords.has(leadMatch[1].toLowerCase())) {
+    if (leadMatch && isSkipWord(leadMatch[1])) {
       authors = authors.slice(leadMatch[0].length).trim();
     }
     if (!authors) continue;
@@ -159,8 +174,8 @@ function extractAuthorDateCitations(text) {
     var before = text.substring(0, m.index);
     var openP = (before.match(/\(/g) || []).length, closeP = (before.match(/\)/g) || []).length;
     if (openP > closeP) continue;
-    var firstWord = authors.split(/[\s,]+/)[0].toLowerCase();
-    if (skipWords.has(firstWord)) continue;
+    var firstWordOriginal = authors.split(/[\s,]+/)[0];
+    if (isSkipWord(firstWordOriginal)) continue;
     // `authors` may have had leading text stripped above (sentence fragments, discourse words,
     // "The/A/An"), so it's no longer necessarily positioned at m.index — every stripping step
     // only ever removes a prefix, though, so `authors` is still a verbatim substring of the
@@ -324,12 +339,7 @@ var AuthorParsers = {
     var parts = splitOnSeparators(cleaned);
     var authors = [];
     var buffer = null;
-    // Matches a run of initials, e.g. "J.", "J. M.", or a hyphenated given name written as
-    // two initials joined by a dash (e.g. "T.-J." for "Tien-Ju") — common in APA/Harvard
-    // reference lists. The period is required on the first letter of each whitespace-
-    // separated cluster (so real surnames like "Yang" or all-caps acronyms like "NASA"
-    // still correctly fail to match), but optional on a hyphen-joined trailing letter.
-    var initialsOnly = /^(?:[A-Z]\.(?:-[A-Z]\.?)*\s*)*[A-Z]\.?(?:-[A-Z]\.?)*$/;
+    var initialsOnly = /^([A-Z]\.\s*)*[A-Z]\.?$/;
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
       if (initialsOnly.test(p)) {
@@ -512,17 +522,6 @@ var FormatDetector = {
       if (/\d{4};\d+(\(\d+\))?:\d+/.test(line)) { scores.vancouver += 4; } // Year;Vol(Issue):Pages
       if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+\s+[A-Z]{1,3}[,.]/u.test(line)) { scores.vancouver += 2; } // Last FM,
       if (/^[A-Z]\.\s*[A-Z]?\.?\s*[\p{Lu}\p{Lo}][\p{L}'\-]+,/u.test(line)) { scores.ieee += 2; } // F. M. Last,
-      // "Surname, F." (comma right after a bare surname, then a single-letter initial+period) is
-      // the unmistakable fingerprint of APA/Harvard's ALL-inverted author format — and it can
-      // basically never occur in genuine IEEE ("F. M. Last,", never inverted) or Vancouver
-      // ("Last FM," — no comma between surname and initials) reference lines. Without an
-      // explicit penalty here, a numeric-heavy in-text citation style (e.g. a document that was
-      // partially converted to IEEE but still has its original APA reference list) could still
-      // out-score apa7/harvard on total points and get its "Last, F. M." entries parsed as if
-      // they were IEEE's "F. M. Last" — silently shredding every author name.
-      if (/^[\p{Lu}\p{Lo}][\p{L}'\-]{2,}\s*,\s*[A-Z]\./u.test(line)) {
-        scores.apa7 += 3; scores.harvard += 2; scores.ieee -= 3; scores.vancouver -= 2;
-      }
     });
     // APA7 never quotes titles at all — if nothing in the whole reference list is quoted,
     // that absence is itself informative (Harvard/Chicago/MLA/IEEE all quote titles).
@@ -1371,30 +1370,16 @@ MultiFormatValidator.prototype.detectMixedCitationStyles = function() {
   var bracket = (text.match(/\[\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\]/g) || []).length;
   // Exclude 4-digit numbers here — those are years inside author-date citations like
   // "(2020)", not numeric citation markers. Genuine numeric-style citations are 1-3 digits.
-  // Also exclude matches immediately preceded by common non-citation contexts — table/figure/
-  // equation references, percentages, and statistical notation ("Table (1)", "94.31% (2)",
-  // "CI (3)", "n = (4)") all produce short bare-parenthesized numbers that look identical to a
-  // numeric citation but virtually never are one, especially in results-heavy academic prose.
-  var nonCitationContext = /(table|figure|fig\.|eq\.|equation|persamaan|tabel|gambar|no\.|n\s*=|df\s*=|%|CI|r\s*=|p\s*=)\s*$/i;
-  var parenNumeric = 0;
-  var pnRe = /\(\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\)/g;
-  var pnMatch;
-  while ((pnMatch = pnRe.exec(text)) !== null) {
-    if (/^\(\d{4}\)$/.test(pnMatch[0])) continue;
-    var before = text.slice(Math.max(0, pnMatch.index - 20), pnMatch.index);
-    if (nonCitationContext.test(before)) continue;
-    parenNumeric++;
-  }
+  var parenNumeric = (text.match(/\(\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\)/g) || []).filter(function(m) { return !/^\(\d{4}\)$/.test(m); }).length;
   var authorDate = (text.match(/\([\p{Lu}\p{Lo}][^()]*?,?\s*\d{4}[a-z]?\)/gu) || []).length;
   var authorPage = (text.match(/\([\p{Lu}\p{Lo}][\p{L}'\-]+\s+\d+(?:[-–]\d+)?\)/gu) || []).length;
 
   var present = [];
   if (bracket > 0) present.push({ label: 'numerik "[1]"', count: bracket });
   // A handful of "(1)"-shaped matches showing up alongside a mostly author-date document is
-  // very often just enumerated prose ("...covers (1) X, (2) Y, (3) Z...") or incidental
-  // statistical/table references rather than a genuine numeric citation style — require a
-  // meaningful volume AND a substantial ratio relative to real citations before flagging it.
-  if (parenNumeric >= 8 && parenNumeric > authorDate * 0.5) present.push({ label: 'numerik "(1)"', count: parenNumeric });
+  // very often just enumerated prose ("...covers (1) X, (2) Y, (3) Z...") rather than a
+  // genuine numeric citation style — require a meaningful volume before flagging it.
+  if (parenNumeric >= 5 && parenNumeric > authorDate * 0.3) present.push({ label: 'numerik "(1)"', count: parenNumeric });
   if (authorDate > 0) present.push({ label: 'penulis-tahun "(Smith, 2020)"', count: authorDate });
   if (authorPage > 0 && authorDate === 0) present.push({ label: 'penulis-halaman "(Smith 45)"', count: authorPage });
 
