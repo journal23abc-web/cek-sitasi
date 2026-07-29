@@ -49,6 +49,7 @@
     jrOriginMinPercent: document.getElementById('jrOriginMinPercent'),
     jrApplyBtn: document.getElementById('jrApplyBtn'),
     jrResultsPanel: document.getElementById('jrResultsPanel'),
+    reportFileName: document.getElementById('reportFileName'),
   };
 
   var jrOverrides = {}; // { referenceIndex: 'local'|'international' } — resets per new validation run
@@ -444,18 +445,21 @@
   });
 
   if (els.downloadBtn) {
+    var pdfSaveCount = 0; // increments each "Unduh sebagai PDF" click this session, so repeated
+                          // saves suggest a different filename instead of the exact same one —
+                          // the browser can't be asked "does this file already exist on disk" (no
+                          // filesystem access from JS), so this is the closest client-side proxy.
+    function buildExportFilename() {
+      pdfSaveCount++;
+      var base = (els.reportFileName && els.reportFileName.value.trim()) || 'Naskah';
+      var name = base + '_Citation Checker';
+      if (pdfSaveCount > 1) name += ' (' + pdfSaveCount + ')';
+      return name;
+    }
+
     els.downloadBtn.addEventListener('click', function() {
       if (!lastResult) return;
-      var style = STYLES[lastStyleId];
-      var now = new Date();
-      var dateStr = now.toISOString().slice(0, 10);
-      // Include time-of-day (not just the date) so downloading the report more than once on
-      // the same day always produces a distinct filename instead of silently overwriting the
-      // previous one (or relying on the browser's own "(1)", "(2)" auto-suffixing, which isn't
-      // always shown/available depending on the "Save as PDF" destination folder picker).
-      var timeStr = [now.getHours(), now.getMinutes(), now.getSeconds()]
-        .map(function(n) { return String(n).padStart(2, '0'); }).join('');
-      var suggestedName = 'Laporan-Validasi-Sitasi-' + style.name.replace(/[^\w]+/g, '-') + '-' + dateStr + '-' + timeStr;
+      var suggestedName = buildExportFilename();
       var originalTitle = document.title;
       document.title = suggestedName;
       els.downloadStatus.textContent = 'Membuka dialog cetak... pilih tujuan "Simpan sebagai PDF".';

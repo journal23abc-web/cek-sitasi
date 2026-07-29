@@ -689,11 +689,21 @@
     return html;
   }
 
+  var pdfSaveCount = 0; // increments each "Unduh sebagai PDF" click this session, so repeated
+                        // saves suggest a different filename instead of the exact same one —
+                        // the browser can't be asked "does this file already exist on disk" (no
+                        // filesystem access from JS), so this is the closest client-side proxy.
+  function buildExportFilename() {
+    pdfSaveCount++;
+    var base = state.fileName ? state.fileName.replace(/\.(docx|txt)$/i, '') : 'Naskah';
+    var name = base + '_Citation Checker';
+    if (pdfSaveCount > 1) name += ' (' + pdfSaveCount + ')';
+    return name;
+  }
+
   els.downloadBtn.addEventListener('click', function() {
     if (!state.lastResult) return;
-    var style = STYLES[state.lastStyleId];
-    var dateStr = new Date().toISOString().slice(0, 10);
-    var suggestedName = 'Laporan-Validasi-Sitasi-' + style.name.replace(/[^\w]+/g, '-') + '-' + dateStr;
+    var suggestedName = buildExportFilename();
     var originalTitle = document.title;
     document.title = suggestedName;
     setStatus('', 'info');
