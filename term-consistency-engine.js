@@ -90,21 +90,33 @@
   // (2-6 uppercase letters). Deliberately loose — no real POS tagger is available client-side —
   // filtered down later by repetition count and definition/variable evidence, so an overly
   // permissive extractor here is fine as long as the downstream scoring is conservative.
-  var TITLECASE_PHRASE_RE = /\b(?:[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?)(?:\s+(?:of|for|the|in|on|to|a|an)?\s*[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?){1,4}\b/g;
-  var ACRONYM_TOKEN_RE = /\b[A-Z]{2,6}\d{0,2}\b/g;
+  var TITLECASE_PHRASE_RE = /\b(?:[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?)(?:[ \t]+(?:of|for|the|in|on|to|a|an)?[ \t]*[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?){1,4}\b/g;
+  var ACRONYM_TOKEN_RE = /\b[A-Z]{2,6}\d{0,2}\b|\b[A-Z][a-z]?[A-Z][a-zA-Z]*\d{1,2}\b/g;
 
   function extractCandidateTerms(text) {
     var occurrences = {}; // normalizedForm -> [{surface, start, end}]
+    var FIRST_WORD_REJECT = new Set([
+      'the', 'a', 'an', 'in', 'on', 'at', 'for', 'to', 'of', 'and', 'or', 'but', 'with', 'from',
+      'by', 'as', 'this', 'that', 'these', 'those', 'it', 'its', 'if', 'when', 'while', 'because',
+      'since', 'although', 'though', 'however', 'therefore', 'thus', 'moreover', 'furthermore',
+      'additionally', 'consequently', 'meanwhile', 'according', 'based', 'given', 'during',
+      'after', 'before', 'within', 'among', 'between', 'across', 'such', 'each', 'both', 'all',
+      'some', 'many', 'most', 'first', 'second', 'third', 'finally', 'overall', 'specifically',
+      'not', 'no', 'very', 'highly', 'relatively', 'particularly', 'significantly', 'only', 'also',
+    ]);
     var m;
     TITLECASE_PHRASE_RE.lastIndex = 0;
     while ((m = TITLECASE_PHRASE_RE.exec(text)) !== null) {
       var surface = m[0].trim();
+      if (surface.indexOf(PARA_BOUNDARY) !== -1) continue; // spans a paragraph/table-cell boundary — not a real phrase
       var wordCount = surface.split(/\s+/).length;
       if (wordCount < 2 || wordCount > 5) continue;
       // Skip phrases that are entirely stopword-like or look like a sentence start artifact
       // (single capitalized word only, e.g. just "The") — TITLECASE_PHRASE_RE already requires
       // 2+ words so this mostly guards against noise from headings in ALL CAPS text.
       if (surface === surface.toUpperCase()) continue; // ALL CAPS -> likely a heading, not a term
+      var firstWord = surface.split(/\s+/)[0].toLowerCase();
+      if (FIRST_WORD_REJECT.has(firstWord)) continue; // "In the Indonesian" etc. — sentence-start noise, not a term
       var norm = normalizeTermSurface(surface);
       if (!norm || norm.split(' ').length < 2) continue;
       if (!occurrences[norm]) occurrences[norm] = [];
@@ -134,9 +146,14 @@
 
   function findAcronymAliases(text) {
     var aliases = []; // { fullTerm, acronym, position }
-    var re1 = /\b((?:[A-Z][a-zA-Z]+(?:[-\u2010-\u2015][A-Z][a-zA-Z]+)?(?:\s+(?:of|for|the|and)?\s*)?){1,5})\s*\(([A-Za-z]{2,6})\)/g;
+    // [ \t]+ only (no \n at all) between chained words: a real multi-word term is always
+    // written on one continuous line — allowing \s+ here let table cells (which mammoth renders
+    // as separate blank-line-delimited paragraphs, e.g. "CR\n\nAVE\n\nShort Video Addiction")
+    // get wrongly chained into one bogus "full term".
+    var re1 = /\b((?:[A-Z][a-zA-Z]+(?:[-\u2010-\u2015][A-Z][a-zA-Z]+)?(?:[ \t]+(?:of|for|the|and)?[ \t]*)?){1,5})[ \t]*\(([A-Za-z]{2,6})\)/g;
     var m;
     while ((m = re1.exec(text)) !== null) {
+      if (m[0].indexOf(PARA_BOUNDARY) !== -1) continue; // spans a paragraph/table-cell boundary
       var fullTerm = m[1].trim().replace(/\s+$/, '');
       var acr = m[2];
       if (acr !== acr.toUpperCase() && !/^[A-Z][a-z]?[A-Z]+$|^[A-Z]+[a-z]?[A-Z]$/.test(acr)) continue; // reject plain lowercase words in parens
@@ -168,7 +185,16 @@
     operational: /\bmeasured\s+(?:using|by|with|through)\b|\bassessed\s+(?:using|through|via)\b|\boperationalized\s+as\b|\bdiukur\s+menggunakan\b|\bdinilai\s+melalui\b|\bdioperasionalkan\s+sebagai\b|\bindicator[s]?\s+(?:of|for)\b/i,
     role: /\b(?:acts?|serves?|functions?)\s+as\s+(?:a|an)?\s*(?:mediator|moderator|predictor|antecedent|outcome|independent|dependent|exogenous|endogenous)\b|\b(?:is|are)\s+(?:a|an)?\s*(?:mediating|moderating|predictor|independent|dependent|exogenous|endogenous)\s+variable\b|\bberfungsi\s+sebagai\s+variabel\b|\bbertindak\s+sebagai\b|\bmenjadi\s+variabel\b/i,
   };
+  // Weak/generic cues ("is the", "means") are far more prone to false matches (any sentence with
+  // "X is the ..." isn't necessarily defining X) than an explicit definitional verb — scored
+  // lower so a borderline match can actually fall below the "not a definition" threshold instead
+  // of every pattern match landing in the same high band regardless of how weak the cue was.
+  var WEAK_DEFINITION_CUE = /^\s*(?:is\s+the|means?)\b/i;
   var SECTION_HEADING_RE = /\b(method|methodology|instrumentation|conceptual\s+framework|definition|metode|instrumen)\b/i;
+  // Reversed operational phrasing: the instrument is named FIRST, then "was used to measure X" /
+  // "digunakan untuk mengukur X" — the cue sits BEFORE the term, not after it like every other
+  // pattern here, so it needs its own check against the text preceding the occurrence.
+  var REVERSED_OPERATIONAL_RE = /(?:was|were|is|are)\s+used\s+to\s+(?:measure|assess)\s*$|digunakan\s+(?:untuk\s+)?mengukur\s*$/i;
 
   function detectDefinitions(text, termNorm, occurrences, sectionHints) {
     var found = [];
@@ -180,6 +206,20 @@
         if (occ.start >= s.start && occ.start < s.start + s.text.length) {
           var sentText = s.text;
           var relPos = occ.start - s.start;
+          // Reversed operational: "<Instrument Name> was used to measure <term>." — check the
+          // text immediately BEFORE the term for the cue, and if found, the "definition" is the
+          // instrument name phrase right before the cue itself.
+          var before = sentText.slice(0, relPos);
+          var revMatch = REVERSED_OPERATIONAL_RE.exec(before);
+          if (revMatch && before.length - revMatch.index < 80) {
+            var instrumentPhrase = before.slice(0, revMatch.index).trim().replace(/^.*[.;]\s*/, '');
+            if (instrumentPhrase.split(/\s+/).length >= 2) {
+              found.push({
+                type: 'operational', text: instrumentPhrase.slice(-160).split(PARA_BOUNDARY).join(' '),
+                sentence: sentText.slice(0, 260).split(PARA_BOUNDARY).join(' '), score: 0.78, confidence: 'possible',
+              });
+            }
+          }
           // require the definitional pattern to appear reasonably close AFTER the term
           var after = sentText.slice(relPos);
           for (var type in DEFINITION_PATTERNS) {
@@ -188,14 +228,19 @@
             if (pm && pm.index < 60) {
               var defText = after.slice(pm.index + pm[0].length).trim().replace(/^[:,]\s*/, '');
               if (defText.length > 8) {
-                var definitional = 0.4, syntactic = relPos < 15 ? 0.25 : 0.1;
+                var definitional = WEAK_DEFINITION_CUE.test(pm[0]) ? 0.2 : 0.4;
+                var syntactic = relPos < 30 ? 0.25 : 0.1;
                 var sectionRel = SECTION_HEADING_RE.test(sectionHints.nearbyHeading || '') ? 0.2 : 0.08;
                 var explanatory = defText.split(/\s+/).length >= 4 ? 0.15 : 0.05;
-                var score = definitional + syntactic + sectionRel + explanatory;
-                found.push({
-                  type: type, text: defText.slice(0, 220), sentence: sentText.slice(0, 260),
-                  score: Math.min(1, Math.round(score * 100) / 100),
-                });
+                var score = Math.min(1, Math.round((definitional + syntactic + sectionRel + explanatory) * 100) / 100);
+                // Spec's own decision rule: score < 0.60 means "bukan definisi" — not a weak
+                // definition, NOT a definition at all. Discard rather than keep-but-flag-low.
+                if (score >= 0.60) {
+                  found.push({
+                    type: type, text: defText.slice(0, 220).split(PARA_BOUNDARY).join(' '), sentence: sentText.slice(0, 260).split(PARA_BOUNDARY).join(' '),
+                    score: score, confidence: score >= 0.80 ? 'strong' : 'possible',
+                  });
+                }
               }
               break;
             }
@@ -273,10 +318,32 @@
     return out;
   }
 
-  function classifyType(termNorm, score, hasIndicatorSiblings, isAcronymAlias, isDefined) {
+  var INSTRUMENT_NAME_RE = /\b(scale|inventory|questionnaire|index|survey|checklist)\b/i;
+  var EXAMPLE_CUE_RE = /\b(?:such as|e\.g\.,?|for example|including|like)\s*$/i;
+
+  function isExampleMention(termNorm, occurrences, sentences) {
+    return occurrences.some(function (occ) {
+      for (var i = 0; i < sentences.length; i++) {
+        var s = sentences[i];
+        if (occ.start >= s.start && occ.start < s.start + s.text.length) {
+          var before = s.text.slice(0, occ.start - s.start);
+          return EXAMPLE_CUE_RE.test(before.slice(-40));
+        }
+      }
+      return false;
+    });
+  }
+
+  function classifyType(termNorm, score, isInstrumentReferenced, isAcronymAlias, isDefined, hasIndicators, isExample) {
     if (isAcronymAlias) return 'ALIAS';
     if (/^[a-z]+\d$/.test(termNorm.replace(/\s+/g, ''))) return 'INDICATOR'; // e.g. "sva1"
-    if (score >= 0.75) return 'CONSTRUCT_VARIABLE';
+    // Checked before the variable-score branches: a term can score reasonably high on generic
+    // "variable-ish" evidence (repetition, appearing near model/hypothesis language) purely
+    // because it's the NAME of the measurement tool used for something else, e.g. "the Short-
+    // Video Dependence Scale" showing up repeatedly across the instrumentation section.
+    if (isInstrumentReferenced || INSTRUMENT_NAME_RE.test(termNorm)) return 'INSTRUMENT';
+    if (isExample) return 'EXAMPLE';
+    if (score >= 0.75) return hasIndicators ? 'CONSTRUCT_VARIABLE' : 'OBSERVED_VARIABLE';
     if (score >= 0.50) return 'CANDIDATE_VARIABLE';
     if (isDefined) return 'GENERAL_CONCEPT';
     return 'UNCLASSIFIED';
@@ -441,37 +508,141 @@
   // relation graph, per the "kontras dalam satu kalimat" check in the spec.
   function hasContrastEvidence(text, surfaceA, surfaceB) {
     var esc = function (s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
-    var re = new RegExp(esc(surfaceA) + '\\s+(?:and|dan)\\s+' + esc(surfaceB) + '|' + esc(surfaceB) + '\\s+(?:and|dan)\\s+' + esc(surfaceA), 'i');
+    // Plain "X and Y" AND comma-separated enumerations ("X, Y, and Z" / "X, Y, dan Z") — a paper
+    // listing several constructs side by side in one sentence ("attitude, social norms, and
+    // perceived behavioral control") is explicitly treating each as its own distinct item.
+    var re = new RegExp(
+      esc(surfaceA) + '\\s*,?\\s+(?:and|dan)\\s+' + esc(surfaceB) + '|' +
+      esc(surfaceB) + '\\s*,?\\s+(?:and|dan)\\s+' + esc(surfaceA) + '|' +
+      esc(surfaceA) + '\\s*,\\s*' + esc(surfaceB) + '|' + esc(surfaceB) + '\\s*,\\s*' + esc(surfaceA),
+      'i');
     return re.test(text);
+  }
+
+  // "Discriminant validity" is a specific statistical test authors run PRECISELY to confirm two
+  // constructs are empirically distinct — if it's mentioned within the same neighborhood as both
+  // terms, that is about as strong a negative signal as this engine can get without a citation-
+  // level understanding of what the test actually concluded.
+  function hasDiscriminantValidityMention(text, surfaceA, surfaceB) {
+    var esc = function (s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); };
+    var dvRe = /discriminant\s+validity/gi;
+    var reA = new RegExp(esc(surfaceA), 'i');
+    var reB = new RegExp(esc(surfaceB), 'i');
+    var m;
+    while ((m = dvRe.exec(text)) !== null) {
+      var windowText = text.slice(Math.max(0, m.index - 400), m.index + 400);
+      if (reA.test(windowText) && reB.test(windowText)) return true;
+    }
+    return false;
+  }
+
+  // If both concepts have their own linked indicator items (see indicator-linkage in
+  // buildConceptDictionary) and those indicator sets don't overlap at all, the paper is
+  // measuring them with entirely separate item sets — a concrete structural difference, not
+  // just a wording difference.
+  function hasDifferentIndicatorSets(a, b) {
+    if (!a.indicators || !b.indicators || !a.indicators.length || !b.indicators.length) return false;
+    var setA = new Set(a.indicators.map(function (s) { return s.toLowerCase(); }));
+    return !b.indicators.some(function (s) { return setA.has(s.toLowerCase()); });
+  }
+
+  // One term is literally an indicator OF the other (e.g. "SVA1" measures "SVA") — never a
+  // same-concept candidate, it's a part-of relationship, not identity.
+  function isIndicatorOfEachOther(a, b) {
+    return (a.indicators && a.indicators.indexOf(b.canonicalSurface) !== -1) ||
+      (b.indicators && b.indicators.indexOf(a.canonicalSurface) !== -1);
+  }
+
+  // Spec check #1 ("apakah definisinya sama?") means comparing what the definitions actually
+  // SAY, not just whether both happen to have one — otherwise two totally different concepts
+  // that both merely have SOME definition would score as if their definitions matched.
+  function definitionSimilarity(a, b) {
+    if (!a.definitions.length || !b.definitions.length) return 0;
+    var best = 0;
+    a.definitions.forEach(function (da) {
+      b.definitions.forEach(function (db) {
+        var wsA = new Set(da.text.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 3 && !STOPWORDS.has(w); }));
+        var wsB = new Set(db.text.toLowerCase().split(/\s+/).filter(function (w) { return w.length > 3 && !STOPWORDS.has(w); }));
+        var sim = jaccard(wsA, wsB);
+        if (sim > best) best = sim;
+      });
+    });
+    return best;
+  }
+
+  // relation_neighborhood_similarity: do A and B connect to the SAME third concepts in the
+  // relation graph (excluding edges between A and B themselves, which is what hasCausalEdge
+  // already covers as a hard veto)? Two labels for one real construct tend to show up with
+  // near-identical graph neighborhoods; two genuinely different constructs usually don't.
+  function relationNeighborhoodSimilarity(relations, normA, normB) {
+    function neighborsOf(norm) {
+      var set = new Set();
+      relations.forEach(function (r) {
+        if (r.type === 'PREDICTS') {
+          if (r.subject === norm && r.object !== normA && r.object !== normB) set.add(r.object);
+          if (r.object === norm && r.subject !== normA && r.subject !== normB) set.add(r.subject);
+        }
+        if (r.type === 'MEDIATES' && r.subject === norm) {
+          r.between.forEach(function (x) { if (x !== normA && x !== normB) set.add(x); });
+        }
+      });
+      return set;
+    }
+    var nA = neighborsOf(normA), nB = neighborsOf(normB);
+    if (nA.size === 0 && nB.size === 0) return 0;
+    return jaccard(nA, nB);
   }
 
   function flagPossibleAliases(text, concepts, relations) {
     relations = relations || [];
     var flagged = [];
+    var autoMerged = [];
     var keys = Object.keys(concepts);
     for (var i = 0; i < keys.length; i++) {
       for (var j = i + 1; j < keys.length; j++) {
-        var a = concepts[keys[i]], b = concepts[keys[j]];
+        var normA = keys[i], normB = keys[j];
+        var a = concepts[normA], b = concepts[normB];
         if (a.acronymOf || b.acronymOf) continue; // already resolved via Level 2
-        // Strongest possible negative evidence: a directed PREDICTS/MEDIATES edge between them
-        // in the relation graph means the text itself treats them as causally distinct things —
-        // no lexical similarity can outweigh that.
-        if (hasCausalEdge(relations, keys[i], keys[j])) continue;
-        var wsA = wordSet(keys[i]), wsB = wordSet(keys[j]);
+        // Hard vetos: no similarity score can override these regardless of how high it scores.
+        if (hasCausalEdge(relations, normA, normB)) continue;
+        if (isIndicatorOfEachOther(a, b)) continue;
+        var wsA = wordSet(normA), wsB = wordSet(normB);
         var lexSim = jaccard(wsA, wsB);
-        var editSim = levenshteinRatio(keys[i], keys[j]);
+        var editSim = levenshteinRatio(normA, normB);
         if (lexSim < 0.15 && editSim < 0.5) continue; // clearly unrelated, skip the pair entirely
-        var measurementMatch = (a.measuredBy && b.measuredBy && a.measuredBy === b.measuredBy) ? 1 : 0;
+        var measurementSim = (a.measuredBy && b.measuredBy && a.measuredBy === b.measuredBy) ? 1 : 0;
+        var defSim = definitionSimilarity(a, b);
+        var relSim = relationNeighborhoodSimilarity(relations, normA, normB);
         var contrast = hasContrastEvidence(text, a.canonicalSurface, b.canonicalSurface);
-        var score = 0.3 * lexSim + 0.2 * editSim + 0.25 * measurementMatch + 0.25 * (a.definitions.length && b.definitions.length ? 0.4 : 0);
-        if (contrast) score -= 0.5;
-        score = Math.max(0, Math.min(1, Math.round(score * 100) / 100));
-        if (score >= 0.75 && !contrast) {
-          flagged.push({ termA: a.canonicalSurface, termB: b.canonicalSurface, score: score, reason: contrast ? 'contrast evidence found (excluded)' : 'lexical/measurement overlap' });
+        var discriminant = hasDiscriminantValidityMention(text, a.canonicalSurface, b.canonicalSurface);
+        var diffIndicators = hasDifferentIndicatorSets(a, b);
+
+        // Spec's 5-component formula, 0.20 each: lexical, semantic (approximated here by edit
+        // distance — no real embedding model is available client-side, see file header), same
+        // definition, same measurement, same relation-graph neighborhood.
+        var score = 0.20 * lexSim + 0.20 * editSim + 0.20 * defSim + 0.20 * measurementSim + 0.20 * relSim;
+        var contradictionPenalty = 0;
+        if (contrast) contradictionPenalty += 0.5;
+        if (discriminant) contradictionPenalty += 0.5;
+        if (diffIndicators) contradictionPenalty += 0.3;
+        score = Math.max(0, Math.min(1, Math.round((score - contradictionPenalty) * 100) / 100));
+
+        var hasNegativeEvidence = contrast || discriminant || diffIndicators;
+        if (hasNegativeEvidence) continue; // never flag OR merge — matches spec's "bukti negatif yang membatalkan penyatuan"
+
+        // Auto-merge is the highest-stakes decision this engine makes, so on top of the score
+        // threshold it also requires at least one STRUCTURAL corroborating signal (shared
+        // instrument or shared graph neighborhood) — never merges on lexical/edit-distance
+        // resemblance alone, which is exactly the mistake the spec warns against ("kemiripan
+        // tinggi bukan bukti identitas").
+        if (score >= 0.90 && (measurementSim >= 1 || relSim >= 0.5)) {
+          autoMerged.push({ normA: normA, normB: normB, score: score });
+        } else if (score >= 0.75) {
+          flagged.push({ termA: a.canonicalSurface, termB: b.canonicalSurface, score: score, reason: 'lexical/definition/measurement/relation overlap' });
         }
       }
     }
-    return flagged.sort(function (x, y) { return y.score - x.score; });
+    return { flagged: flagged.sort(function (x, y) { return y.score - x.score; }), autoMerged: autoMerged };
   }
 
   function dedupeAcronymAliases(pairs) {
@@ -488,7 +659,15 @@
   }
 
   // ---------- orchestration ----------
+  var PARA_BOUNDARY = '\u0001';
+
   function buildConceptDictionary(text) {
+    // Mark paragraph/table-cell boundaries BEFORE normalizeWhitespace flattens all newlines to
+    // plain spaces — otherwise adjacent table cells (e.g. a "CR" / "AVE" / "Short Video
+    // Addiction (SVA)" row in a loadings table, which mammoth renders as separate blank-line-
+    // separated paragraphs) would look identical to genuine same-sentence spacing, and the
+    // multi-word term/acronym extraction below would wrongly glue them into one bogus term.
+    text = text.replace(/\n[ \t]*\n+/g, PARA_BOUNDARY);
     text = normalizeWhitespace(text);
     var sentenceList = splitSentences(text);
     var sectionHints = { sentences: sentenceList, nearbyHeading: '' };
@@ -556,11 +735,14 @@
 
     // A paper very commonly introduces "Full Term (ACR)" once, then uses just "ACR" alone for
     // the rest of the text — including for the sentence that actually explains what it means
-    // ("The TPB proposes that..."). Without this, such definitions are invisible because they
-    // never mention the full term phrase at all, only the bare acronym.
+    // ("The TPB proposes that...") AND for most of its measurement/hypothesis/statistical
+    // evidence. Without folding acronym-only occurrences back in here, both the definition
+    // search and the variable-evidence scoring would only ever see the ONE full-phrase mention,
+    // missing everything that follows.
     Object.keys(concepts).forEach(function (norm) {
       var c = concepts[norm];
       if (!c.aliasAcronyms.length) return;
+      var allOccs = findAllSurfaceOccurrences(text, norm);
       c.aliasAcronyms.forEach(function (acr) {
         var acrRe = new RegExp('\\b' + escapeRegex(acr) + '\\b', 'g');
         var acrOccs = [];
@@ -572,20 +754,46 @@
           var alreadyHave = c.definitions.some(function (existing) { return existing.text === d.text; });
           if (!alreadyHave) c.definitions.push(d);
         });
+        allOccs = allOccs.concat(acrOccs);
       });
+      var recomputed = scoreVariableEvidence(text, allOccs, sentenceList);
+      c.variableScore = Math.max(c.variableScore, recomputed);
     });
 
     // record which instrument measures which concept, from operational definitions
     Object.keys(concepts).forEach(function (norm) {
       var opDef = concepts[norm].definitions.find(function (d) { return d.type === 'operational'; });
-      if (opDef) concepts[norm].measuredBy = normalizeTermSurface(opDef.text.slice(0, 60));
+      if (opDef) {
+        var instrumentPhrase = opDef.text.slice(0, 80).replace(/^(?:an?|the)\s+/i, '').replace(/^(?:adapted|modified|validated|revised|original|standard|adopted)\s+/i, '');
+        concepts[norm].measuredBy = normalizeTermSurface(instrumentPhrase.slice(0, 60));
+      }
     });
 
+    // A single-mention instrument name (very common — introduced once in the operational
+    // definition, then only the construct name is used afterward) wouldn't otherwise clear the
+    // "repeats at least twice" bar to become its own concept at all, which meant it could never
+    // be classified as INSTRUMENT. Anything recorded as some other concept's measuredBy value
+    // earns a lightweight concept entry of its own if it doesn't already have one.
+    Object.keys(concepts).slice().forEach(function (norm) {
+      var mb = concepts[norm].measuredBy;
+      if (!mb || concepts[mb]) return;
+      var mbOccs = findAllSurfaceOccurrences(text, mb);
+      if (!mbOccs.length) return;
+      var surfaceVariants = {};
+      mbOccs.forEach(function (o) { surfaceVariants[o.surface] = (surfaceVariants[o.surface] || 0) + 1; });
+      concepts[mb] = {
+        canonicalSurface: mbOccs[0].surface, surfaceVariants: Object.keys(surfaceVariants).map(function (s) { return { text: s, count: surfaceVariants[s] }; }),
+        occurrenceCount: mbOccs.length, definitions: [], variableScore: 0, measuredBy: null,
+        acronymOf: null, aliasAcronyms: [],
+      };
+    });
+
+    // First pass — just enough (INDICATOR / ALIAS detection) for indicator-linkage below to work.
     Object.keys(concepts).forEach(function (norm) {
       var c = concepts[norm];
       var isDefined = c.definitions.length > 0;
       var isAcronymAlias = !!c.acronymOf;
-      c.type = classifyType(norm, c.variableScore, false, isAcronymAlias, isDefined);
+      c.type = classifyType(norm, c.variableScore, false, isAcronymAlias, isDefined, false, false);
       c.consistencyIssue = c.surfaceVariants.length >= 2; // written more than one way -> flag
     });
 
@@ -614,7 +822,95 @@
       });
     });
 
-    var possibleAliases = flagPossibleAliases(text, concepts, relations);
+    // Second pass — now that measuredBy (all concepts) and indicators (parent constructs) are
+    // both known, upgrade the classification: INSTRUMENT for anything referenced as someone
+    // else's measuring tool, EXAMPLE for terms introduced via "such as"/"e.g."/"including",
+    // CONSTRUCT_VARIABLE (has its own indicator items) vs OBSERVED_VARIABLE (measured directly,
+    // no indicator sub-items) for the rest.
+    var instrumentTargets = {};
+    Object.keys(concepts).forEach(function (norm) {
+      if (concepts[norm].measuredBy) instrumentTargets[norm] = concepts[norm].measuredBy;
+    });
+    Object.keys(concepts).forEach(function (norm) {
+      var c = concepts[norm];
+      if (c.type === 'INDICATOR' || c.type === 'ALIAS') return; // already final
+      var isDefined = c.definitions.length > 0;
+      var isAcronymAlias = !!c.acronymOf;
+      var isInstrumentReferenced = Object.keys(instrumentTargets).some(function (ownerNorm) {
+        if (ownerNorm === norm) return false; // never let a concept's own measuredBy self-reference it
+        var t = instrumentTargets[ownerNorm];
+        return t.indexOf(norm) !== -1 || norm.indexOf(t) !== -1;
+      });
+      var hasIndicators = !!(c.indicators && c.indicators.length >= 2);
+      var occsForExample = findAllSurfaceOccurrences(text, norm);
+      var isExample = isExampleMention(norm, occsForExample.length ? occsForExample : [{ start: -1 }], sentenceList);
+      c.type = classifyType(norm, c.variableScore, isInstrumentReferenced, isAcronymAlias, isDefined, hasIndicators, isExample);
+    });
+
+    var aliasResult = flagPossibleAliases(text, concepts, relations);
+
+    // Execute auto-merges (score >= 0.90 + structural corroboration). Handled with a redirect
+    // map so a chain (A merges into B, then B merges into C) still resolves to one final survivor
+    // instead of silently dropping data if the pairs are processed in an inconvenient order.
+    var redirect = {};
+    function resolve(norm) { while (redirect[norm]) norm = redirect[norm]; return norm; }
+    var mergeLog = [];
+    aliasResult.autoMerged.forEach(function (m) {
+      var survivorNorm = resolve(m.normA), mergedNorm = resolve(m.normB);
+      if (survivorNorm === mergedNorm) return; // already merged via a chain
+      var survivor = concepts[survivorNorm], merged = concepts[mergedNorm];
+      if (!survivor || !merged) return;
+      // keep the more frequently-used surface form as canonical, merge everything else
+      if (merged.occurrenceCount > survivor.occurrenceCount) survivor.canonicalSurface = merged.canonicalSurface;
+      var variantMap = {};
+      survivor.surfaceVariants.concat(merged.surfaceVariants).forEach(function (v) {
+        variantMap[v.text] = (variantMap[v.text] || 0) + v.count;
+      });
+      survivor.surfaceVariants = Object.keys(variantMap).map(function (t) { return { text: t, count: variantMap[t] }; });
+      survivor.occurrenceCount += merged.occurrenceCount;
+      merged.definitions.forEach(function (d) {
+        if (!survivor.definitions.some(function (e) { return e.text === d.text; })) survivor.definitions.push(d);
+      });
+      merged.aliasAcronyms.forEach(function (acr) {
+        if (survivor.aliasAcronyms.indexOf(acr) === -1) survivor.aliasAcronyms.push(acr);
+      });
+      if (merged.indicators) {
+        survivor.indicators = survivor.indicators || [];
+        merged.indicators.forEach(function (ind) { if (survivor.indicators.indexOf(ind) === -1) survivor.indicators.push(ind); });
+      }
+      survivor.variableScore = Math.max(survivor.variableScore, merged.variableScore);
+      survivor.measuredBy = survivor.measuredBy || merged.measuredBy;
+      (merged.roles || []).forEach(function (r) { if (survivor.roles.indexOf(r) === -1) survivor.roles.push(r); });
+      survivor.consistencyIssue = survivor.surfaceVariants.length >= 2;
+      survivor.mergedFrom = (survivor.mergedFrom || []).concat([merged.canonicalSurface]);
+      mergeLog.push({ into: survivor.canonicalSurface, from: merged.canonicalSurface, score: m.score });
+      delete concepts[mergedNorm];
+      redirect[mergedNorm] = survivorNorm;
+    });
+
+    // Assign a stable concept_id and attach a per-concept related_to list (derived from the
+    // relation graph) — the spec's output shape wants both directly on each concept, not just
+    // available as a separate global relations array the caller has to cross-reference by hand.
+    var idCounter = 0;
+    Object.keys(concepts).sort().forEach(function (norm) {
+      idCounter++;
+      var c = concepts[norm];
+      c.concept_id = 'C' + String(idCounter).padStart(3, '0');
+      c.related_to = relations
+        .filter(function (r) {
+          return r.subject === norm || r.object === norm || (r.between && r.between.indexOf(norm) !== -1);
+        })
+        .map(function (r) {
+          if (r.type === 'MEDIATES' && r.subject === norm) {
+            return { concept: r.between.map(function (n) { return concepts[n] ? concepts[n].canonicalSurface : n; }).join(' & '), relation: 'MEDIATES_BETWEEN' };
+          }
+          var otherNorm = r.subject === norm ? r.object : r.subject;
+          var otherSurface = concepts[otherNorm] ? concepts[otherNorm].canonicalSurface : otherNorm;
+          if (r.type === 'PREDICTS') return { concept: otherSurface, relation: r.subject === norm ? 'PREDICTS' : 'PREDICTED_BY' };
+          if (r.type === 'MEDIATES') return { concept: otherSurface, relation: 'MEDIATED_BY' };
+          return { concept: otherSurface, relation: r.type };
+        });
+    });
 
     // undefined-but-important terms: variable-like score but zero definitions found
     var undefinedImportantTerms = Object.keys(concepts)
@@ -628,7 +924,8 @@
 
     return {
       concepts: concepts,
-      possibleAliases: possibleAliases,
+      possibleAliases: aliasResult.flagged,
+      autoMerged: mergeLog,
       undefinedImportantTerms: undefinedImportantTerms,
       inconsistentTerms: inconsistentTerms,
       acronymAliases: dedupeAcronymAliases(acronymAliases),

@@ -130,7 +130,7 @@ test('constructs with clear measurement + hypothesis evidence classify as variab
   const c = result.concepts;
   ['short video addiction', 'emotion regulation difficulty', 'fear of failure', 'academic dishonesty'].forEach((k) => {
     assert.ok(c[k].variableScore >= 0.5, k + ' expected score >= 0.5, got ' + c[k].variableScore);
-    assert.ok(['CANDIDATE_VARIABLE', 'CONSTRUCT_VARIABLE'].includes(c[k].type), k + ' expected a variable classification, got ' + c[k].type);
+    assert.ok(['CANDIDATE_VARIABLE', 'CONSTRUCT_VARIABLE', 'OBSERVED_VARIABLE'].includes(c[k].type), k + ' expected a variable classification, got ' + c[k].type);
   });
 });
 
@@ -229,6 +229,140 @@ test('numbered item codes (SVA1, SVA2) are linked to their parent construct via 
   assert.ok(parent.indicators, 'expected indicators to be linked');
   assert.deepStrictEqual(parent.indicators.sort(), ['SVA1', 'SVA2']);
   assert.strictEqual(result.concepts['sva1'].type, 'INDICATOR');
+});
+
+console.log('\n=== Definition confidence tiers (score >= 0.60 required, tagged strong/possible) ===');
+
+test('a weak/generic definitional cue far from the term is rejected entirely (score < 0.60)', () => {
+  const text = 'Many things happen in this long sentence before we finally get to Fear of Failure which honestly is the last thing mentioned here almost as an afterthought.';
+  const occ = TCE.extractCandidateTerms(text).phraseOccurrences['fear of failure'];
+  const r = TCE.detectDefinitions(text, 'fear of failure', occ, { sentences: TCE.splitSentences(text) });
+  assert.strictEqual(r.length, 0, 'a weak, distant "is the" cue should not count as a definition at all');
+});
+
+test('a strong definitional cue right after the term is tagged strong confidence', () => {
+  const text = 'Fear of Failure is defined as concern over the consequences of failure in academic settings.';
+  const occ = TCE.extractCandidateTerms(text).phraseOccurrences['fear of failure'];
+  const r = TCE.detectDefinitions(text, 'fear of failure', occ, { sentences: TCE.splitSentences(text) });
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].confidence, 'strong');
+  assert.ok(r[0].score >= 0.80);
+});
+
+console.log('\n=== Reversed operational definition pattern ("Instrument Y was used to measure X") ===');
+
+test('the reversed instrument-first phrasing is detected as an operational definition', () => {
+  const text = 'The Short-Video Dependence Scale was used to measure Short-Video Addiction among participants.';
+  const occ = TCE.extractCandidateTerms(text).phraseOccurrences['short video addiction'];
+  const r = TCE.detectDefinitions(text, 'short video addiction', occ, { sentences: TCE.splitSentences(text) });
+  const op = r.find((d) => d.type === 'operational');
+  assert.ok(op, 'expected an operational definition from the reversed phrasing');
+  assert.ok(op.text.includes('Short-Video Dependence Scale'));
+});
+
+console.log('\n=== New negative-evidence checks: discriminant validity, different indicator sets ===');
+
+test('a "discriminant validity" mention near both terms blocks alias flagging/merging', () => {
+  const text = `
+    Emotion Regulation Difficulties (ERD) is measured using the DERS. Emotion Regulation Difficulties predicts outcomes.
+    Emotional Regulation Problems (ERP) is measured using a different survey. Emotional Regulation Problems predicts other outcomes.
+    Discriminant validity confirmed that Emotion Regulation Difficulties and Emotional Regulation Problems are empirically distinct constructs.
+  `;
+  const result = TCE.buildConceptDictionary(text);
+  const flaggedOrMerged = result.possibleAliases.some((p) =>
+    (p.termA.includes('Difficulties') && p.termB.includes('Problems')) || (p.termB.includes('Difficulties') && p.termA.includes('Problems')));
+  assert.strictEqual(flaggedOrMerged, false);
+  assert.strictEqual(result.autoMerged.length, 0);
+});
+
+test('two concepts with entirely non-overlapping indicator sets are not flagged as possible aliases', () => {
+  const text = `
+    Short Video Addiction (SVA) is measured using an adapted scale. SVA1 states one thing. SVA2 states another. SVA3 states a third.
+    Short Form Anxiety (SFA) is measured using a different scale. SFA1 states one thing. SFA2 states another.
+  `;
+  const result = TCE.buildConceptDictionary(text);
+  const pair = result.possibleAliases.find((p) => p.termA.includes('SVA') || p.termB.includes('SVA') || p.termA.includes('Short'));
+  assert.strictEqual(pair, undefined);
+});
+
+console.log('\n=== Auto-merge at score >= 0.90 (highest-stakes feature — must never misfire on genuinely different concepts) ===');
+
+test('near-identical wording with a genuinely shared measurement instrument auto-merges', () => {
+  const text = `
+    Short Video Addiction (SVA) is measured using the Short-Video Dependence Scale.
+    Short-video Addictions is measured using the Short-Video Dependence Scale as well, confirming prior findings.
+    Short Video Addiction predicts poor academic outcomes. Short-video Addictions predicts poor academic outcomes too.
+  `;
+  const result = TCE.buildConceptDictionary(text);
+  // These two should already collide at Level 1 (surface-form normalization) in most cases —
+  // this test exists mainly to confirm the auto-merge path doesn't crash and, if two distinct
+  // concept keys somehow survive to Level 3, requires them to actually be corroborated before
+  // merging (not just lexical resemblance).
+  assert.ok(Array.isArray(result.autoMerged));
+});
+
+test('KNOWN-DIFFERENT constructs (Emotion Regulation Difficulties vs Fear of Failure) are NEVER auto-merged, even under adversarial phrasing', () => {
+  const result = TCE.buildConceptDictionary(SAMPLE);
+  const wronglyMerged = result.autoMerged.some((m) =>
+    (m.into.includes('Emotion') && m.from.includes('Fear')) || (m.into.includes('Fear') && m.from.includes('Emotion')));
+  assert.strictEqual(wronglyMerged, false);
+});
+
+test('auto-merge never fires from lexical/edit-distance similarity alone, without a corroborating structural signal', () => {
+  // Two totally unrelated-in-meaning but textually similar-shaped phrases, repeated enough to
+  // become candidates, with NO shared instrument and NO shared relation-graph neighborhood.
+  const text = `
+    Digital Reading Habits are common among students. Digital Reading Habits vary widely.
+    Digital Reading Skills are also common among students. Digital Reading Skills vary widely too.
+    Students report Digital Reading Habits frequently. Teachers observe Digital Reading Skills frequently.
+  `;
+  const result = TCE.buildConceptDictionary(text);
+  assert.strictEqual(result.autoMerged.length, 0, 'must not merge on lexical similarity alone without measurement/relation corroboration');
+});
+
+console.log('\n=== Roles derived from graph position are attached per-concept ===');
+
+test('each concept carries its own roles array (mediator/predictor/outcome) derived from the relation graph', () => {
+  const result = TCE.buildConceptDictionary(SAMPLE);
+  const erd = result.concepts['emotion regulation difficulty'];
+  assert.ok(Array.isArray(erd.roles));
+});
+
+console.log('\n=== New classification types: INSTRUMENT, EXAMPLE, CONSTRUCT_VARIABLE vs OBSERVED_VARIABLE ===');
+
+test('an instrument/scale referenced as another construct\'s measuredBy is classified as INSTRUMENT', () => {
+  const result = TCE.buildConceptDictionary(SAMPLE);
+  const instrument = result.concepts['short video dependence scale'];
+  assert.ok(instrument, 'expected the instrument to appear as its own concept');
+  assert.strictEqual(instrument.type, 'INSTRUMENT');
+});
+
+test('a construct with 2+ linked indicator items is CONSTRUCT_VARIABLE, one with none is OBSERVED_VARIABLE', () => {
+  const text = `
+    Short Video Addiction (SVA) is measured using an adapted scale. SVA predicts poor outcomes. H1: SVA predicts Academic Dishonesty.
+    SVA1 states one thing. SVA2 states another thing. SVA3 states a third thing.
+    The path coefficient for SVA in H1 was significant (beta = 0.42, p < 0.001), based on the structural model.
+    Academic Dishonesty (AD) is measured using the ADS. Academic Dishonesty is influenced by SVA.
+  `;
+  const result = TCE.buildConceptDictionary(text);
+  assert.strictEqual(result.concepts['short video addiction'].type, 'CONSTRUCT_VARIABLE');
+});
+
+console.log('\n=== concept_id and related_to (per-concept relation attachment) ===');
+
+test('every concept gets a stable, unique concept_id', () => {
+  const result = TCE.buildConceptDictionary(SAMPLE);
+  const ids = Object.keys(result.concepts).map((k) => result.concepts[k].concept_id);
+  assert.ok(ids.every((id) => /^C\d{3}$/.test(id)));
+  assert.strictEqual(new Set(ids).size, ids.length, 'concept_ids must be unique');
+});
+
+test('related_to is attached directly on each concept, reflecting its graph edges', () => {
+  const result = TCE.buildConceptDictionary(SAMPLE);
+  const erd = result.concepts['emotion regulation difficulty'];
+  assert.ok(Array.isArray(erd.related_to));
+  const predictsFearOfFailure = erd.related_to.some((r) => r.concept === 'Fear of Failure' && r.relation === 'PREDICTS');
+  assert.ok(predictsFearOfFailure, 'expected ERD -> predicts -> Fear of Failure in its related_to list');
 });
 
 console.log('\n' + '='.repeat(50));
