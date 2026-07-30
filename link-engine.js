@@ -17,7 +17,7 @@
   var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
   var XML_NS = 'http://www.w3.org/XML/1998/namespace';
 
-  var HEADING_RE = /(references|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
+  var HEADING_RE = /(\breferences?\b|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
 
   // ---------- kunci pencocokan penulis(surname)+tahun, konsisten kedua sisi ----------
   // Sitasi in-text kadang ditulis "H. Zhang" (inisial + nama belakang) — bukan bagian dari
@@ -55,9 +55,15 @@
   function findHeadingIndex(paras) {
     for (var i = 0; i < paras.length; i++) {
       var t = paras[i].text.trim();
-      if (t.length > 0 && t.length <= 60 && HEADING_RE.test(t)) {
+      if (t.length > 0 && t.length <= 60) {
         var stripped = t.replace(/^[\dIVXLC]+[.)]\s*/i, '').replace(/[:.\s]+$/, '');
-        if (HEADING_RE.test(stripped) && stripped.split(/\s+/).length <= 4) return i;
+        var words = stripped.split(/\s+/).filter(Boolean);
+        if (HEADING_RE.test(stripped) && words.length <= 4) return i;
+        // Same typo tolerance as the paste-text validator (CE.isFuzzyHeadingWord) — a single-
+        // word heading like "Refernces"/"Bibliograpy" is still recognized. DOCX-sourced
+        // headings are less prone to copy-paste typos than pasted PDF text, but a document
+        // that genuinely has a misspelled heading shouldn't silently fail to link at all.
+        if (words.length === 1 && CE.isFuzzyHeadingWord && CE.isFuzzyHeadingWord(stripped)) return i;
       }
     }
     return -1;
