@@ -140,18 +140,25 @@ function detectMalformedCitations(text) {
     });
   }
 
-  // 2. Wrong capitalization of "et al." — must always be lowercase with a period after "al"
-  // ("et al."), never "Et Al.", "ET AL", "et Al.", etc.
+  // 2. "et al." must be EXACTLY that: lowercase, with a period after "al" — never "Et Al.",
+  // "ET AL", "et Al", "et al" (missing period), etc. Checked against the canonical form as a
+  // whole rather than case and punctuation separately, so a citation with both problems at once
+  // ("Et Al") gets one clear combined message instead of two overlapping ones.
   var etAlRe = /\bet\s+al\.?/gi;
   while ((m = etAlRe.exec(text)) !== null) {
     var matched = m[0];
-    var canonical = 'et al' + (matched.endsWith('.') ? '.' : '');
-    if (matched !== canonical) {
+    if (matched !== 'et al.') {
+      var base = matched.replace(/\.$/, '');
+      var caseWrong = base !== 'et al';
+      var periodMissing = !matched.endsWith('.');
+      var problems = [];
+      if (caseWrong) problems.push('huruf besar/kecil salah');
+      if (periodMissing) problems.push('tanpa titik di akhir');
       issues.push({
         type: 'et_al_case',
         raw: matched,
         position: m.index,
-        message: '"' + matched + '" seharusnya ditulis huruf kecil semua: "' + canonical + (canonical.endsWith('.') ? '' : '.') + '".',
+        message: '"' + matched + '" ' + problems.join(' dan ') + ' — seharusnya "et al.".',
         suggestion: 'et al.',
       });
     }
@@ -162,22 +169,44 @@ function detectMalformedCitations(text) {
   // "Agusalim Muhammad, et al., 2020)". Tracked via a running paren-balance scan: whenever a ")"
   // would take the balance negative, check whether the text right before it looks citation-like.
   var balance = 0;
+  var lastOpenPos = -1;
   var closeCiteRe = /(?:\d{4}[a-z]?|et\s+al\.?,?\s*\d{4}[a-z]?)\)$/i;
   for (var i = 0; i < text.length; i++) {
     var ch = text[i];
-    if (ch === '(') balance++;
+    if (ch === '(') { balance++; lastOpenPos = i; }
     else if (ch === ')') {
       if (balance <= 0) {
         var windowStart = Math.max(0, i - 90);
         var windowText = text.slice(windowStart, i + 1);
         if (closeCiteRe.test(windowText)) {
-          var snippetStart = Math.max(windowStart, i - 60);
+          // Prefer starting the snippet right after the nearest earlier "(" (the citation group
+          // this dangling ")" almost certainly belongs to, even if that "(" was already correctly
+          // matched by an EARLIER ")" — e.g. "(A, 2020; B, 2021); C, 2022)" — the stray final ")"
+          // conceptually continues the SAME group that opened at that "("). Falls back to the
+          // fixed-size window only when no "(" was seen recently enough to be relevant.
+          var snippetStart = (lastOpenPos !== -1 && lastOpenPos >= windowStart) ? lastOpenPos : windowStart;
+          // Back up to the nearest word boundary so the snippet/suggestion doesn't start
+          // mid-word (e.g. "d, 1996..." instead of "Delaney, 1996...") — only relevant for the
+          // fixed-size-window fallback, since lastOpenPos already lands exactly on "(".
+          while (snippetStart > 0 && text[snippetStart] !== '(' && /\S/.test(text[snippetStart - 1]) && /\S/.test(text[snippetStart])) snippetStart--;
+          var rawSnippet = text.slice(snippetStart, i + 1).trim();
+          // Best-effort auto-fix: the most common real-world cause of this pattern is a stray
+          // ")" in the middle where a ";" (list separator) was intended, with the true closing
+          // ")" only appearing at the very end — e.g. "(A, 2020; B, 2021); C, 2022)" almost
+          // always means the author meant "(A, 2020; B, 2021; C, 2022)". Only offered when there
+          // IS a stray interior ")" to fix this way; otherwise there's no safe generic guess.
+          var suggestion = null;
+          var interior = rawSnippet.slice(0, -1);
+          if (interior.indexOf(')') !== -1) {
+            var fixedInner = interior.split(')').join(';').replace(/;\s*;/g, ';').replace(/^;\s*/, '').replace(/\s*;\s*$/, '');
+            suggestion = (fixedInner.charAt(0) === '(' ? '' : '(') + fixedInner + ')';
+          }
           issues.push({
             type: 'missing_open_paren',
-            raw: text.slice(snippetStart, i + 1).trim(),
+            raw: rawSnippet,
             position: snippetStart,
             message: 'Kurung tutup ")" ditemukan tapi tidak ada kurung buka "(" pasangannya — kemungkinan tanda kurung sitasi hilang.',
-            suggestion: null,
+            suggestion: suggestion,
           });
         }
         balance = 0; // reset so one dropped "(" doesn't cascade into flagging every later ")" too
@@ -201,6 +230,65 @@ function detectMalformedCitations(text) {
       position: m.index,
       message: '"et al." semestinya langsung mengikuti penulis PERTAMA saja, bukan setelah ' + (m[2] ? 'dua nama (' + m[1] + ', ' + m[2] + ')' : 'beberapa nama') + ' disebutkan.',
       suggestion: m[1] + ' et al.',
+    });
+  }
+
+  // 5. Missing space around "&" joining two author surnames — "Pitelis &Wagner" or "Smith& Jones"
+  // instead of "Smith & Jones". Scoped to citation context (a 4-digit year within ~80 chars
+  // after) to avoid false positives on unrelated ampersands like "R&D" or a company name.
+  var ampRe = /([\p{Lu}\p{Lo}][\p{L}'\-]{1,})(\s?)&(\s?)([\p{Lu}\p{Lo}][\p{L}'\-]{1,})/gu;
+  while ((m = ampRe.exec(text)) !== null) {
+    if (m[2] === ' ' && m[3] === ' ') continue; // already correctly spaced
+    var afterAmp = text.slice(m.index, Math.min(text.length, m.index + 80));
+    if (/\d{4}/.test(afterAmp)) {
+      issues.push({
+        type: 'no_space_around_ampersand',
+        raw: m[0],
+        position: m.index,
+        message: 'Tidak ada spasi di sekitar tanda "&" — seharusnya ada spasi sebelum dan sesudahnya.',
+        suggestion: m[1] + ' & ' + m[4],
+      });
+    }
+  }
+
+  // 6. Extra space right after the citation's opening "(" or right before its closing ")" —
+  // "( Smith, 2020)" or "(Smith, 2020 )" instead of "(Smith, 2020)". Content is either a full
+  // citation ("Smith, 2020") or, for the "Author, (Year)" narrative style, just the bare year.
+  var citeInnerAlt = '(?:[\\p{Lu}\\p{Lo}][^()]{1,140}?\\d{4}[a-z]?|\\d{4}[a-z]?)';
+  var spaceAfterOpenRe = new RegExp('\\(( +)(' + citeInnerAlt + ')\\)', 'gu');
+  while ((m = spaceAfterOpenRe.exec(text)) !== null) {
+    issues.push({
+      type: 'extra_space_in_paren',
+      raw: '(' + m[1] + m[2] + ')',
+      position: m.index,
+      message: 'Ada spasi berlebih tepat setelah tanda kurung buka "(".',
+      suggestion: '(' + m[2].trim() + ')',
+    });
+  }
+  var spaceBeforeCloseRe = new RegExp('\\((' + citeInnerAlt + ')( +)\\)', 'gu');
+  while ((m = spaceBeforeCloseRe.exec(text)) !== null) {
+    issues.push({
+      type: 'extra_space_in_paren',
+      raw: '(' + m[1] + m[2] + ')',
+      position: m.index,
+      message: 'Ada spasi berlebih tepat sebelum tanda kurung tutup ")".',
+      suggestion: '(' + m[1].trim() + ')',
+    });
+  }
+
+  // 7. Missing space right after a citation's closing ")" before the next word — "(Smith,
+  // 2020)the study" instead of "(Smith, 2020) the study" (also covers the "Author, (2018)claim"
+  // narrative-style, year-only-parenthetical case). Excludes cases where the next character is
+  // punctuation (",", ".", ";", etc.), which is normal ("as shown (Smith, 2020), this...").
+  var noSpaceAfterCloseRe = new RegExp('\\(' + citeInnerAlt + '\\)([A-Za-z])', 'gu');
+  while ((m = noSpaceAfterCloseRe.exec(text)) !== null) {
+    var closeIdx = m.index + m[0].length - 1 - m[1].length;
+    issues.push({
+      type: 'no_space_after_paren',
+      raw: text.slice(Math.max(0, closeIdx - 20), closeIdx + 1) + m[1],
+      position: Math.max(0, closeIdx - 20),
+      message: 'Tidak ada spasi setelah tanda kurung tutup sitasi — seharusnya ada spasi sebelum kata "' + m[1] + '..." berikutnya.',
+      suggestion: null,
     });
   }
 
@@ -1502,9 +1590,12 @@ MultiFormatValidator.prototype.validateCitationFormat = function() {
   var self = this;
   var TITLES = {
     no_space_before_paren: 'Sitasi tanpa spasi sebelum tanda kurung',
-    et_al_case: '"et al." salah huruf besar/kecil',
+    et_al_case: '"et al." format salah (huruf besar/kecil atau titik)',
     missing_open_paren: 'Tanda kurung sitasi tidak lengkap',
     multiple_authors_before_et_al: '"et al." mengikuti lebih dari satu nama penulis',
+    no_space_around_ampersand: 'Tanda "&" tanpa spasi di sekitarnya',
+    extra_space_in_paren: 'Spasi berlebih di dalam tanda kurung sitasi',
+    no_space_after_paren: 'Sitasi tanpa spasi setelah tanda kurung',
   };
   var issues = detectMalformedCitations(this.articleText);
   issues.forEach(function(issue) {

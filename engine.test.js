@@ -455,6 +455,16 @@ test('a missing opening parenthesis is detected, with a useful context snippet',
   const found = issues.find(i => i.type === 'missing_open_paren');
   assert.ok(found);
   assert.ok(found.raw.includes('Agusalim Muhammad'), 'expected the snippet to include enough context, got: ' + found.raw);
+  assert.strictEqual(found.suggestion, null, 'no safe auto-fix is possible when there is no earlier "(" at all');
+});
+
+test('a stray closing paren in the middle of a multi-source citation list produces a full, correct, copyable suggestion (regression)', () => {
+  const text = 'The reported measures of firm performance include financial and non-financial performance adopted from(Delaney & Huselid, 1996; Fu et al., 2016; Ho et al., 2024); Kim et al., 2024).';
+  const issues = CE.detectMalformedCitations(text);
+  const found = issues.find(i => i.type === 'missing_open_paren');
+  assert.ok(found);
+  assert.strictEqual(found.raw, '(Delaney & Huselid, 1996; Fu et al., 2016; Ho et al., 2024); Kim et al., 2024)');
+  assert.strictEqual(found.suggestion, '(Delaney & Huselid, 1996; Fu et al., 2016; Ho et al., 2024; Kim et al., 2024)');
 });
 
 test('"et al." following two listed author names (not just the first) is flagged', () => {
@@ -495,12 +505,64 @@ test('well-formed citations in various valid styles produce no false positives',
   });
 });
 
+test('missing period after "et al" (correct case, but no period) is detected', () => {
+  const issues = CE.detectMalformedCitations('(Agus et al, 2023)');
+  const found = issues.find(i => i.type === 'et_al_case');
+  assert.ok(found);
+  assert.ok(found.message.includes('tanpa titik'));
+});
+
+test('missing space around "&" in a citation context is detected', () => {
+  const issues = CE.detectMalformedCitations('Pitelis &Wagner, (2019) demonstrated this.');
+  const found = issues.find(i => i.type === 'no_space_around_ampersand');
+  assert.ok(found);
+  assert.strictEqual(found.suggestion, 'Pitelis & Wagner');
+});
+
+test('"&" without a nearby year (R&D, AT&T, Q&A) is NOT flagged', () => {
+  const clean = [
+    'This is a research and development (R&D) department.',
+    'Perusahaan AT&T meluncurkan produk baru tahun ini.',
+    'Sebuah studi Q&A yang dilakukan minggu lalu.',
+  ];
+  clean.forEach((text) => {
+    const issues = CE.detectMalformedCitations(text);
+    assert.strictEqual(issues.some(i => i.type === 'no_space_around_ampersand'), false, 'false positive for: ' + text);
+  });
+});
+
+test('extra space right after "(" or right before ")" is detected, including the year-only narrative style', () => {
+  const issues1 = CE.detectMalformedCitations('quality management ( Gutierrez et al., 2018).');
+  assert.ok(issues1.find(i => i.type === 'extra_space_in_paren'));
+  const issues2 = CE.detectMalformedCitations('Studi ini (Smith, 2020 ) menunjukkan hal ini.');
+  assert.ok(issues2.find(i => i.type === 'extra_space_in_paren'));
+});
+
+test('missing space after a citation\'s closing ")" is detected, including "Author, (Year)text" narrative style', () => {
+  const issues1 = CE.detectMalformedCitations('(Abdeen et al., 2025)found that this is true.');
+  assert.ok(issues1.find(i => i.type === 'no_space_after_paren'));
+  const issues2 = CE.detectMalformedCitations('Jaleha & Machuki, (2018)claim that this is true.');
+  assert.ok(issues2.find(i => i.type === 'no_space_after_paren'), 'expected the year-only-parenthetical narrative style to also be caught');
+});
+
+test('a citation followed by normal punctuation (comma, period, semicolon) is NOT flagged as missing space', () => {
+  const clean = [
+    'Studi (Smith, 2020), sebagaimana ditunjukkan, adalah valid.',
+    'Studi (Smith, 2020). Selanjutnya, penelitian lain menunjukkan.',
+    'Studi ini (Smith, 2020); dilanjutkan oleh penelitian lain.',
+  ];
+  clean.forEach((text) => {
+    const issues = CE.detectMalformedCitations(text);
+    assert.strictEqual(issues.some(i => i.type === 'no_space_after_paren'), false, 'false positive for: ' + text);
+  });
+});
+
 test('malformed-citation format issues surface as validator errors with clear per-type titles', () => {
   const r = validate(
     'Ekonomi(Agus, Supardi, Et Al., 2023) sangat penting.',
     'Agus, A., & Supardi, S. (2023). Judul. Jurnal, 1(1), 1-10.');
   assert.ok(r.errors.some(e => e.title === 'Sitasi tanpa spasi sebelum tanda kurung'));
-  assert.ok(r.errors.some(e => e.title === '"et al." salah huruf besar/kecil'));
+  assert.ok(r.errors.some(e => e.title === '"et al." format salah (huruf besar/kecil atau titik)'));
   assert.ok(r.errors.some(e => e.title === '"et al." mengikuti lebih dari satu nama penulis'));
 });
 
