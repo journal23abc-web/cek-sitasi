@@ -90,7 +90,7 @@
   // (2-6 uppercase letters). Deliberately loose — no real POS tagger is available client-side —
   // filtered down later by repetition count and definition/variable evidence, so an overly
   // permissive extractor here is fine as long as the downstream scoring is conservative.
-  var TITLECASE_PHRASE_RE = /\b(?:[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?)(?:\s+(?:of|for|the|and|in|on|to|a|an)?\s*[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?){1,4}\b/g;
+  var TITLECASE_PHRASE_RE = /\b(?:[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?)(?:\s+(?:of|for|the|in|on|to|a|an)?\s*[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?){1,4}\b/g;
   var ACRONYM_TOKEN_RE = /\b[A-Z]{2,6}\d{0,2}\b/g;
 
   function extractCandidateTerms(text) {
@@ -164,7 +164,7 @@
 
   // ---------- Section 1: definition detection ----------
   var DEFINITION_PATTERNS = {
-    conceptual: /\b(is|are|was|were)\s+defined\s+as\b|\brefers?\s+to\b|\bis\s+the\b|\bmeans?\b|\bmerupakan\b|\badalah\b|\bmerujuk\s+pada\b|\bdidefinisikan\s+sebagai\b|\bmencakup\b|\bditandai\s+dengan\b/i,
+    conceptual: /\b(is|are|was|were)\s+defined\s+as\b|\brefers?\s+to\b|\bis\s+the\b|\bmeans?\b|\b(?:proposes?|posits?|suggests?|argues?|states?|explains?|assumes?)\s+that\b|\bmerupakan\b|\badalah\b|\bmerujuk\s+pada\b|\bdidefinisikan\s+sebagai\b|\bmencakup\b|\bditandai\s+dengan\b/i,
     operational: /\bmeasured\s+(?:using|by|with|through)\b|\bassessed\s+(?:using|through|via)\b|\boperationalized\s+as\b|\bdiukur\s+menggunakan\b|\bdinilai\s+melalui\b|\bdioperasionalkan\s+sebagai\b|\bindicator[s]?\s+(?:of|for)\b/i,
     role: /\b(?:acts?|serves?|functions?)\s+as\s+(?:a|an)?\s*(?:mediator|moderator|predictor|antecedent|outcome|independent|dependent|exogenous|endogenous)\b|\b(?:is|are)\s+(?:a|an)?\s*(?:mediating|moderating|predictor|independent|dependent|exogenous|endogenous)\s+variable\b|\bberfungsi\s+sebagai\s+variabel\b|\bbertindak\s+sebagai\b|\bmenjadi\s+variabel\b/i,
   };
@@ -256,7 +256,10 @@
   function findAllSurfaceOccurrences(text, normalizedForm) {
     var words = normalizedForm.split(' ');
     var pattern = words.map(function (w) {
-      // allow the normalized word to have lost a trailing s/ies during normalization
+      // Mirror the y->ies fold normalizeTermSurface() applies going the other way, so a
+      // normalized singular like "difficulty" still matches the plural "difficulties" in the
+      // original text (a plain "(?:e?s)?" suffix only covers "s"/"es", not "y"->"ies").
+      if (/[^aeiou]y$/.test(w)) return escapeRegex(w.slice(0, -1)) + '(?:y|ies)';
       return escapeRegex(w) + '(?:e?s)?';
     }).join('[\\s\\-\\u2010-\\u2015]+');
     var re = new RegExp('\\b' + pattern + '\\b', 'gi');
@@ -277,6 +280,131 @@
     if (score >= 0.50) return 'CANDIDATE_VARIABLE';
     if (isDefined) return 'GENERAL_CONCEPT';
     return 'UNCLASSIFIED';
+  }
+
+  // ---------- relation graph: PREDICTS / MEDIATES / RELATED_TO ----------
+  // The piece the original spec calls "bangun graph hubungan antarkonsep" — without this, there
+  // is no way to implement relation_neighborhood_similarity or most of the negative-evidence
+  // checks ("dihubungkan oleh panah sebab-akibat", etc.), so alias flagging was structurally
+  // incomplete without it.
+  //
+  // Rather than trying to regex-capture arbitrary noun phrases around a relational verb (error-
+  // prone — noun phrase boundaries are exactly what's hard without a real parser), this finds
+  // WHICH ALREADY-KNOWN CONCEPTS are mentioned on either side of the verb within the same
+  // sentence, and infers direction from their relative position. That means relation extraction
+  // can only ever connect concepts the earlier stages already found — which is the right
+  // trade-off here: a missed relation is a smaller problem than a hallucinated one.
+  var PREDICTS_VERB_RE = /\b(?:predicts?|influences?|affects?)\b/i;
+  var EFFECT_OF_RE = /\beffect\s+of\b|\bpengaruh\b/i;
+  var MEDIATES_BETWEEN_RE = /\bmediat(?:es|ed|ing)\s+the\s+relationship\s+between\b/i;
+  var RELATIONSHIP_BETWEEN_RE = /\brelationship\s+between\b|\bhubungan\s+antara\b/i;
+
+  var MAX_RELATION_DISTANCE = 120; // chars — keeps relation extraction inside one clause, not the whole (possibly long, multi-clause) sentence
+
+  var THEORY_NAME_RE = /\b(theory|model|framework|approach)\b/i;
+
+  function extractRelations(concepts, sentences) {
+    var normKeys = Object.keys(concepts);
+    var relations = [];
+
+    function mentionsInSentence(sentenceText) {
+      var found = [];
+      normKeys.forEach(function (norm) {
+        var occs = findAllSurfaceOccurrences(sentenceText, norm);
+        if (occs.length) found.push({ norm: norm, start: occs[0].start });
+      });
+      found.sort(function (a, b) { return a.start - b.start; });
+      return found;
+    }
+
+    sentences.forEach(function (s) {
+      var mentions = mentionsInSentence(s.text);
+      if (mentions.length < 2) return;
+
+      // A compound "mediated the relationship between X and Y and between Z and W" has more
+      // than one "between", and the simple "take the first two mentions after between" approach
+      // below would mispair concepts across the two clauses. Skip rather than guess wrong.
+      var betweenCount = (s.text.match(/\bbetween\b/gi) || []).length;
+      if (MEDIATES_BETWEEN_RE.test(s.text) && betweenCount === 1) {
+        var mIdx = s.text.search(MEDIATES_BETWEEN_RE);
+        var before = mentions.filter(function (m) { return m.start < mIdx; });
+        var after = mentions.filter(function (m) { return m.start >= mIdx && m.start - mIdx <= MAX_RELATION_DISTANCE; });
+        if (before.length && after.length >= 2) {
+          var mediator = before[before.length - 1].norm, b = after[0].norm, c = after[1].norm;
+          if (mediator !== b && mediator !== c && b !== c) {
+            relations.push({ type: 'MEDIATES', subject: mediator, between: [b, c], sentence: s.text.slice(0, 200) });
+            relations.push({ type: 'PREDICTS', subject: b, object: mediator, sentence: s.text.slice(0, 200), inferred: true });
+            relations.push({ type: 'PREDICTS', subject: mediator, object: c, sentence: s.text.slice(0, 200), inferred: true });
+          }
+        }
+        return;
+      }
+      if (MEDIATES_BETWEEN_RE.test(s.text)) return; // compound "between...and between..." — skip, see above
+      var verbMatch = PREDICTS_VERB_RE.test(s.text) ? PREDICTS_VERB_RE : (EFFECT_OF_RE.test(s.text) ? EFFECT_OF_RE : null);
+      if (verbMatch) {
+        var vIdx = s.text.search(verbMatch);
+        var before2 = mentions.filter(function (m) { return m.start < vIdx && vIdx - m.start <= MAX_RELATION_DISTANCE; });
+        var after2 = mentions.filter(function (m) { return m.start >= vIdx && m.start - vIdx <= MAX_RELATION_DISTANCE; });
+        if (before2.length && after2.length) {
+          // A theory/model/framework name positioned right before a relational verb almost
+          // always describes what the theory EXPLAINS or provides a lens for, not a literal
+          // causal claim it makes itself — skip it as a candidate subject and fall back to an
+          // earlier concept mention if there is one, rather than asserting "TPB predicts X".
+          var subjCandidates = before2.slice().reverse().filter(function (m) {
+            return !THEORY_NAME_RE.test(concepts[m.norm].canonicalSurface);
+          });
+          if (!subjCandidates.length) return;
+          var subj = subjCandidates[0].norm;
+          after2.forEach(function (o) {
+            if (o.norm !== subj) relations.push({ type: 'PREDICTS', subject: subj, object: o.norm, sentence: s.text.slice(0, 200) });
+          });
+        }
+        return;
+      }
+      if (RELATIONSHIP_BETWEEN_RE.test(s.text)) {
+        var bIdx = s.text.search(RELATIONSHIP_BETWEEN_RE);
+        var after3 = mentions.filter(function (m) { return m.start >= bIdx && m.start - bIdx <= MAX_RELATION_DISTANCE; });
+        if (after3.length >= 2 && after3[0].norm !== after3[1].norm) {
+          relations.push({ type: 'RELATED_TO', subject: after3[0].norm, object: after3[1].norm, sentence: s.text.slice(0, 200) });
+        }
+      }
+    });
+
+    // dedupe identical (type, subject, object) triples
+    var seen = {};
+    return relations.filter(function (r) {
+      var key = r.type + '|' + r.subject + '|' + (r.object || r.between.join(','));
+      if (seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  }
+
+  // A directed PREDICTS/MEDIATES edge between two DIFFERENT concepts is the strongest possible
+  // signal that they are NOT the same concept — matches the spec's negative-evidence rule
+  // "keduanya dihubungkan oleh panah sebab-akibat" directly.
+  function hasCausalEdge(relations, normA, normB) {
+    return relations.some(function (r) {
+      if (r.type === 'PREDICTS') return (r.subject === normA && r.object === normB) || (r.subject === normB && r.object === normA);
+      if (r.type === 'MEDIATES') return r.subject === normA ? r.between.indexOf(normB) !== -1 : (r.subject === normB && r.between.indexOf(normA) !== -1);
+      return false;
+    });
+  }
+
+  // Structural role, derived purely from the concept's position in the relation graph —
+  // matches the spec's desired "roles" output field (exogenous_variable / mediator / outcome /
+  // predictor). A concept can hold more than one role if the text is inconsistent about it
+  // (worth surfacing, not hiding).
+  function deriveRoles(norm, relations) {
+    var roles = [];
+    var isSubjectOfPredicts = relations.some(function (r) { return r.type === 'PREDICTS' && r.subject === norm; });
+    var isObjectOfPredicts = relations.some(function (r) { return r.type === 'PREDICTS' && r.object === norm; });
+    var isMediator = relations.some(function (r) { return r.type === 'MEDIATES' && r.subject === norm; });
+    if (isMediator) roles.push('mediator');
+    if (isSubjectOfPredicts && !isObjectOfPredicts) roles.push('exogenous_variable / predictor');
+    if (isObjectOfPredicts && !isSubjectOfPredicts) roles.push('outcome_variable');
+    if (isSubjectOfPredicts && isObjectOfPredicts && !isMediator) roles.push('intermediate_variable');
+    return roles;
   }
 
   // ---------- Level 3: lexical equivalence flagging (NEVER auto-merged) ----------
@@ -317,13 +445,18 @@
     return re.test(text);
   }
 
-  function flagPossibleAliases(text, concepts) {
+  function flagPossibleAliases(text, concepts, relations) {
+    relations = relations || [];
     var flagged = [];
     var keys = Object.keys(concepts);
     for (var i = 0; i < keys.length; i++) {
       for (var j = i + 1; j < keys.length; j++) {
         var a = concepts[keys[i]], b = concepts[keys[j]];
         if (a.acronymOf || b.acronymOf) continue; // already resolved via Level 2
+        // Strongest possible negative evidence: a directed PREDICTS/MEDIATES edge between them
+        // in the relation graph means the text itself treats them as causally distinct things —
+        // no lexical similarity can outweigh that.
+        if (hasCausalEdge(relations, keys[i], keys[j])) continue;
         var wsA = wordSet(keys[i]), wsB = wordSet(keys[j]);
         var lexSim = jaccard(wsA, wsB);
         var editSim = levenshteinRatio(keys[i], keys[j]);
@@ -339,6 +472,19 @@
       }
     }
     return flagged.sort(function (x, y) { return y.score - x.score; });
+  }
+
+  function dedupeAcronymAliases(pairs) {
+    var seen = {};
+    var out = [];
+    pairs.forEach(function (p) {
+      var key = normalizeTermSurface(p.fullTerm) + '|' + p.acronym;
+      if (seen[key]) { seen[key].occurrenceCount++; return; }
+      var entry = { fullTerm: p.fullTerm, acronym: p.acronym, position: p.position, occurrenceCount: 1 };
+      seen[key] = entry;
+      out.push(entry);
+    });
+    return out;
   }
 
   // ---------- orchestration ----------
@@ -380,7 +526,7 @@
     acronymAliases.forEach(function (pair) {
       var norm = normalizeTermSurface(pair.fullTerm);
       if (concepts[norm]) {
-        concepts[norm].aliasAcronyms.push(pair.acronym);
+        if (concepts[norm].aliasAcronyms.indexOf(pair.acronym) === -1) concepts[norm].aliasAcronyms.push(pair.acronym);
       } else if (normalizeTermSurface(pair.fullTerm).split(' ').length >= 2) {
         // full term wasn't picked up as a repeating candidate on its own — still worth recording
         concepts[norm] = {
@@ -389,6 +535,44 @@
           aliasAcronyms: [pair.acronym],
         };
       }
+    });
+
+    // Item/indicator codes ("SVA1", "SVA2", "ERD1") were extracted into acronymOccurrences but
+    // never turned into their own concept entries — without an entry, classifyType() never runs
+    // on them and the indicator-linkage step below has nothing to find. Only keep ones that
+    // actually end in a digit (the acronym-alias pattern above already covers plain acronyms
+    // like "TPB" that never carry a trailing number).
+    Object.keys(extracted.acronymOccurrences).forEach(function (acr) {
+      if (!/\d$/.test(acr)) return;
+      var norm = normalizeTermSurface(acr);
+      if (concepts[norm]) return;
+      var occs = extracted.acronymOccurrences[acr];
+      concepts[norm] = {
+        canonicalSurface: acr, surfaceVariants: [{ text: acr, count: occs.length }],
+        occurrenceCount: occs.length, definitions: [], variableScore: 0, measuredBy: null,
+        acronymOf: null, aliasAcronyms: [],
+      };
+    });
+
+    // A paper very commonly introduces "Full Term (ACR)" once, then uses just "ACR" alone for
+    // the rest of the text — including for the sentence that actually explains what it means
+    // ("The TPB proposes that..."). Without this, such definitions are invisible because they
+    // never mention the full term phrase at all, only the bare acronym.
+    Object.keys(concepts).forEach(function (norm) {
+      var c = concepts[norm];
+      if (!c.aliasAcronyms.length) return;
+      c.aliasAcronyms.forEach(function (acr) {
+        var acrRe = new RegExp('\\b' + escapeRegex(acr) + '\\b', 'g');
+        var acrOccs = [];
+        var m;
+        while ((m = acrRe.exec(text)) !== null) acrOccs.push({ surface: m[0], start: m.index, end: m.index + m[0].length });
+        if (!acrOccs.length) return;
+        var acrDefs = detectDefinitions(text, norm, acrOccs, sectionHints);
+        acrDefs.forEach(function (d) {
+          var alreadyHave = c.definitions.some(function (existing) { return existing.text === d.text; });
+          if (!alreadyHave) c.definitions.push(d);
+        });
+      });
     });
 
     // record which instrument measures which concept, from operational definitions
@@ -405,7 +589,32 @@
       c.consistencyIssue = c.surfaceVariants.length >= 2; // written more than one way -> flag
     });
 
-    var possibleAliases = flagPossibleAliases(text, concepts);
+    // ---------- relation graph (PREDICTS / MEDIATES / RELATED_TO) ----------
+    var relations = extractRelations(concepts, sentenceList);
+    Object.keys(concepts).forEach(function (norm) {
+      concepts[norm].roles = deriveRoles(norm, relations);
+    });
+
+    // ---------- indicator -> parent construct linkage ----------
+    // "SVA1" is an INDICATOR of the "Short-Video Addiction" construct, identified by whichever
+    // concept's acronym is a case-insensitive prefix of the indicator's own (numberless) form —
+    // e.g. "sva1" -> strip trailing digit -> "sva" -> matches SVA's aliasAcronyms.
+    Object.keys(concepts).forEach(function (norm) {
+      var c = concepts[norm];
+      if (c.type !== 'INDICATOR') return;
+      var indicatorPrefix = norm.replace(/\s+/g, '').replace(/\d+$/, '').toLowerCase();
+      Object.keys(concepts).forEach(function (parentNorm) {
+        if (parentNorm === norm) return;
+        var parent = concepts[parentNorm];
+        var matchesAcronym = parent.aliasAcronyms.some(function (acr) { return acr.toLowerCase() === indicatorPrefix; });
+        if (matchesAcronym) {
+          parent.indicators = parent.indicators || [];
+          if (parent.indicators.indexOf(c.canonicalSurface) === -1) parent.indicators.push(c.canonicalSurface);
+        }
+      });
+    });
+
+    var possibleAliases = flagPossibleAliases(text, concepts, relations);
 
     // undefined-but-important terms: variable-like score but zero definitions found
     var undefinedImportantTerms = Object.keys(concepts)
@@ -422,7 +631,8 @@
       possibleAliases: possibleAliases,
       undefinedImportantTerms: undefinedImportantTerms,
       inconsistentTerms: inconsistentTerms,
-      acronymAliases: acronymAliases,
+      acronymAliases: dedupeAcronymAliases(acronymAliases),
+      relations: relations,
     };
   }
 
@@ -433,6 +643,10 @@
     detectDefinitions: detectDefinitions,
     scoreVariableEvidence: scoreVariableEvidence,
     flagPossibleAliases: flagPossibleAliases,
+    extractRelations: extractRelations,
+    deriveRoles: deriveRoles,
+    hasCausalEdge: hasCausalEdge,
+    findAllSurfaceOccurrences: findAllSurfaceOccurrences,
     buildConceptDictionary: buildConceptDictionary,
     splitSentences: splitSentences,
   };

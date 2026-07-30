@@ -167,6 +167,70 @@ test('contrast evidence ("X and Y" in the same sentence) suppresses an alias fla
   assert.strictEqual(pair, undefined);
 });
 
+console.log('\n=== Relation graph (PREDICTS / MEDIATES / RELATED_TO) — the missing piece from the spec ===');
+
+test('PREDICTS relations are extracted from hypothesis-style sentences', () => {
+  const text = 'H1: Short-Video Addiction predicts Emotion Regulation Difficulties. Short-Video Addiction is measured using a scale. Emotion Regulation Difficulties is measured using the DERS.';
+  const result = TCE.buildConceptDictionary(text);
+  const rel = result.relations.find((r) => r.type === 'PREDICTS');
+  assert.ok(rel, 'expected a PREDICTS relation');
+  assert.strictEqual(rel.subject, 'short video addiction');
+  assert.strictEqual(rel.object, 'emotion regulation difficulty');
+});
+
+test('MEDIATES relations infer the two implied PREDICTS edges', () => {
+  const text = 'Emotion Regulation Difficulties mediates the relationship between Short-Video Addiction and Fear of Failure. Short-Video Addiction is measured using a scale. Emotion Regulation Difficulties is measured using a scale. Fear of Failure is measured using a scale.';
+  const result = TCE.buildConceptDictionary(text);
+  const mediates = result.relations.find((r) => r.type === 'MEDIATES');
+  assert.ok(mediates);
+  assert.strictEqual(mediates.subject, 'emotion regulation difficulty');
+  assert.deepStrictEqual(mediates.between.sort(), ['fear of failure', 'short video addiction'].sort());
+  const inferred = result.relations.filter((r) => r.type === 'PREDICTS' && r.inferred);
+  assert.strictEqual(inferred.length, 2);
+});
+
+test('a compound "between X and Y and between Z and W" sentence is skipped rather than mispaired', () => {
+  const text = 'Behavioral Intention mediated the relationship between Attitude and Psychological Distress and between Perceived Behavioral Control and Psychological Distress. Behavioral Intention is measured using a scale. Psychological Distress is measured using a scale. Perceived Behavioral Control is measured using a scale.';
+  const result = TCE.buildConceptDictionary(text);
+  const wrongEdge = result.relations.find((r) =>
+    r.type === 'PREDICTS' && r.subject === 'behavioral intention' && r.object === 'perceived behavioral control');
+  assert.strictEqual(wrongEdge, undefined, 'must not assert a reversed/mispaired relation from a compound sentence it cannot reliably parse');
+});
+
+test('a theory/model/framework name is never asserted as the subject of a PREDICTS relation', () => {
+  const text = 'The Theory of Planned Behavior provides a foundation for investigating the influence of Social Norms and Perceived Behavioral Control on outcomes. Social Norms is measured using a scale. Perceived Behavioral Control is measured using a scale.';
+  const result = TCE.buildConceptDictionary(text);
+  const wrongEdge = result.relations.find((r) => r.subject === 'theory of planned behavior');
+  assert.strictEqual(wrongEdge, undefined);
+});
+
+test('roles are correctly derived from graph position: pure predictor, mediator, pure outcome', () => {
+  const text = 'H1: Short-Video Addiction predicts Emotion Regulation Difficulties. H2: Emotion Regulation Difficulties predicts Fear of Failure. Short-Video Addiction is measured using a scale. Emotion Regulation Difficulties is measured using a scale. Fear of Failure is measured using a scale.';
+  const result = TCE.buildConceptDictionary(text);
+  assert.deepStrictEqual(result.concepts['short video addiction'].roles, ['exogenous_variable / predictor']);
+  assert.deepStrictEqual(result.concepts['fear of failure'].roles, ['outcome_variable']);
+  assert.deepStrictEqual(result.concepts['emotion regulation difficulty'].roles, ['intermediate_variable']);
+});
+
+test('a causal PREDICTS edge between two concepts suppresses a possible-alias flag between them', () => {
+  const text = 'Academic Dishonesty (AD) is measured using the ADS. Academic Misconduct Behavior is measured using the ADS too. H1: Academic Dishonesty predicts Academic Misconduct Behavior.';
+  const result = TCE.buildConceptDictionary(text);
+  const pair = result.possibleAliases.find((p) =>
+    (p.termA.includes('Dishonesty') && p.termB.includes('Misconduct')) || (p.termB.includes('Dishonesty') && p.termA.includes('Misconduct')));
+  assert.strictEqual(pair, undefined, 'a causal edge is the strongest negative evidence and must suppress the alias flag');
+});
+
+console.log('\n=== Indicator -> parent construct linkage ===');
+
+test('numbered item codes (SVA1, SVA2) are linked to their parent construct via acronym match', () => {
+  const text = 'Short-Video Addiction (SVA) is measured using an adapted scale, a validated instrument. Item SVA1 asks about frequency. Item SVA2 asks about duration.';
+  const result = TCE.buildConceptDictionary(text);
+  const parent = result.concepts['short video addiction'];
+  assert.ok(parent.indicators, 'expected indicators to be linked');
+  assert.deepStrictEqual(parent.indicators.sort(), ['SVA1', 'SVA2']);
+  assert.strictEqual(result.concepts['sva1'].type, 'INDICATOR');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);
