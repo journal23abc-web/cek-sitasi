@@ -433,6 +433,77 @@ test('a genuinely out-of-order reference list is still correctly flagged (sanity
   assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), true);
 });
 
+console.log('\n=== Malformed in-text citation format detection ===');
+
+test('missing space before citation opening parenthesis is detected', () => {
+  const issues = CE.detectMalformedCitations('Ekonomi(Agus, 2023) sangat penting.');
+  const found = issues.find(i => i.type === 'no_space_before_paren');
+  assert.ok(found, 'expected a no_space_before_paren issue');
+  assert.strictEqual(found.raw, 'Ekonomi(Agus, 2023)');
+});
+
+test('wrong capitalization of "et al." is detected and normalized in the suggestion', () => {
+  const issues = CE.detectMalformedCitations('(Agus, Et Al., 2023)');
+  const found = issues.find(i => i.type === 'et_al_case');
+  assert.ok(found);
+  assert.strictEqual(found.raw, 'Et Al.');
+  assert.strictEqual(found.suggestion, 'et al.');
+});
+
+test('a missing opening parenthesis is detected, with a useful context snippet', () => {
+  const issues = CE.detectMalformedCitations('Menurut Agusalim Muhammad, et al., 2020) hal ini benar.');
+  const found = issues.find(i => i.type === 'missing_open_paren');
+  assert.ok(found);
+  assert.ok(found.raw.includes('Agusalim Muhammad'), 'expected the snippet to include enough context, got: ' + found.raw);
+});
+
+test('"et al." following two listed author names (not just the first) is flagged', () => {
+  const issues = CE.detectMalformedCitations('(Agus, Supardi, et al., 2023)');
+  const found = issues.find(i => i.type === 'multiple_authors_before_et_al');
+  assert.ok(found);
+  assert.strictEqual(found.suggestion, 'Agus et al.');
+});
+
+test('an initial before "et al." ("Smith, J. et al.") is NOT wrongly flagged as two authors', () => {
+  const issues = CE.detectMalformedCitations('Menurut Smith, J. et al. (2020) hal ini benar.');
+  assert.strictEqual(issues.some(i => i.type === 'multiple_authors_before_et_al'), false);
+});
+
+test('the combined example from the report (all four problems in one citation) is fully caught', () => {
+  const issues = CE.detectMalformedCitations('Ekonomi(Agus, Supardi, Et Al., 2023)');
+  const types = issues.map(i => i.type).sort();
+  assert.deepStrictEqual(types, ['et_al_case', 'multiple_authors_before_et_al', 'no_space_before_paren']);
+});
+
+test('well-formed citations in various valid styles produce no false positives', () => {
+  const clean = [
+    'Studi ini didukung oleh (Smith, 2020).',
+    'Menurut Smith (2020), hal ini benar.',
+    'Studi ini didukung oleh (Smith et al., 2020).',
+    'Studi ini didukung oleh (Smith, Jones, & Brown, 2020).',
+    'Menurut Smith, J. (2020) hal ini benar.',
+    'The R\u00b2 value was significant (see Table 3).',
+    'The function calculateTotal(x) returns a value.',
+    'Studi (Van der Berg, 2021) menunjukkan hal ini.',
+    'Analisis menunjukkan hasil (p < 0.05) yang signifikan.',
+    'Item (3) dalam daftar ini penting.',
+    'Sebagaimana ditemukan oleh (1) faktor ekonomi, (2) faktor sosial.',
+  ];
+  clean.forEach((text) => {
+    const issues = CE.detectMalformedCitations(text);
+    assert.strictEqual(issues.length, 0, 'expected no issues for: "' + text + '", got: ' + JSON.stringify(issues.map(i => i.type)));
+  });
+});
+
+test('malformed-citation format issues surface as validator errors with clear per-type titles', () => {
+  const r = validate(
+    'Ekonomi(Agus, Supardi, Et Al., 2023) sangat penting.',
+    'Agus, A., & Supardi, S. (2023). Judul. Jurnal, 1(1), 1-10.');
+  assert.ok(r.errors.some(e => e.title === 'Sitasi tanpa spasi sebelum tanda kurung'));
+  assert.ok(r.errors.some(e => e.title === '"et al." salah huruf besar/kecil'));
+  assert.ok(r.errors.some(e => e.title === '"et al." mengikuti lebih dari satu nama penulis'));
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

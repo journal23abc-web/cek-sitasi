@@ -112,6 +112,101 @@ function extractNumericCitations(text) {
   return results;
 }
 
+// ---------- Malformed in-text citation format detection ----------
+// This is a DIFFERENT category of check from the citation<->reference matching logic above: it
+// looks for structural/typographical problems in a citation's own formatting (missing space,
+// wrong "et al." casing, unbalanced parentheses, non-standard author-list-before-"et al." style)
+// — issues that can make a citation invisible to extraction entirely (a missing "(" means
+// extractAuthorDateCitations never sees it at all, which would otherwise silently show up as a
+// false "reference not cited in text" instead of the real, more specific problem) or just look
+// unprofessional even when the citation IS otherwise extractable and matchable.
+function detectMalformedCitations(text) {
+  var issues = [];
+
+  // 1. Missing space before the citation's opening "(" — e.g. "Ekonomi(Agus, 2023)". Requires a
+  // letter (not whitespace/punctuation/another bracket) immediately before "(", and citation-like
+  // content inside (a capitalized word and a plausible year) so this doesn't fire on unrelated
+  // parenthetical asides like "function(x)" or footnote markers.
+  var noSpaceRe = /(\S*[A-Za-z])\(([\p{Lu}\p{Lo}][^()]{2,140}?\d{4}[a-z]?[^()]{0,20})\)/gu;
+  var m;
+  while ((m = noSpaceRe.exec(text)) !== null) {
+    var precedingWord = m[1].split(/(?<=[.,;:!?])/).pop(); // drop any leading punctuation-terminated fragment, keep the actual word
+    issues.push({
+      type: 'no_space_before_paren',
+      raw: precedingWord + '(' + m[2] + ')',
+      position: m.index + (m[1].length - precedingWord.length),
+      message: 'Tidak ada spasi sebelum tanda kurung sitasi — seharusnya ada spasi antara "' + precedingWord + '" dan "(".',
+      suggestion: precedingWord + ' (' + m[2] + ')',
+    });
+  }
+
+  // 2. Wrong capitalization of "et al." — must always be lowercase with a period after "al"
+  // ("et al."), never "Et Al.", "ET AL", "et Al.", etc.
+  var etAlRe = /\bet\s+al\.?/gi;
+  while ((m = etAlRe.exec(text)) !== null) {
+    var matched = m[0];
+    var canonical = 'et al' + (matched.endsWith('.') ? '.' : '');
+    if (matched !== canonical) {
+      issues.push({
+        type: 'et_al_case',
+        raw: matched,
+        position: m.index,
+        message: '"' + matched + '" seharusnya ditulis huruf kecil semua: "' + canonical + (canonical.endsWith('.') ? '' : '.') + '".',
+        suggestion: 'et al.',
+      });
+    }
+  }
+
+  // 3. A closing ")" that ends what looks like a citation (ends in a 4-digit year, or "et al.,
+  // YYYY") but has no matching "(" — i.e. the opening parenthesis was dropped/lost, e.g.
+  // "Agusalim Muhammad, et al., 2020)". Tracked via a running paren-balance scan: whenever a ")"
+  // would take the balance negative, check whether the text right before it looks citation-like.
+  var balance = 0;
+  var closeCiteRe = /(?:\d{4}[a-z]?|et\s+al\.?,?\s*\d{4}[a-z]?)\)$/i;
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i];
+    if (ch === '(') balance++;
+    else if (ch === ')') {
+      if (balance <= 0) {
+        var windowStart = Math.max(0, i - 90);
+        var windowText = text.slice(windowStart, i + 1);
+        if (closeCiteRe.test(windowText)) {
+          var snippetStart = Math.max(windowStart, i - 60);
+          issues.push({
+            type: 'missing_open_paren',
+            raw: text.slice(snippetStart, i + 1).trim(),
+            position: snippetStart,
+            message: 'Kurung tutup ")" ditemukan tapi tidak ada kurung buka "(" pasangannya — kemungkinan tanda kurung sitasi hilang.',
+            suggestion: null,
+          });
+        }
+        balance = 0; // reset so one dropped "(" doesn't cascade into flagging every later ")" too
+      } else {
+        balance--;
+      }
+    }
+  }
+
+  // 4. "et al." following TWO OR MORE explicitly listed author names instead of just the first —
+  // APA/most styles cite a 3+-author work as "Firstauthor et al.", not "Firstauthor, Secondauthor,
+  // et al." (that's mixing the "list everyone" and "abbreviate with et al." conventions).
+  var twoThenEtAlRe = /\b([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,\s*([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,?\s*(et\s+al\.?)/giu;
+  while ((m = twoThenEtAlRe.exec(text)) !== null) {
+    // Skip if the second token is itself an initial (e.g. "Smith, J., et al." is fine — that's
+    // just the first author's initial, not a second author being listed).
+    if (/^[A-Z]\.?$/.test(m[2])) continue;
+    issues.push({
+      type: 'multiple_authors_before_et_al',
+      raw: m[0],
+      position: m.index,
+      message: '"et al." semestinya langsung mengikuti penulis PERTAMA saja, bukan setelah ' + (m[2] ? 'dua nama (' + m[1] + ', ' + m[2] + ')' : 'beberapa nama') + ' disebutkan.',
+      suggestion: m[1] + ' et al.',
+    });
+  }
+
+  return issues.sort(function(a, b) { return a.position - b.position; });
+}
+
 function extractAuthorDateCitations(text) {
   var citations = [];
   var parenRegex = /\(([^()]+?)\)/g;
@@ -800,6 +895,10 @@ MultiFormatValidator.prototype.validate = function() {
     this.validateAuthorPage();
   }
 
+  if (family === 'author-date' || family === 'author-page') {
+    this.validateCitationFormat();
+  }
+
   this.validateInstitutionalConsistency();
   this.validateReferenceOrdering();
   this.detectDuplicateReferences();
@@ -1397,6 +1496,27 @@ MultiFormatValidator.prototype.detectMixedCitationStyles = function() {
 };
 
 // ----- INSTITUTIONAL AUTHOR CONSISTENCY -----
+// Structural/typographical citation format issues — separate from citation<->reference
+// matching. See detectMalformedCitations() for what each issue type means.
+MultiFormatValidator.prototype.validateCitationFormat = function() {
+  var self = this;
+  var TITLES = {
+    no_space_before_paren: 'Sitasi tanpa spasi sebelum tanda kurung',
+    et_al_case: '"et al." salah huruf besar/kecil',
+    missing_open_paren: 'Tanda kurung sitasi tidak lengkap',
+    multiple_authors_before_et_al: '"et al." mengikuti lebih dari satu nama penulis',
+  };
+  var issues = detectMalformedCitations(this.articleText);
+  issues.forEach(function(issue) {
+    self.errors.push({
+      title: TITLES[issue.type] || 'Format sitasi bermasalah',
+      description: issue.message + (issue.suggestion ? ' Saran: "' + issue.suggestion + '".' : ''),
+      code: issue.raw,
+      severity: 'error',
+    });
+  });
+};
+
 MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
   var self = this;
   var institutionalRefs = this.references.filter(function(r) { return r.isInstitutional; });
@@ -2035,6 +2155,7 @@ var CitationEngine = {
   AuthorParsers: AuthorParsers,
   extractNumericCitations: extractNumericCitations,
   extractAuthorDateCitations: extractAuthorDateCitations,
+  detectMalformedCitations: detectMalformedCitations,
   extractAuthorPageCitations: extractAuthorPageCitations,
   splitOnSeparators: splitOnSeparators,
   esc: esc,
