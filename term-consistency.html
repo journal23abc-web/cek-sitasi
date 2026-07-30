@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cek Konsistensi Istilah — Validator Sitasi</title>
+<script>
+(function(){
+  try {
+    var saved = localStorage.getItem('citationValidatorTheme');
+    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="shared.css?v=3">
+<style>
+  .wrap{ max-width:900px; margin:0 auto; position:relative; z-index:1; }
+  a{ color:var(--cyan); }
+  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
+  h1{ font-family:var(--font-display); font-weight:700; font-size:26px; margin:0; letter-spacing:-0.01em; }
+  .back-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+  .back-link:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  .field-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  .step-num{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--cyan); color:var(--void); font-family:var(--font-mono); font-size:11px; font-weight:700; margin-right:8px; flex-shrink:0; }
+
+  textarea{ width:100%; min-height:220px; font-family:var(--font-mono); font-size:12.5px; line-height:1.6; color:var(--text); background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:14px; outline:none; resize:vertical; }
+  textarea:focus{ border-color:var(--cyan); }
+
+  button.primary{ font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
+  button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
+  button.primary:active{ transform:translateY(1px); }
+  button.primary:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+
+  .status{ font-family:var(--font-mono); font-size:11.5px; margin-top:12px; line-height:1.7; }
+  .status.info{ color:var(--text-dim); } .status.ok{ color:var(--green); } .status.err{ color:var(--red); } .status.warn{ color:var(--amber); }
+
+  .results{ display:none; margin-top:20px; }
+  .results.active{ display:block; }
+  .summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:10px; margin-bottom:18px; }
+  .sum-card{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center; }
+  .sum-card .n{ font-family:var(--font-display); font-size:22px; font-weight:700; }
+  .sum-card .l{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:2px; }
+  .sum-card.warn .n{ color:var(--amber); } .sum-card.ok .n{ color:var(--green); } .sum-card.info .n{ color:var(--cyan); }
+
+  .tc-issue{ background:var(--input-bg); border-left:3px solid var(--amber); border-radius:0 8px 8px 0; padding:12px 14px; margin-bottom:10px; }
+  .tc-issue.review{ border-left-color:var(--violet); }
+  .tc-issue .tc-term{ font-family:var(--font-display); font-weight:700; font-size:14px; margin-bottom:6px; }
+  .tc-issue .tc-variants{ display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .tc-issue .tc-variant{ font-family:var(--font-mono); font-size:11px; background:var(--panel); border:1px solid var(--hairline); border-radius:5px; padding:3px 8px; }
+  .tc-issue .tc-meta{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-top:6px; }
+
+  table.tc-table{ width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
+  table.tc-table th{ text-align:left; font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-faint); padding:8px; border-bottom:1px solid var(--hairline); }
+  table.tc-table td{ padding:8px; border-bottom:1px solid var(--hairline); vertical-align:top; }
+  .tc-type{ font-family:var(--font-mono); font-size:10px; padding:2px 7px; border-radius:4px; }
+  .tc-type.CONSTRUCT_VARIABLE{ background:rgba(62,217,143,.12); color:var(--green); }
+  .tc-type.CANDIDATE_VARIABLE{ background:rgba(79,227,232,.12); color:var(--cyan); }
+  .tc-type.GENERAL_CONCEPT{ background:rgba(139,124,240,.12); color:var(--violet); }
+  .tc-type.UNCLASSIFIED{ background:rgba(150,150,150,.12); color:var(--text-dim); }
+  .tc-type.ALIAS{ background:rgba(242,184,75,.12); color:var(--amber); }
+
+  details.collapsible{ background:var(--panel); border:1px solid var(--hairline); border-radius:10px; margin-bottom:14px; overflow:hidden; }
+  details.collapsible summary{ padding:14px 18px; cursor:pointer; font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.02em; list-style:none; display:flex; align-items:center; gap:8px; }
+  details.collapsible summary::-webkit-details-marker{ display:none; }
+  details.collapsible .collapsible-content{ padding:0 18px 18px; }
+  .empty-note{ font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); padding:10px 0; }
+  .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+</style>
+</head>
+<body>
+<div class="watermark" aria-hidden="true"><span>JOURNAL TOOLS</span></div>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
+      <h1>Cek Konsistensi Istilah</h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
+      <a href="index.html" class="back-link">🏠 Beranda</a>
+    </div>
+  </header>
+
+  <div class="panel">
+    <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+
+    <div class="field-label"><span class="step-num">1</span>Tempel Teks Naskah</div>
+    <textarea id="articleText" placeholder="Tempel seluruh isi naskah (atau bagian yang ingin dicek) di sini..."></textarea>
+
+    <div class="row" style="margin-top:18px;display:flex;gap:14px;">
+      <button class="primary" id="processBtn">🔎 Cek Konsistensi Istilah</button>
+      <span class="status info" id="statusMsg" role="status" aria-live="polite"></span>
+    </div>
+
+    <div class="disclaimer">
+      🔒 Semua pemrosesan berjalan di browser Anda — tidak ada teks yang dikirim ke server.<br><br>
+      ⚠️ <b>Ini alat bantu heuristik (aturan pola + kemiripan kata), bukan model AI/semantik sungguhan.</b> Tidak ada akses ke model embedding di browser tanpa memuat model ML besar, jadi "kemiripan makna" di sini didekati dari kemiripan kata yang selalu lebih lemah dari makna sesungguhnya. Karena itu:
+      <ul style="margin:6px 0 0 18px; padding:0;">
+        <li>Penggabungan otomatis <b>hanya</b> terjadi untuk variasi penulisan yang jelas aman (huruf besar/kecil, tanda hubung, tunggal/jamak) dan pasangan akronim eksplisit "Istilah Lengkap (SINGKATAN)".</li>
+        <li>Istilah yang mirip secara kata tapi <b>berpotensi konsep berbeda</b> hanya <b>ditandai untuk Anda tinjau sendiri</b> — tidak pernah digabung otomatis.</li>
+        <li>Hasil ini <b>bukan</b> pengganti pembacaan manual, tapi bisa membantu menemukan istilah yang ditulis tidak konsisten atau tidak pernah didefinisikan.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="panel">
+      <div class="field-label">Ringkasan</div>
+      <div class="summary-grid" id="summaryGrid"></div>
+    </div>
+
+    <details class="collapsible" id="inconsistentDetails" open>
+      <summary>⚠️ Istilah Ditulis Tidak Konsisten</summary>
+      <div class="collapsible-content" id="inconsistentPanel"></div>
+    </details>
+
+    <details class="collapsible" id="undefinedDetails" open>
+      <summary>❓ Istilah Penting Tapi Tidak Pernah Didefinisikan</summary>
+      <div class="collapsible-content" id="undefinedPanel"></div>
+    </details>
+
+    <details class="collapsible" id="aliasDetails">
+      <summary>🔍 Kemungkinan Alias — Perlu Ditinjau Manual</summary>
+      <div class="collapsible-content" id="aliasPanel"></div>
+    </details>
+
+    <details class="collapsible" id="dictionaryDetails">
+      <summary>📖 Kamus Konsep Lengkap</summary>
+      <div class="collapsible-content" id="dictionaryPanel"></div>
+    </details>
+  </div>
+</div>
+
+<script src="theme.js?v=1"></script>
+<script src="term-consistency-engine.js?v=1"></script>
+<script src="term-consistency.js?v=1"></script>
+</body>
+</html>
