@@ -406,6 +406,33 @@ test('journal article is classified as journal-article (DOI expected)', () => {
   assert.ok(!CE.DOI_NOT_EXPECTED_TYPES[t]);
 });
 
+console.log('\n=== Reference-list alphabetical ordering (diacritics & tie-breaking) ===');
+
+test('a reference starting with an accented letter (Ú, É, Ñ, ...) is not wrongly flagged as out of order (regression)', () => {
+  const r = validate(
+    'Studi oleh Tsai (2013) dan Úbeda García et al. (2018) serta Venugopal et al. (2023) menunjukkan hal ini.',
+    'Tsai, P. C.-F., & Shih, C.-T. (2013). Title. Journal, 1(1), 1-10.\n' +
+    'Úbeda García, M., Claver-Cortés, E., Marco-Lajara, B., Zaragoza-sáez, P., & García-Lillo, F. (2018). Title. Journal, 2(1), 1-10.\n' +
+    'Venugopal, A., Nerur, S., Yasar, M., & Rasheed, A. A. (2023). Title. Journal, 3(1), 1-10.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), false);
+});
+
+test('a solo-authored entry is correctly ordered before a co-authored entry with the same first surname, even when published later (regression)', () => {
+  const r = validate(
+    'Studi oleh Teece (2012) dan Teece et al. (1997) menunjukkan hal ini.',
+    'Teece, D. (2012). Title one. Journal, 1(1), 1-10.\n' +
+    'Teece, D. J., Pisano, G., & Shuen, A. (1997). Title two. Journal, 2(1), 1-10.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), false);
+});
+
+test('a genuinely out-of-order reference list is still correctly flagged (sanity check against over-correction)', () => {
+  const r = validate(
+    'Studi oleh Zebra (2020) dan Apple (2019) menunjukkan hal ini.',
+    'Zebra, A. (2020). Title one. Journal, 1(1), 1-10.\n' +
+    'Apple, B. (2019). Title two. Journal, 2(1), 1-10.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), true);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
@@ -413,3 +440,5 @@ if (fail > 0) {
   failures.forEach(f => console.log('  - ' + f.name + ': ' + f.err.message));
   process.exit(1);
 }
+
+

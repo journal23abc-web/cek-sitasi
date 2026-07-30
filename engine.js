@@ -1143,11 +1143,15 @@ MultiFormatValidator.prototype.validateReferenceOrdering = function() {
   var withKeys = this.references.map(function(r, idx) {
     var pairing = r.isInstitutional ? extractAcronymPairing(r.firstAuthor) : null;
     var sortBase = r.isInstitutional ? (pairing ? pairing.full : r.firstAuthor) : surnameOf(r.firstAuthor, self.styleId);
-    return { idx: idx, sortKey: (sortBase || '').toLowerCase().replace(/^(the|a|an)\s+/i, ''), year: r.year || '', firstAuthor: r.firstAuthor };
+    return { idx: idx, sortKey: (sortBase || '').toLowerCase().replace(/^(the|a|an)\s+/i, ''), year: r.year || '', firstAuthor: r.firstAuthor, authorCount: r.authorCount || 1 };
   });
   var sorted = withKeys.slice().sort(function(a,b) {
-    if (a.sortKey < b.sortKey) return -1;
-    if (a.sortKey > b.sortKey) return 1;
+    var cmp = a.sortKey.localeCompare(b.sortKey, 'en', { sensitivity: 'base' });
+    if (cmp !== 0) return cmp;
+    // APA: when the first-listed surname is the same, a solo-authored entry ("Teece, D.") is
+    // ordered before a co-authored one with the same first surname ("Teece, D. J., Pisano, G.,
+    // & Shuen, A."), regardless of publication year — fewer authors sorts first.
+    if (a.authorCount !== b.authorCount) return a.authorCount - b.authorCount;
     return (a.year || '').localeCompare(b.year || '');
   });
   var isSorted = withKeys.every(function(w, i) { return w.idx === sorted[i].idx; });
