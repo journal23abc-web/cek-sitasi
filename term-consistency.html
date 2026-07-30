@@ -67,6 +67,19 @@
   details.collapsible .collapsible-content{ padding:0 18px 18px; }
   .empty-note{ font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); padding:10px 0; }
   .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
+
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:24px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); margin-bottom:14px; }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .icon{ font-size:26px; margin-bottom:8px; }
+  .dropzone .main{ font-size:13px; color:var(--text); margin-bottom:4px; }
+  .dropzone .sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); }
+  .file-chip{ display:none; align-items:center; gap:10px; margin-bottom:14px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:var(--font-mono); font-size:12px; }
+  .file-chip.show{ display:flex; }
+  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
+  .file-chip .x:hover{ color:var(--red); }
+  .input-mode-toggle{ display:flex; gap:8px; margin-bottom:16px; }
+  .input-mode-toggle button{ flex:1; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.04em; padding:9px 14px; border-radius:6px; border:1px solid var(--hairline); background:var(--input-bg); color:var(--text-dim); cursor:pointer; transition:all .15s ease; }
+  .input-mode-toggle button.active{ border-color:var(--cyan); color:var(--cyan); background:rgba(79,227,232,.08); }
 </style>
 </head>
 <body>
@@ -86,8 +99,30 @@
   <div class="panel">
     <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
 
-    <div class="field-label"><span class="step-num">1</span>Tempel Teks Naskah</div>
-    <textarea id="articleText" placeholder="Tempel seluruh isi naskah (atau bagian yang ingin dicek) di sini..."></textarea>
+    <div class="field-label"><span class="step-num">1</span>Masukkan Naskah</div>
+
+    <div class="input-mode-toggle">
+      <button type="button" id="modePasteBtn" class="active">📋 Tempel Teks</button>
+      <button type="button" id="modeUploadBtn">📄 Upload .docx</button>
+    </div>
+
+    <div id="pasteModePanel">
+      <textarea id="articleText" placeholder="Tempel seluruh isi naskah (atau bagian yang ingin dicek) di sini..."></textarea>
+    </div>
+
+    <div id="uploadModePanel" style="display:none;">
+      <div class="dropzone" id="dropzone">
+        <div class="icon">📄</div>
+        <div class="main">Klik atau seret file .docx ke sini</div>
+        <div class="sub">Upload memungkinkan pembacaan tabel (loading/CR/AVE) sebagai bukti tambahan — tidak tersedia lewat tempel teks biasa.</div>
+        <input type="file" id="fileInput" accept=".docx" style="display:none;">
+      </div>
+      <div class="file-chip" id="fileChip">
+        <span id="fileName"></span>
+        <span id="fileSize" style="color:var(--text-faint);"></span>
+        <span class="x" id="fileRemove">✕</span>
+      </div>
+    </div>
 
     <div class="row" style="margin-top:18px;display:flex;gap:14px;">
       <button class="primary" id="processBtn">🔎 Cek Konsistensi Istilah</button>
@@ -96,10 +131,12 @@
 
     <div class="disclaimer">
       🔒 Semua pemrosesan berjalan di browser Anda — tidak ada teks yang dikirim ke server.<br><br>
-      ⚠️ <b>Ini alat bantu heuristik (aturan pola + kemiripan kata), bukan model AI/semantik sungguhan.</b> Tidak ada akses ke model embedding di browser tanpa memuat model ML besar, jadi "kemiripan makna" di sini didekati dari kemiripan kata yang selalu lebih lemah dari makna sesungguhnya. Karena itu:
+      ⚠️ <b>Ini alat bantu heuristik (aturan pola + kemiripan kata terkurasi), bukan model AI/semantik sungguhan.</b> Tidak ada akses ke model embedding di browser tanpa memuat model ML besar. Sebagai gantinya, "kemiripan makna" didekati dari kamus sinonim akademik terkurasi (mis. "dishonesty"~"misconduct") — akurat untuk pasangan yang ada di kamus, tapi tidak bisa menggeneralisasi ke pasangan sinonim yang belum dikenal. Karena itu:
       <ul style="margin:6px 0 0 18px; padding:0;">
-        <li>Penggabungan otomatis <b>hanya</b> terjadi untuk variasi penulisan yang jelas aman (huruf besar/kecil, tanda hubung, tunggal/jamak) dan pasangan akronim eksplisit "Istilah Lengkap (SINGKATAN)".</li>
-        <li>Istilah yang mirip secara kata tapi <b>berpotensi konsep berbeda</b> hanya <b>ditandai untuk Anda tinjau sendiri</b> — tidak pernah digabung otomatis.</li>
+        <li>Penggabungan otomatis <b>hanya</b> terjadi untuk variasi penulisan yang jelas aman (huruf besar/kecil, tanda hubung, tunggal/jamak), pasangan akronim eksplisit "Istilah Lengkap (SINGKATAN)", dan pasangan bersimilaritas sangat tinggi (≥0.90) yang punya bukti struktural pendukung (instrumen sama atau posisi graph relasi sama) — tidak pernah hanya dari kemiripan kata.</li>
+        <li>Istilah yang mirip tapi <b>berpotensi konsep berbeda</b> hanya <b>ditandai untuk Anda tinjau sendiri</b>.</li>
+        <li><b>Upload .docx</b> (bukan tempel teks) memungkinkan sistem membaca tabel loading/CR/AVE/koefisien sebagai bukti tambahan — teks tempel tidak punya struktur tabel sama sekali.</li>
+        <li>Bukti statistik (koefisien, p-value) di luar tabel tetap perlu menyebut nama istilah dalam kalimat yang sama untuk terhitung.</li>
         <li>Hasil ini <b>bukan</b> pengganti pembacaan manual, tapi bisa membantu menemukan istilah yang ditulis tidak konsisten atau tidak pernah didefinisikan.</li>
       </ul>
     </div>
@@ -126,6 +163,11 @@
       <div class="collapsible-content" id="aliasPanel"></div>
     </details>
 
+    <details class="collapsible" id="relationsDetails">
+      <summary>🕸️ Graph Hubungan Antar-Konsep (PREDICTS / MEDIATES)</summary>
+      <div class="collapsible-content" id="relationsPanel"></div>
+    </details>
+
     <details class="collapsible" id="dictionaryDetails">
       <summary>📖 Kamus Konsep Lengkap</summary>
       <div class="collapsible-content" id="dictionaryPanel"></div>
@@ -133,8 +175,10 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
-<script src="term-consistency-engine.js?v=1"></script>
-<script src="term-consistency.js?v=1"></script>
+<script src="term-consistency-engine.js?v=2"></script>
+<script src="term-consistency.js?v=2"></script>
 </body>
 </html>

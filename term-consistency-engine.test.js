@@ -365,6 +365,84 @@ test('related_to is attached directly on each concept, reflecting its graph edge
   assert.ok(predictsFearOfFailure, 'expected ERD -> predicts -> Fear of Failure in its related_to list');
 });
 
+console.log('\n=== Curated synonym dictionary (semantic_similarity improvement) ===');
+
+test('known synonym pairs from the spec\'s own example ("dishonesty" ~ "misconduct") score high', () => {
+  const sim = TCE.synonymAwareSimilarity(new Set(['academic', 'dishonesty']), new Set(['academic', 'misconduct']));
+  assert.strictEqual(sim, 1);
+});
+
+test('genuinely unrelated word sets score zero, not a false match', () => {
+  const sim = TCE.synonymAwareSimilarity(new Set(['emotion', 'regulation', 'difficulty']), new Set(['fear', 'failure']));
+  assert.strictEqual(sim, 0);
+});
+
+test('with realistic corroborating evidence (matching definitions + shared instrument + shared relation neighbor), a known synonym pair IS flagged for review (but never auto-merged)', () => {
+  const text = `
+    Academic Dishonesty (AD) refers to dishonest behavior such as cheating and plagiarism among students. Academic Dishonesty is measured using the ADS. H1: Emotion Regulation Difficulties predicts Academic Dishonesty.
+    Emotion Regulation Difficulties (ERD) is measured using the DERS. Emotion Regulation Difficulties predicts negative behaviors.
+    Academic Misconduct refers to dishonest behavior such as cheating and plagiarism among students too. Academic Misconduct is measured using the ADS. Emotion Regulation Difficulties predicts Academic Misconduct as well.
+  `;
+  const result = TCE.buildConceptDictionary(text);
+  const flagged = result.possibleAliases.find((p) =>
+    (p.termA.includes('Dishonesty') && p.termB.includes('Misconduct')) || (p.termB.includes('Dishonesty') && p.termA.includes('Misconduct')));
+  assert.ok(flagged, 'expected Academic Dishonesty <-> Academic Misconduct to be flagged given realistic corroborating evidence');
+  assert.strictEqual(result.autoMerged.length, 0, 'must still not auto-merge just from this');
+});
+
+console.log('\n=== DOCX table awareness (statistical evidence from loadings/CR/AVE tables) ===');
+
+test('extractDocxTableRows finds a statistical table\'s data rows by their header', () => {
+  const { DOMParser } = require('@xmldom/xmldom');
+  const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const cell = (t) => `<w:tc><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:tc>`;
+  const row = (cells) => `<w:tr>${cells.map(cell).join('')}</w:tr>`;
+  const tableXml = `<w:tbl>${row(['Construct', 'Loading', 'CR', 'AVE'])}${row(['SVA', '0.85', '0.90', '0.75'])}${row(['ERD', '0.80', '0.88', '0.70'])}</w:tbl>`;
+  const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${tableXml}</w:body></w:document>`;
+  const xmlDoc = new DOMParser().parseFromString(xml, 'application/xml');
+  const rows = TCE.extractDocxTableRows(xmlDoc);
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(rows.map((r) => r.rowLabel).sort(), ['ERD', 'SVA']);
+});
+
+test('a non-statistical table (no Loading/CR/AVE-style header) is correctly ignored', () => {
+  const { DOMParser } = require('@xmldom/xmldom');
+  const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const cell = (t) => `<w:tc><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:tc>`;
+  const row = (cells) => `<w:tr>${cells.map(cell).join('')}</w:tr>`;
+  const tableXml = `<w:tbl>${row(['Author', 'Year', 'Country'])}${row(['Smith', '2020', 'USA'])}</w:tbl>`;
+  const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${tableXml}</w:body></w:document>`;
+  const xmlDoc = new DOMParser().parseFromString(xml, 'application/xml');
+  const rows = TCE.extractDocxTableRows(xmlDoc);
+  assert.strictEqual(rows.length, 0);
+});
+
+test('table-derived statistical evidence combines with (not overrides) in-text evidence found via acronym-only mentions', () => {
+  const { DOMParser } = require('@xmldom/xmldom');
+  const W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const cell = (t) => `<w:tc><w:p><w:r><w:t>${t}</w:t></w:r></w:p></w:tc>`;
+  const row = (cells) => `<w:tr>${cells.map(cell).join('')}</w:tr>`;
+  const tableXml = `<w:tbl>${row(['Construct', 'Loading', 'CR', 'AVE'])}${row(['SVA', '0.85', '0.90', '0.75'])}</w:tbl>`;
+  const xml = `<?xml version="1.0"?><w:document xmlns:w="${W_NS}"><w:body>${tableXml}</w:body></w:document>`;
+  const xmlDoc = new DOMParser().parseFromString(xml, 'application/xml');
+  const tableRows = TCE.extractDocxTableRows(xmlDoc);
+
+  const text = 'Short Video Addiction (SVA) is measured using an adapted scale. SVA predicts poor outcomes. H1: SVA predicts negative consequences.';
+  const withoutTable = TCE.buildConceptDictionary(text);
+  const withTable = TCE.buildConceptDictionary(text, { tableRows: tableRows });
+  assert.ok(withTable.concepts['short video addiction'].variableScore > withoutTable.concepts['short video addiction'].variableScore,
+    'table evidence should meaningfully increase the score, not just tie with the text-only score');
+  assert.strictEqual(withTable.concepts['short video addiction'].hasTableStatEvidence, true);
+});
+
+test('passing tableRows is a complete no-op when empty (plain paste-text pathway unaffected)', () => {
+  const result1 = TCE.buildConceptDictionary(SAMPLE);
+  const result2 = TCE.buildConceptDictionary(SAMPLE, { tableRows: [] });
+  Object.keys(result1.concepts).forEach((k) => {
+    assert.strictEqual(result1.concepts[k].variableScore, result2.concepts[k].variableScore);
+  });
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

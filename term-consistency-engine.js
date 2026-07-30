@@ -227,7 +227,7 @@
             var pm = pat.exec(after);
             if (pm && pm.index < 60) {
               var defText = after.slice(pm.index + pm[0].length).trim().replace(/^[:,]\s*/, '');
-              if (defText.length > 8) {
+              if (defText.length >= 4) {
                 var definitional = WEAK_DEFINITION_CUE.test(pm[0]) ? 0.2 : 0.4;
                 var syntactic = relPos < 30 ? 0.25 : 0.1;
                 var sectionRel = SECTION_HEADING_RE.test(sectionHints.nearbyHeading || '') ? 0.2 : 0.08;
@@ -259,7 +259,7 @@
   var MODEL_SECTION_RE = /\b(hypothes[ie]s|conceptual\s+framework|instrumentation|structural\s+model|sem\b|regression)\b/i;
   var ROLE_LANGUAGE_RE = /\b(?:mediat(?:or|es|ing)|moderat(?:or|es|ing)|predictor|antecedent|exogenous|endogenous|independent\s+variable|dependent\s+variable|outcome\s+variable)\b|\bvariabel\s+(?:mediasi|moderasi|independen|dependen)\b/i;
 
-  function scoreVariableEvidence(text, occurrences, sentences) {
+  function scoreVariableEvidence(text, occurrences, sentences, hasTableStatEvidence) {
     var measurementHit = 0, hypothesisHit = 0, modelRelHit = 0, statsHit = 0, sectionHit = 0, roleHit = 0;
     occurrences.forEach(function (occ) {
       for (var i = 0; i < sentences.length; i++) {
@@ -284,7 +284,11 @@
     // from the spec's Section 3 evidence list ("menjadi mediator/moderator", "muncul dalam
     // hipotesis").
     var modelRel = (modelRelHit > 0 || roleHit > 0) ? 1 : 0;
-    var stats = statsHit > 0 ? 1 : 0;
+    // Statistical evidence: an in-sentence coefficient/loading/p-value mention, OR (when the
+    // caller supplies it — see extractDocxTableRows for the DOCX-upload pathway) this term's row
+    // in an actual loadings/path-coefficient TABLE, which sentence-level scanning alone can never
+    // see since a table row rarely repeats the term name in the same "sentence" as its numbers.
+    var stats = (statsHit > 0 || hasTableStatEvidence) ? 1 : 0;
     var section = sectionHit > 0 ? 1 : 0;
     var repetition = Math.min(1, occurrences.length / 5);
     var score = 0.25 * measurement + 0.20 * hypothesis + 0.20 * modelRel + 0.15 * stats + 0.10 * section + 0.10 * repetition;
@@ -502,6 +506,84 @@
     return 1 - dist / Math.max(m, n);
   }
 
+  // ---------- "semantic_similarity" approximation: curated academic synonym clusters ----------
+  // HONEST LIMITATION (see file header): there is no real embedding model here. This is a
+  // hand-curated list of word clusters common in social-science/psychology/education/business
+  // research papers — it will correctly catch KNOWN synonym pairs ("dishonesty" ~ "misconduct")
+  // but will NOT generalize to a synonym pair it doesn't already contain. It is still a genuine,
+  // meaningful improvement over edit-distance (which only measures spelling closeness, not
+  // meaning at all) for the pairs it does cover, and unlike edit-distance it correctly does NOT
+  // treat spelling-similar-but-meaning-different words (e.g. "addiction" vs "affliction") as close.
+  var SYNONYM_CLUSTERS = [
+    ['dishonesty', 'misconduct', 'cheating', 'fraud', 'deception', 'dishonest'],
+    ['addiction', 'dependence', 'dependency', 'compulsion'],
+    ['difficulty', 'difficulties', 'problem', 'problems', 'issue', 'issues', 'struggle', 'struggles'],
+    ['regulation', 'control', 'management', 'regulating'],
+    ['skill', 'skills', 'ability', 'abilities', 'competence', 'competency', 'competencies', 'proficiency'],
+    ['behavior', 'behaviour', 'behaviors', 'behaviours', 'conduct'],
+    ['intention', 'intentions', 'intent', 'willingness', 'readiness'],
+    ['perception', 'perceptions', 'perceived', 'attitude', 'attitudes', 'view', 'views'],
+    ['failure', 'failures', 'setback', 'setbacks', 'shortcoming', 'shortcomings'],
+    ['fear', 'anxiety', 'worry', 'apprehension', 'dread'],
+    ['satisfaction', 'contentment', 'fulfillment', 'fulfilment'],
+    ['engagement', 'involvement', 'participation', 'engagment'],
+    ['motivation', 'drive', 'incentive'],
+    ['performance', 'achievement', 'attainment'],
+    ['effectiveness', 'efficacy', 'effectivenes'],
+    ['awareness', 'consciousness', 'mindfulness'],
+    ['norm', 'norms', 'standard', 'standards', 'expectation', 'expectations'],
+    ['influence', 'impact', 'effect', 'effects'],
+    ['stress', 'strain', 'pressure', 'tension'],
+    ['wellbeing', 'wellness', 'welfare'],
+    ['commitment', 'dedication', 'devotion'],
+    ['trust', 'confidence', 'reliance'],
+    ['support', 'assistance', 'help', 'aid'],
+    ['communication', 'interaction', 'exchange'],
+    ['knowledge', 'understanding', 'comprehension'],
+    ['perception', 'awareness', 'recognition'],
+    ['procrastination', 'delay', 'postponement', 'avoidance'],
+    ['loneliness', 'isolation', 'solitude'],
+    ['resilience', 'resiliency', 'hardiness'],
+    ['burnout', 'exhaustion', 'fatigue'],
+    ['self-esteem', 'self esteem', 'self-worth', 'self worth'],
+    ['self-efficacy', 'self efficacy', 'self-confidence', 'self confidence'],
+    ['adoption', 'acceptance', 'uptake'],
+    ['usage', 'use', 'utilization', 'utilisation'],
+    ['dependency', 'reliance', 'overreliance'],
+    ['disorder', 'condition', 'syndrome'],
+    ['symptom', 'symptoms', 'indication', 'indications'],
+    ['intervention', 'treatment', 'therapy'],
+    ['outcome', 'outcomes', 'result', 'results', 'consequence', 'consequences'],
+    ['antecedent', 'antecedents', 'predictor', 'predictors', 'determinant', 'determinants'],
+    ['mediator', 'mediators', 'intermediary'],
+    ['moderator', 'moderators', 'modifier'],
+    ['construct', 'concept', 'variable'],
+  ];
+  var SYNONYM_CLUSTER_INDEX = {};
+  SYNONYM_CLUSTERS.forEach(function (cluster, idx) {
+    cluster.forEach(function (w) { SYNONYM_CLUSTER_INDEX[w] = idx; });
+  });
+
+  function synonymAwareSimilarity(wordsA, wordsB) {
+    var arrA = Array.from(wordsA), arrB = Array.from(wordsB);
+    if (!arrA.length || !arrB.length) return 0;
+    function overlapCount(from, against) {
+      var matched = 0;
+      from.forEach(function (wa) {
+        var clusterA = SYNONYM_CLUSTER_INDEX[wa];
+        var hit = against.some(function (wb) {
+          return wa === wb || (clusterA !== undefined && SYNONYM_CLUSTER_INDEX[wb] === clusterA);
+        });
+        if (hit) matched++;
+      });
+      return matched;
+    }
+    // symmetric: average of "how much of A is covered by B" and "how much of B is covered by A"
+    var covA = overlapCount(arrA, arrB) / arrA.length;
+    var covB = overlapCount(arrB, arrA) / arrB.length;
+    return Math.round(((covA + covB) / 2) * 100) / 100;
+  }
+
   // Negative evidence: if two terms are ever joined by "and"/"dan" in one phrase, or both listed
   // as distinct items in the same short list, that's a strong signal they're being treated as
   // DIFFERENT things by the author — the single most reliable signal available without a real
@@ -570,6 +652,62 @@
     return best;
   }
 
+  // ---------- DOCX table awareness (optional — only usable when a parsed document.xml is
+  // available, i.e. the DOCX-upload pathway, not plain pasted text) ----------
+  // Plain-text extraction (mammoth, or a person copy-pasting from Word) flattens every table
+  // cell into just another paragraph, so a loadings/path-coefficient table like:
+  //   Construct | Loading | CR | AVE
+  //   SVA       | 0.85    | 0.90 | 0.75
+  // loses all row/column structure — sentence-level scanning can never connect "SVA" to "0.85"
+  // because they were never in the same "sentence" to begin with. This reads the RAW DOCX XML
+  // (the same way link-engine.js already does for citation-linking) to recover that structure:
+  // find tables whose header row looks statistical (Loading/CR/AVE/Alpha/Beta/p-value/...), then
+  // record which row-label cells have a numeric value elsewhere in their own row.
+  var TABLE_STAT_HEADER_RE = /\b(loading|cr|ave|alpha|rho[-_]?a|beta|coefficient|p[-\s]?value|r\s*[²2]|vif|t[-\s]?stat|t[-\s]?value)\b/i;
+
+  function extractDocxTableRows(xmlDoc) {
+    function cellText(tc) {
+      var ts = tc.getElementsByTagName('w:t');
+      var s = '';
+      for (var i = 0; i < ts.length; i++) s += ts[i].textContent;
+      return s.trim();
+    }
+    var results = []; // [{ rowLabel }]
+    var tables = xmlDoc.getElementsByTagName('w:tbl');
+    for (var t = 0; t < tables.length; t++) {
+      var rows = tables[t].getElementsByTagName('w:tr');
+      if (rows.length < 2) continue;
+      var headerCells = rows[0].getElementsByTagName('w:tc');
+      var isStatTable = false;
+      for (var h = 0; h < headerCells.length; h++) {
+        if (TABLE_STAT_HEADER_RE.test(cellText(headerCells[h]))) { isStatTable = true; break; }
+      }
+      if (!isStatTable) continue;
+      for (var r = 1; r < rows.length; r++) {
+        var cells = rows[r].getElementsByTagName('w:tc');
+        if (!cells.length) continue;
+        var rowLabel = cellText(cells[0]);
+        if (!rowLabel) continue;
+        var hasNumeric = false;
+        for (var c = 1; c < cells.length; c++) {
+          if (/\d/.test(cellText(cells[c]))) { hasNumeric = true; break; }
+        }
+        if (hasNumeric) results.push({ rowLabel: rowLabel });
+      }
+    }
+    return results;
+  }
+
+  // Does this concept correspond to a given table row label? Matches on canonical/normalized
+  // form or any acronym alias — a loadings table typically labels rows by whichever short form
+  // (often the acronym) the author found convenient in that table.
+  function conceptMatchesRowLabel(concept, norm, rowLabel) {
+    var labelNorm = normalizeTermSurface(rowLabel);
+    if (!labelNorm) return false;
+    if (labelNorm === norm || labelNorm.indexOf(norm) !== -1 || norm.indexOf(labelNorm) !== -1) return true;
+    return concept.aliasAcronyms.some(function (acr) { return acr.toLowerCase() === rowLabel.trim().toLowerCase(); });
+  }
+
   // relation_neighborhood_similarity: do A and B connect to the SAME third concepts in the
   // relation graph (excluding edges between A and B themselves, which is what hasCausalEdge
   // already covers as a hard veto)? Two labels for one real construct tend to show up with
@@ -609,7 +747,8 @@
         var wsA = wordSet(normA), wsB = wordSet(normB);
         var lexSim = jaccard(wsA, wsB);
         var editSim = levenshteinRatio(normA, normB);
-        if (lexSim < 0.15 && editSim < 0.5) continue; // clearly unrelated, skip the pair entirely
+        var semanticSim = synonymAwareSimilarity(wsA, wsB);
+        if (lexSim < 0.15 && editSim < 0.5 && semanticSim < 0.4) continue; // clearly unrelated, skip the pair entirely
         var measurementSim = (a.measuredBy && b.measuredBy && a.measuredBy === b.measuredBy) ? 1 : 0;
         var defSim = definitionSimilarity(a, b);
         var relSim = relationNeighborhoodSimilarity(relations, normA, normB);
@@ -617,10 +756,11 @@
         var discriminant = hasDiscriminantValidityMention(text, a.canonicalSurface, b.canonicalSurface);
         var diffIndicators = hasDifferentIndicatorSets(a, b);
 
-        // Spec's 5-component formula, 0.20 each: lexical, semantic (approximated here by edit
-        // distance — no real embedding model is available client-side, see file header), same
-        // definition, same measurement, same relation-graph neighborhood.
-        var score = 0.20 * lexSim + 0.20 * editSim + 0.20 * defSim + 0.20 * measurementSim + 0.20 * relSim;
+        // Spec's 5-component formula, 0.20 each: lexical (exact word overlap), semantic (curated
+        // academic synonym clusters — see synonymAwareSimilarity's header comment for the honest
+        // limitation this carries vs a real embedding model), same definition, same measurement,
+        // same relation-graph neighborhood.
+        var score = 0.20 * lexSim + 0.20 * semanticSim + 0.20 * defSim + 0.20 * measurementSim + 0.20 * relSim;
         var contradictionPenalty = 0;
         if (contrast) contradictionPenalty += 0.5;
         if (discriminant) contradictionPenalty += 0.5;
@@ -661,7 +801,9 @@
   // ---------- orchestration ----------
   var PARA_BOUNDARY = '\u0001';
 
-  function buildConceptDictionary(text) {
+  function buildConceptDictionary(text, options) {
+    options = options || {};
+    var tableRows = options.tableRows || [];
     // Mark paragraph/table-cell boundaries BEFORE normalizeWhitespace flattens all newlines to
     // plain spaces — otherwise adjacent table cells (e.g. a "CR" / "AVE" / "Short Video
     // Addiction (SVA)" row in a loadings table, which mammoth renders as separate blank-line-
@@ -738,10 +880,14 @@
     // ("The TPB proposes that...") AND for most of its measurement/hypothesis/statistical
     // evidence. Without folding acronym-only occurrences back in here, both the definition
     // search and the variable-evidence scoring would only ever see the ONE full-phrase mention,
-    // missing everything that follows.
+    // missing everything that follows. Table-derived statistical evidence (see
+    // extractDocxTableRows) is folded into this SAME final scoreVariableEvidence call, not a
+    // separate one — computing it separately and taking Math.max() across the two would silently
+    // drop any case where the acronym occurrences supply one kind of evidence (say, hypothesis
+    // language) and the table supplies another (statistical), since neither call alone would see
+    // both and the higher-scoring one would just mask the other's contribution.
     Object.keys(concepts).forEach(function (norm) {
       var c = concepts[norm];
-      if (!c.aliasAcronyms.length) return;
       var allOccs = findAllSurfaceOccurrences(text, norm);
       c.aliasAcronyms.forEach(function (acr) {
         var acrRe = new RegExp('\\b' + escapeRegex(acr) + '\\b', 'g');
@@ -756,15 +902,25 @@
         });
         allOccs = allOccs.concat(acrOccs);
       });
-      var recomputed = scoreVariableEvidence(text, allOccs, sentenceList);
-      c.variableScore = Math.max(c.variableScore, recomputed);
+      var hasTableEvidence = tableRows.length > 0 && tableRows.some(function (row) { return conceptMatchesRowLabel(c, norm, row.rowLabel); });
+      if (hasTableEvidence) c.hasTableStatEvidence = true;
+      if (allOccs.length || hasTableEvidence) {
+        var recomputed = scoreVariableEvidence(text, allOccs.length ? allOccs : [{ start: -1, end: -1 }], sentenceList, hasTableEvidence);
+        c.variableScore = Math.max(c.variableScore, recomputed);
+      }
     });
 
     // record which instrument measures which concept, from operational definitions
     Object.keys(concepts).forEach(function (norm) {
       var opDef = concepts[norm].definitions.find(function (d) { return d.type === 'operational'; });
       if (opDef) {
-        var instrumentPhrase = opDef.text.slice(0, 80).replace(/^(?:an?|the)\s+/i, '').replace(/^(?:adapted|modified|validated|revised|original|standard|adopted)\s+/i, '');
+        var instrumentPhrase = opDef.text.slice(0, 80)
+          .replace(/^(?:an?|the)\s+/i, '')
+          .replace(/^(?:adapted|modified|validated|revised|original|standard|adopted)\s+/i, '')
+          .replace(/[.,;]?\s*(?:as\s+well|too|also|likewise|similarly)\b.*$/i, '')
+          .replace(/[.,;]?\s*(?:following|consistent\s+with|in\s+line\s+with|based\s+on|per)\s+.*$/i, '')
+          .replace(/[.,;]?\s*(?:from|in|for)\s+(?:this|the\s+present)\s+study.*$/i, '');
+        instrumentPhrase = instrumentPhrase.replace(/[.,;]\s*$/, '');
         concepts[norm].measuredBy = normalizeTermSurface(instrumentPhrase.slice(0, 60));
       }
     });
@@ -940,6 +1096,8 @@
     detectDefinitions: detectDefinitions,
     scoreVariableEvidence: scoreVariableEvidence,
     flagPossibleAliases: flagPossibleAliases,
+    synonymAwareSimilarity: synonymAwareSimilarity,
+    extractDocxTableRows: extractDocxTableRows,
     extractRelations: extractRelations,
     deriveRoles: deriveRoles,
     hasCausalEdge: hasCausalEdge,
