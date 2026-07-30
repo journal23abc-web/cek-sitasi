@@ -133,7 +133,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -1442,7 +1442,47 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
 };
 
 // ---------- DOCUMENT AUTO-SPLIT (find References/Daftar Pustaka heading) ----------
-var REFERENCES_HEADING_RE = /(references|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
+var REFERENCES_HEADING_RE = /(\breferences?\b|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
+
+// Small, dependency-free Levenshtein distance — used only for typo-tolerant heading matching
+// below, on short strings (a single word), so no need for anything fancier/faster.
+function levenshteinDistance(a, b) {
+  var m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  var prev = [];
+  for (var j = 0; j <= n; j++) prev[j] = j;
+  for (var i = 1; i <= m; i++) {
+    var cur = [i];
+    for (var j2 = 1; j2 <= n; j2++) {
+      cur[j2] = a[i - 1] === b[j2 - 1]
+        ? prev[j2 - 1]
+        : 1 + Math.min(prev[j2 - 1], prev[j2], cur[j2 - 1]);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+// Candidate words a typo'd heading might be aiming for. Deliberately excludes multi-word phrases
+// ("daftar pustaka", "works cited", ...) — fuzzy-matching those word-by-word risks too many false
+// positives; typos are handled here only for the single-word English/Indonesian heading forms.
+var HEADING_TYPO_CANDIDATES = ['references', 'reference', 'bibliography', 'referensi'];
+// Real, unrelated words that happen to sit within edit-distance of a candidate above — must
+// never be treated as a typo'd heading no matter how close the distance is.
+var HEADING_TYPO_BLOCKLIST = { preference: true, conference: true, difference: true, deference: true, inference: true, interference: true, reverence: true, reference: false };
+delete HEADING_TYPO_BLOCKLIST.reference; // "reference" itself is a valid (singular) candidate, not a false-positive
+
+function isFuzzyHeadingWord(word) {
+  var w = word.toLowerCase().replace(/[^a-z]/g, '');
+  if (!w || HEADING_TYPO_BLOCKLIST[w]) return false;
+  for (var i = 0; i < HEADING_TYPO_CANDIDATES.length; i++) {
+    var cand = HEADING_TYPO_CANDIDATES[i];
+    var maxDist = cand.length >= 8 ? 2 : 1;
+    if (Math.abs(w.length - cand.length) <= maxDist && levenshteinDistance(w, cand) <= maxDist) return true;
+  }
+  return false;
+}
 
 function findReferencesHeading(fullText) {
   var lines = fullText.split('\n');
@@ -1451,11 +1491,16 @@ function findReferencesHeading(fullText) {
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
     var trimmed = line.trim();
-    if (trimmed.length > 0 && trimmed.length <= 60 && REFERENCES_HEADING_RE.test(trimmed)) {
+    if (trimmed.length > 0 && trimmed.length <= 60) {
       var stripped = trimmed.replace(/^[\dIVXLC]+[.\)]\s*/i, '').replace(/[:.\s]+$/, '');
-      var wordCount = stripped.split(/\s+/).length;
-      if (REFERENCES_HEADING_RE.test(stripped) && wordCount <= 4) {
-        candidates.push({ lineIndex: i, offset: offset, lineLength: line.length, text: trimmed });
+      var wordCount = stripped.split(/\s+/).filter(Boolean).length;
+      var isExactMatch = REFERENCES_HEADING_RE.test(stripped) && wordCount <= 4;
+      // Typo tolerance only applies to a heading that's exactly ONE word once numbering/
+      // punctuation is stripped (e.g. "Refernces", "Bibliograpy") — a whole short line, not
+      // just any word inside a longer line, to keep the false-positive risk low.
+      var isTypoMatch = !isExactMatch && wordCount === 1 && isFuzzyHeadingWord(stripped);
+      if (isExactMatch || isTypoMatch) {
+        candidates.push({ lineIndex: i, offset: offset, lineLength: line.length, text: trimmed, isTypo: isTypoMatch });
       }
     }
     offset += line.length + 1;
@@ -1474,12 +1519,173 @@ function findReferencesHeading(fullText) {
   return candidates[candidates.length - 1];
 }
 
+// A reference-list "chunk" is considered structurally complete once it has a year and ends in
+// a way real references normally end (sentence-final punctuation, or a trailing DOI/URL) — used
+// to stop merging further lines onto it, so unrelated content starting right after (see below)
+// can't get glued on just because it doesn't itself look like a new reference's opening line.
+function chunkLooksStructurallyComplete(t) {
+  if (!/\(\d{4}[a-z]?\)|(?:^|\s)(19|20)\d{2}[a-z]?[.,)]/.test(t) && !/\bn\.d\./i.test(t)) return false;
+  var end = t.replace(/\s+$/, '');
+  return /[.)]$/.test(end) || /https?:\/\/\S+$/.test(end) || /\d{4,9}\/[^\s]*$/.test(end);
+}
+
+// The real test of whether a merged chunk is an actual reference entry at all — deliberately
+// content-based (year / DOI / URL / "n.d.") rather than keyword-based ("Corresponding Author",
+// "Email:", ...), so it isn't tied to any particular journal template and doesn't need updating
+// every time a new kind of trailing content shows up (author bios, acknowledgments, funding
+// statements, conflict-of-interest notes, ORCID blocks, "how to cite" boxes, copyright notices,
+// etc. — all of it fails this check the same way, wherever it appears and however many separate
+// blocks of it there are).
+function looksLikeGenuineReference(t) {
+  if (/\b(19|20)\d{2}[a-z]?\b/.test(t)) return true;
+  if (/\bn\.d\./i.test(t)) return true;
+  if (/\bdoi\.org\/|(?:^|\s)10\.\d{4,9}\//.test(t)) return true;
+  if (/https?:\/\//.test(t)) return true;
+  return false;
+}
+
+// Copy-pasting from a PDF commonly re-inserts each page's running header/footer INLINE with the
+// body text at every page boundary (e.g. journal name, author list, "Vol X, No Y", "JOURNAL |
+// 123") — invisible in the PDF viewer but very much present once pasted as plain text. Left in
+// place, this can literally split a single reference-list entry into two (the header lands mid-
+// sentence), causing "reference line unreadable" failures for otherwise well-formed entries.
+// Detected generically (not hard-coded to any one journal's template): a running header is a
+// short line that repeats verbatim 3+ times, usually as part of a small block of consecutive
+// repeating lines, with a varying page-number line tacked on the end of each occurrence.
+function stripRepeatingPageArtifacts(text) {
+  if (!text) return text;
+  text = text.replace(/\r\n?/g, '\n');
+  var lines = text.split('\n');
+  var n = lines.length;
+  if (n < 10) return text; // too short for a multi-page "repeats every page" pattern to be real
+
+  var freq = {};
+  for (var i = 0; i < n; i++) {
+    var t = lines[i].trim();
+    if (!t || t.length > 200) continue;
+    freq[t] = (freq[t] || 0) + 1;
+  }
+  var minRepeats = 3;
+  var candidateLines = {};
+  var anyCandidate = false;
+  Object.keys(freq).forEach(function (t) {
+    if (freq[t] >= minRepeats) { candidateLines[t] = true; anyCandidate = true; }
+  });
+  if (!anyCandidate) return text;
+
+  var isCandidate = lines.map(function (l) {
+    var t = l.trim();
+    return !!(t && candidateLines[t]);
+  });
+
+  var toRemove = new Array(n).fill(false);
+  for (var i2 = 0; i2 < n; i2++) {
+    if (!isCandidate[i2]) continue;
+    toRemove[i2] = true;
+    var j = i2 + 1;
+    while (j < n && isCandidate[j]) { toRemove[j] = true; j++; }
+    // The line right after a run of 2+ repeating lines is very often the page-number footer
+    // (varies per page, so it never repeats verbatim itself) — fold it in too when it's short
+    // and numeric-ish, e.g. "JUPITER | 364" or "Page 12".
+    if (j < n && (j - i2) >= 2) {
+      var t2 = lines[j].trim();
+      if (t2 && t2.length < 40 && /\d/.test(t2) && !candidateLines[t2]) { toRemove[j] = true; j++; }
+    }
+    i2 = j - 1;
+  }
+
+  var kept = [];
+  for (var i3 = 0; i3 < n; i3++) if (!toRemove[i3]) kept.push(lines[i3]);
+  return kept.join('\n');
+}
+
+// PDF text extraction (and naive copy-paste) hard-wraps every visual line, so a single reference
+// entry that displays across 2-3 lines in the PDF becomes 2-3 separate lines of pasted text —
+// but every downstream reference-list parser assumes one entry per line. This rejoins wrapped
+// continuation lines back onto the entry they belong to. A DOCX-sourced reference list (already
+// one paragraph per entry) passes through unchanged, since every one of its lines already
+// independently looks like a valid entry start.
+//
+// It also generally handles non-reference content sitting anywhere in the list — not just a
+// single trailing block, but any number of separate blocks scattered through it (author bios,
+// acknowledgments, funding/conflict-of-interest statements, ORCID blocks, "how to cite" boxes,
+// copyright notices, ...): once an accumulating chunk already looks like a complete reference
+// (chunkLooksStructurallyComplete), further lines start a NEW chunk instead of being merged on,
+// so junk right after a real reference can't corrupt it — and every resulting chunk is then
+// independently required to actually look like a reference (looksLikeGenuineReference) or it's
+// dropped, wherever in the list it happens to sit.
+function rejoinWrappedReferenceLines(text) {
+  if (!text) return text;
+  var lines = text.split('\n').map(function (l) { return l.replace(/\r$/, ''); });
+  var numberedStart = /^\s*(?:\[\d+\]|\(\d+\)|\d+[.)])\s*[\p{Lu}]/u;
+  function looksLikeAuthorDateStart(t) {
+    if (!/^[\p{Lu}\p{Lo}]/u.test(t)) return false;
+    var head100 = t.slice(0, 100);
+    var head220 = t.slice(0, 220);
+    return /,/.test(head100) && /\(\d{4}[a-z]?\)/.test(head220);
+  }
+  var merged = [];
+  var current = null;
+  for (var i = 0; i < lines.length; i++) {
+    var trimmed = lines[i].trim();
+    if (!trimmed) { if (current !== null) { merged.push(current); current = null; } continue; }
+    var looksLikeStart = numberedStart.test(trimmed) || looksLikeAuthorDateStart(trimmed);
+    var currentIsDone = current !== null && chunkLooksStructurallyComplete(current);
+    if (looksLikeStart || current === null || currentIsDone) {
+      if (current !== null) merged.push(current);
+      current = trimmed;
+    } else {
+      current += ' ' + trimmed;
+    }
+  }
+  if (current !== null) merged.push(current);
+  return merged.filter(looksLikeGenuineReference).join('\n');
+}
+
+function isAllCapsHeadingLike(t) {
+  return t.length > 0 && t.length <= 60 && t === t.toUpperCase() && /[A-Z]/.test(t) && !/[a-z]/.test(t);
+}
+
+// Companion to rejoinWrappedReferenceLines, for the ARTICLE body instead of the reference list:
+// a hard-wrapped PDF line that doesn't end with sentence-ending punctuation is almost certainly
+// a continuation of the same sentence, not a real line break — left unjoined, this can literally
+// split a single in-text citation like "(Smith, 2020)" into "(Smith," + "2020)" across two lines,
+// which breaks citation detection. Never merges an ALL-CAPS heading-like line with its neighbor
+// in either direction, so section headings ("INTRODUCTION", "METHOD", ...) are left untouched.
+function unwrapHardWrappedLines(text) {
+  if (!text) return text;
+  var lines = text.split('\n');
+  var out = [];
+  for (var i = 0; i < lines.length; i++) {
+    var raw = lines[i];
+    var trimmed = raw.trim();
+    if (out.length === 0 || trimmed === '') { out.push(raw); continue; }
+    var prevTrim = out[out.length - 1].trim();
+    if (prevTrim === '') { out.push(raw); continue; }
+    var prevEndsSentence = /[.!?:;][")'\]]?$/.test(prevTrim);
+    var prevIsHeading = isAllCapsHeadingLike(prevTrim);
+    var curIsHeading = isAllCapsHeadingLike(trimmed);
+    if (!prevEndsSentence && !prevIsHeading && !curIsHeading) {
+      out[out.length - 1] = out[out.length - 1].replace(/\s+$/, '') + ' ' + trimmed;
+    } else {
+      out.push(raw);
+    }
+  }
+  return out.join('\n');
+}
+
 function splitDocumentByReferences(fullText) {
+  fullText = stripRepeatingPageArtifacts(fullText);
   var heading = findReferencesHeading(fullText);
   if (!heading) return null;
   var article = fullText.substring(0, heading.offset).trim();
   var afterHeading = fullText.substring(heading.offset + heading.lineLength).trim();
-  return { article: article, references: afterHeading, headingText: heading.text };
+  return {
+    article: unwrapHardWrappedLines(article),
+    references: rejoinWrappedReferenceLines(afterHeading),
+    headingText: heading.text,
+    headingIsTypo: !!heading.isTypo,
+  };
 }
 
 
@@ -1836,6 +2042,12 @@ var CitationEngine = {
   looksLikePersonalName: looksLikePersonalName,
   DOIChecker: DOIChecker,
   splitDocumentByReferences: splitDocumentByReferences,
+  stripRepeatingPageArtifacts: stripRepeatingPageArtifacts,
+  rejoinWrappedReferenceLines: rejoinWrappedReferenceLines,
+  unwrapHardWrappedLines: unwrapHardWrappedLines,
+  looksLikeGenuineReference: looksLikeGenuineReference,
+  chunkLooksStructurallyComplete: chunkLooksStructurallyComplete,
+  isFuzzyHeadingWord: isFuzzyHeadingWord,
   findReferencesHeading: findReferencesHeading,
   YearRange: YearRange,
   detectSourceType: detectSourceType,

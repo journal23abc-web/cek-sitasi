@@ -83,6 +83,91 @@ test('narrative citation keeps "of/for/the" inside an institutional author name 
   assert.strictEqual(r[0].authors, 'Institute of International Finance and Deloitte');
 });
 
+test('narrative citation supports "&" as an author-chain connector, not just "and"/"dan" (regression)', () => {
+  assert.strictEqual(CE.extractAuthorDateCitations('Smith & Jones (2020) argued...')[0].authors, 'Smith & Jones');
+  assert.strictEqual(CE.extractAuthorDateCitations('Juar-Hah & Jsaj-Mau (2019) found that...')[0].authors, 'Juar-Hah & Jsaj-Mau');
+});
+
+test('narrative citation supports "Author, (Year)" (comma before the parenthesis) as well as "Author (Year)" (regression)', () => {
+  const r = CE.extractAuthorDateCitations('According to Kristiani & Pradnyadewi, (2021) the obstacles are common.');
+  assert.strictEqual(r.length, 1);
+  assert.strictEqual(r[0].authors, 'Kristiani & Pradnyadewi');
+  assert.strictEqual(r[0].year, '2021');
+});
+
+test('two-author "&" citation with hyphenated surnames matches its reference end to end (regression)', () => {
+  const r = validate(
+    'Studi oleh Juar-Hah & Jsaj-Mau (2019) menunjukkan hal ini.',
+    'Juar-Hah, A., & Jsaj-Mau, B. (2019). Judul artikel. Jurnal, 1(1), 1-10.');
+  assert.strictEqual(r.errors.some(e => /tidak ada di daftar referensi|tidak disitasi/.test(e.title)), false);
+});
+
+console.log('\n=== Reference-heading detection (typo tolerance, singular form, trailing identity block) ===');
+
+test('a "References" heading with common typos is still detected', () => {
+  ['Refernces', 'REFRENCES', 'Bibliograpy', 'Refrensi'].forEach((h) => {
+    const text = 'Judul\n\nIsi artikel yang cukup panjang untuk lolos validasi minimal karakter di sini.\n\n' + h + '\n\nSmith, J. (2020). Title. Journal, 1(1), 1-10.';
+    const split = CE.splitDocumentByReferences(text);
+    assert.ok(split, 'heading "' + h + '" should have been detected');
+    assert.strictEqual(split.headingIsTypo, true);
+  });
+});
+
+test('confusable words like "Preference"/"Conference" are never mistaken for a typo\'d heading', () => {
+  ['Preference', 'Conference'].forEach((h) => {
+    const text = 'Judul\n\nIsi artikel yang cukup panjang untuk lolos validasi minimal karakter di sini.\n\n' + h + '\n\nSmith, J. (2020). Title. Journal, 1(1), 1-10.';
+    const split = CE.splitDocumentByReferences(text);
+    assert.strictEqual(split, null, '"' + h + '" must not be detected as a references heading');
+  });
+});
+
+test('singular "Reference" (no trailing s) is detected as the heading', () => {
+  const text = 'Judul\n\nIsi artikel yang cukup panjang untuk lolos validasi minimal karakter di sini.\n\nREFERENCE\n\nSmith, J. (2020). Title. Journal, 1(1), 1-10.';
+  const split = CE.splitDocumentByReferences(text);
+  assert.ok(split);
+  assert.strictEqual(split.headingIsTypo, false);
+});
+
+test('a trailing author-identity block (corresponding author note, address, email) is discarded, not merged into the last reference', () => {
+  const text = 'Judul\n\nIsi artikel.\n\nREFERENCES\n\n' +
+    'Smith, J. (2020). Title one. Journal, 1(1), 1-10.\n' +
+    'Jones, K. (2019). Title two. Journal, 2(1), 1-10.\n' +
+    '* Jane Doe (Corresponding Author)\n' +
+    'Some University, Some City\n' +
+    'Email: jane@example.com';
+  const split = CE.splitDocumentByReferences(text);
+  const parsed = CE.parseReferenceListDetailed(split.references, 'apa7');
+  assert.strictEqual(parsed.references.length, 2);
+  assert.strictEqual(parsed.failedLines.length, 0);
+  assert.ok(!parsed.references[1].raw.includes('Corresponding Author'));
+});
+
+test('multiple SEPARATE non-reference blocks of DIFFERENT kinds, scattered anywhere in the list, are all discarded (not just one trailing block)', () => {
+  const text = 'Judul\n\nIsi artikel.\n\nREFERENCES\n\n' +
+    'Smith, J. (2020). Title one. Journal, 1(1), 1-10.\n' +
+    '\nACKNOWLEDGMENTS\nWe thank the reviewers for their valuable feedback and support during this research.\n\n' +
+    'Jones, K. (2019). Title two. Journal, 2(1), 1-10.\n' +
+    'Conflict of Interest: The authors declare no conflict of interest in this study.\n' +
+    'Brown, A. (2021). Title three. Journal, 3(1), 1-10.\n' +
+    '* Widia Wati (Corresponding Author)\nUniversitas Bengkulu, Indonesia\nEmail: widia@example.com\n' +
+    '* Iis Sujarwati\nUniversitas Bengkulu, Indonesia\nEmail: iis@example.com\n' +
+    'FUNDING STATEMENT\nThis research received no external funding from any organization whatsoever this year.\n' +
+    'Data Availability: Data supporting this study are available upon reasonable request.';
+  const split = CE.splitDocumentByReferences(text);
+  const parsed = CE.parseReferenceListDetailed(split.references, 'apa7');
+  assert.strictEqual(parsed.references.length, 3);
+  assert.deepStrictEqual(parsed.references.map(r => r.firstAuthor), ['Smith, J', 'Jones, K', 'Brown, A']);
+  assert.strictEqual(parsed.failedLines.length, 0);
+});
+
+test('looksLikeGenuineReference recognizes year/DOI/URL/n.d. as reference-like, rejects plain junk text', () => {
+  assert.strictEqual(CE.looksLikeGenuineReference('Smith, J. (2020). Title. Journal, 1(1), 1-10.'), true);
+  assert.strictEqual(CE.looksLikeGenuineReference('Author, A. (n.d.). Title. Website.'), true);
+  assert.strictEqual(CE.looksLikeGenuineReference('Author, A. Title. https://example.com/x'), true);
+  assert.strictEqual(CE.looksLikeGenuineReference('We thank the reviewers for their support.'), false);
+  assert.strictEqual(CE.looksLikeGenuineReference('Email: someone@example.com'), false);
+});
+
 test('narrative citation position points at the actual author text, not a stripped-away prefix (regression)', () => {
   const text = 'may be insufficient in certain contexts. Conversely, Mwangi (2024) document a negative relationship.';
   const r = CE.extractAuthorDateCitations(text);
