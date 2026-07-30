@@ -566,6 +566,23 @@ test('malformed-citation format issues surface as validator errors with clear pe
   assert.ok(r.errors.some(e => e.title === '"et al." mengikuti lebih dari satu nama penulis'));
 });
 
+test('malformed-citation suggestions use the dedicated "correction" field (rendered as a copyable box by the UI), not buried inside the description text', () => {
+  const r = validate(
+    'The reported measures of firm performance include financial and non-financial performance adopted from(Delaney & Huselid, 1996; Fu et al., 2016; Ho et al., 2024); Kim et al., 2024).',
+    'Delaney, J. T., & Huselid, M. A. (1996). Title. Journal, 1(1), 1-10.\n' +
+    'Fu, N. (2016). Title. Journal, 2(1), 1-10.\n' +
+    'Ho, M. (2024). Title. Journal, 3(1), 1-10.\n' +
+    'Kim, M. (2024). Title. Journal, 4(1), 1-10.');
+  const openParenErr = r.errors.find(e => e.title === 'Tanda kurung sitasi tidak lengkap');
+  assert.ok(openParenErr);
+  assert.strictEqual(openParenErr.correction, '(Delaney & Huselid, 1996; Fu et al., 2016; Ho et al., 2024; Kim et al., 2024)');
+  assert.ok(!openParenErr.description.includes('Saran:'), 'suggestion should live in the correction field, not be appended to the description text');
+
+  const noSpaceErr = r.errors.find(e => e.title === 'Sitasi tanpa spasi sebelum tanda kurung');
+  assert.ok(noSpaceErr);
+  assert.ok(noSpaceErr.correction, 'expected a correction field for the no-space-before-paren issue too');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

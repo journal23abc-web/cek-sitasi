@@ -1601,8 +1601,9 @@ MultiFormatValidator.prototype.validateCitationFormat = function() {
   issues.forEach(function(issue) {
     self.errors.push({
       title: TITLES[issue.type] || 'Format sitasi bermasalah',
-      description: issue.message + (issue.suggestion ? ' Saran: "' + issue.suggestion + '".' : ''),
+      description: issue.message,
       code: issue.raw,
+      correction: issue.suggestion || undefined,
       severity: 'error',
     });
   });
