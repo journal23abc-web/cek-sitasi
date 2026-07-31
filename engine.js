@@ -1369,10 +1369,14 @@ MultiFormatValidator.prototype.validateReferenceOrdering = function() {
   var sorted = withKeys.slice().sort(function(a,b) {
     var cmp = a.sortKey.localeCompare(b.sortKey, 'en', { sensitivity: 'base' });
     if (cmp !== 0) return cmp;
-    // APA: when the first-listed surname is the same, a solo-authored entry ("Teece, D.") is
-    // ordered before a co-authored one with the same first surname ("Teece, D. J., Pisano, G.,
-    // & Shuen, A."), regardless of publication year — fewer authors sorts first.
-    if (a.authorCount !== b.authorCount) return a.authorCount - b.authorCount;
+    // APA: when the first-listed surname is the same, a SOLO-authored entry ("Teece, D.") is
+    // ordered before ANY co-authored one with the same first surname ("Teece, D. J., Pisano, G.,
+    // & Shuen, A."), regardless of publication year. This is narrower than "fewer authors always
+    // wins" — two different MULTI-author entries by the same first author (e.g. "Sundari, A.,
+    // Armanu, ... (2025)" vs "Sundari, A., Indrasari, ... (2026)", 4 vs 3 authors) are NOT
+    // solo-vs-group, so they still sort by year like any other same-surname tie.
+    if (a.authorCount === 1 && b.authorCount !== 1) return -1;
+    if (b.authorCount === 1 && a.authorCount !== 1) return 1;
     return (a.year || '').localeCompare(b.year || '');
   });
   var isSorted = withKeys.every(function(w, i) { return w.idx === sorted[i].idx; });

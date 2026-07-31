@@ -425,6 +425,14 @@ test('a solo-authored entry is correctly ordered before a co-authored entry with
   assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), false);
 });
 
+test('two DIFFERENT multi-author entries by the same first author sort by year, not by however many co-authors each happens to have (regression: a 3-author 2026 paper was wrongly sorted before a 4-author 2025 paper by the same lead author)', () => {
+  const r = validate(
+    'Studi oleh Sundari et al. (2025) dan Sundari et al. (2026) menunjukkan hal ini.',
+    'Sundari, A., Armanu, Indrasari, M., & Hasbullah, M. A. (2025). Title one. Journal, 1(1), 1-10.\n' +
+    'Sundari, A., Indrasari, M., & Sukesi. (2026). Title two. Journal, 2(1), 1-10.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), false);
+});
+
 test('a genuinely out-of-order reference list is still correctly flagged (sanity check against over-correction)', () => {
   const r = validate(
     'Studi oleh Zebra (2020) dan Apple (2019) menunjukkan hal ini.',
