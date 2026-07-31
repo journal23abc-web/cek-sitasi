@@ -168,6 +168,115 @@ test('a citation with no matching reference is reported as unmatched, not crashe
   assert.strictEqual(result.unmatched.length, 1);
 });
 
+console.log('\n=== Readable bookmark names (Surname+Year, not opaque ref_5000) ===');
+
+function bookmarkNamesIn(xmlDoc) {
+  var bms = xmlDoc.getElementsByTagName('w:bookmarkStart');
+  var names = [];
+  for (var i = 0; i < bms.length; i++) {
+    var n = bms[i].getAttribute('w:name');
+    if (n && n.charAt(0) !== '_') names.push(n);
+  }
+  return names;
+}
+
+test('a new bookmark is named after the reference\'s first author surname + year, not an opaque "ref_5000" id', () => {
+  var paras = [
+    para(run('Studi oleh ') + run('(Smith, 2020)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var names = bookmarkNamesIn(xmlDoc);
+  assert.strictEqual(names.length, 1);
+  assert.strictEqual(names[0], 'Smith2020');
+});
+
+test('accented/special characters in the surname are normalized to their base letter, not just deleted (Müller -> Muller, not Mller)', () => {
+  var paras = [
+    para(run('Studi oleh ') + run('(Müller, 2019)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run('Müller, A. (2019). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var names = bookmarkNamesIn(xmlDoc);
+  assert.strictEqual(names[0], 'Muller2019');
+});
+
+test('an apostrophe/hyphen in the surname is stripped cleanly (O\'Brien, Garcia-Lopez)', () => {
+  var paras = [
+    para(run('Studi oleh ') + run("(O'Brien, 2021)") + run(' dan ') + run('(Garcia-Lopez, 2022)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run("O'Brien, K. (2021). Title. Journal, 1(1), 1-10.")),
+    para(run('Garcia-Lopez, M. (2022). Title. Journal, 2(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var names = bookmarkNamesIn(xmlDoc).sort();
+  assert.deepStrictEqual(names, ['GarciaLopez2022', 'OBrien2021']);
+});
+
+test('two different references that would normalize to the same bookmark name get disambiguated', () => {
+  var paras = [
+    para(run('Studi oleh ') + run('(Smith, 2020a)') + run(' dan ') + run('(Smith, 2020b)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020a). First title. Journal, 1(1), 1-10.')),
+    para(run('Smith, K. (2020b). Second title. Journal, 2(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var names = bookmarkNamesIn(xmlDoc);
+  assert.strictEqual(names.length, 2);
+  assert.strictEqual(new Set(names).size, 2, 'the two bookmark names must be distinct, got: ' + JSON.stringify(names));
+});
+
+console.log('\n=== Citation\'s own "(" and ")" are included in the linked span ===');
+
+function hyperlinkTexts(xmlDoc) {
+  var hls = xmlDoc.getElementsByTagName('w:hyperlink');
+  var texts = [];
+  for (var i = 0; i < hls.length; i++) {
+    var wts = hls[i].getElementsByTagName('w:t');
+    var t = '';
+    for (var j = 0; j < wts.length; j++) t += wts[j].textContent;
+    texts.push(t);
+  }
+  return texts;
+}
+
+test('a single parenthetical citation "(Smith, 2020)" is linked INCLUDING both parentheses', () => {
+  var paras = [
+    para(run('Studi oleh ') + run('(Smith, 2020)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var texts = hyperlinkTexts(xmlDoc);
+  assert.strictEqual(texts.length, 1);
+  assert.strictEqual(texts[0], '(Smith, 2020)', 'expected the parentheses themselves to be part of the hyperlink, got: ' + JSON.stringify(texts[0]));
+});
+
+test('in a multi-citation group "(Smith, 2020; Jones, 2019)", the opening "(" attaches to the first link and the closing ")" to the last', () => {
+  var paras = [
+    para(run('Studi oleh ') + run('(Smith, 2020; Jones, 2019)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run('Jones, K. (2019). Title. Journal, 2(1), 1-10.')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 2);
+  var texts = hyperlinkTexts(xmlDoc);
+  assert.strictEqual(texts.length, 2);
+  assert.ok(texts[0].startsWith('('), 'first segment should include the opening "(": ' + JSON.stringify(texts[0]));
+  assert.ok(texts[1].endsWith(')'), 'last segment should include the closing ")": ' + JSON.stringify(texts[1]));
+  // the whole visible text must still be completely unchanged
+  assert.strictEqual(texts[0] + '; ' + texts[1], '(Smith, 2020; Jones, 2019)');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

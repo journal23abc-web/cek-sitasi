@@ -38,6 +38,20 @@
     return CE.normalizeKeyName(name, !!isInstitutional) + '_' + String(year || '').replace(/[a-z]$/, '');
   }
 
+  // Word bookmark names: must start with a letter, contain only letters/digits/underscores (no
+  // spaces, no symbols, no accented characters), max 40 chars. A raw surname like "Müller",
+  // "O'Brien", or "van der Berg" would produce an INVALID bookmark if used as-is — Word either
+  // silently mangles it or rejects the whole bookmark. Normalize accents to their base letter
+  // first (so "Müller" -> "Muller", not just "mller") so the result stays a recognizable single
+  // word, matching what the user sees when they open the hyperlink/bookmark dialog (Ctrl+K).
+  function sanitizeBookmarkWord(raw) {
+    var s = (raw || '').normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // strip diacritic marks, keep base letter
+    s = s.replace(/[^a-zA-Z0-9]/g, ''); // drop everything else (apostrophes, hyphens, spaces, ...)
+    if (!s) s = 'Ref';
+    if (!/^[a-zA-Z]/.test(s)) s = 'B' + s; // bookmark names must start with a letter
+    return s.slice(0, 30); // leave room for a year + disambiguation suffix within the 40-char limit
+  }
+
   // ---------- baca semua paragraf top-level dari document.xml ----------
   function buildParagraphList(xmlDoc) {
     var pNodes = xmlDoc.getElementsByTagName('w:p');
@@ -367,6 +381,7 @@
     var refIndex = {};   // key(surname/acronym + tahun) -> bookmarkName  (gaya penulis-tahun)
     var numIndex = {};   // nomor -> bookmarkName                         (gaya numerik)
     var bookmarkSeq = 5000;
+    var usedBookmarkNames = {};
     var refCount = 0;
     var ordinal = 0;
 
@@ -378,8 +393,22 @@
       var bookmarkName = findExistingBookmarkName(paraObj.el);
       if (!bookmarkName) {
         var id = bookmarkSeq++;
-        bookmarkName = 'ref_' + id;
+        // Prefer a readable "Surname2020"-style name (what shows up in Word's Ctrl+K bookmark
+        // list) over an opaque "ref_5000"; fall back to that opaque form only when there's no
+        // usable author name to build one from (e.g. some numeric-style or malformed entries).
+        var baseWord = null;
+        if (ref.firstAuthor) {
+          var surnameForName = ref.isInstitutional ? ref.firstAuthor : CE.surnameOf(ref.firstAuthor, styleId);
+          baseWord = sanitizeBookmarkWord(surnameForName) + String(ref.year || '').replace(/[^0-9a-zA-Z]/g, '');
+        }
+        if (!baseWord) baseWord = 'ref' + id;
+        bookmarkName = baseWord;
+        var suffix = 2;
+        while (usedBookmarkNames[bookmarkName]) { bookmarkName = baseWord + '_' + suffix; suffix++; } // e.g. two different papers that both normalize to "Smith2020"
+        usedBookmarkNames[bookmarkName] = true;
         insertBookmark(xmlDoc, paraObj.el, bookmarkName, id);
+      } else {
+        usedBookmarkNames[bookmarkName] = true;
       }
 
       if (style.family === 'numeric') {
@@ -452,7 +481,14 @@
               // trim spasi di tepi segmen supaya link tidak "makan" spasi pemisah
               var leadWs = segText.match(/^\s*/)[0].length;
               var trailWs = segText.match(/\s*$/)[0].length;
-              addMatch(segStartAbs + leadWs, segEndAbs - trailWs, bmSeg, segText.trim(), part ? part.year : null);
+              var linkStart = segStartAbs + leadWs;
+              var linkEnd = segEndAbs - trailWs;
+              // Sertakan '(' pembuka pada segmen PERTAMA dan ')' penutup pada segmen TERAKHIR,
+              // supaya seluruh "(...)" ikut terbookmark/ter-hyperlink, bukan cuma teks penulis+
+              // tahun di dalamnya. Segmen tengah (dipisah ';') tidak dapat kurungnya sendiri.
+              if (idx === 0) linkStart = c.position;
+              if (idx === segments.length - 1) linkEnd = c.position + c.raw.length;
+              addMatch(linkStart, linkEnd, bmSeg, segText.trim(), part ? part.year : null);
             });
           } else {
             // Bentuk tak umum (mis. sitasi tahun-ganda "Smith, 2019, 2021" dalam satu kurung)
