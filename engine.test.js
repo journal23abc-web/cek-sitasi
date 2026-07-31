@@ -446,8 +446,8 @@ test('wrong capitalization of "et al." is detected and normalized in the suggest
   const issues = CE.detectMalformedCitations('(Agus, Et Al., 2023)');
   const found = issues.find(i => i.type === 'et_al_case');
   assert.ok(found);
-  assert.strictEqual(found.raw, 'Et Al.');
-  assert.strictEqual(found.suggestion, 'et al.');
+  assert.strictEqual(found.raw, '(Agus, Et Al., 2023)');
+  assert.ok(found.suggestion.includes('et al.') && found.suggestion.includes('Agus'), 'expected the suggestion to include author context too: ' + found.suggestion);
 });
 
 test('a missing opening parenthesis is detected, with a useful context snippet', () => {
@@ -471,7 +471,7 @@ test('"et al." following two listed author names (not just the first) is flagged
   const issues = CE.detectMalformedCitations('(Agus, Supardi, et al., 2023)');
   const found = issues.find(i => i.type === 'multiple_authors_before_et_al');
   assert.ok(found);
-  assert.strictEqual(found.suggestion, 'Agus et al.');
+  assert.strictEqual(found.suggestion, '(Agus et al., 2023)');
 });
 
 test('an initial before "et al." ("Smith, J. et al.") is NOT wrongly flagged as two authors', () => {
@@ -516,7 +516,7 @@ test('missing space around "&" in a citation context is detected', () => {
   const issues = CE.detectMalformedCitations('Pitelis &Wagner, (2019) demonstrated this.');
   const found = issues.find(i => i.type === 'no_space_around_ampersand');
   assert.ok(found);
-  assert.strictEqual(found.suggestion, 'Pitelis & Wagner');
+  assert.strictEqual(found.suggestion, 'Pitelis & Wagner, (2019)');
 });
 
 test('"&" without a nearby year (R&D, AT&T, Q&A) is NOT flagged', () => {
@@ -581,6 +581,39 @@ test('malformed-citation suggestions use the dedicated "correction" field (rende
   const noSpaceErr = r.errors.find(e => e.title === 'Sitasi tanpa spasi sebelum tanda kurung');
   assert.ok(noSpaceErr);
   assert.ok(noSpaceErr.correction, 'expected a correction field for the no-space-before-paren issue too');
+});
+
+console.log('\n=== Regression: real-world false positives/negatives found via user documents ===');
+
+test('name particles ("le", "de", "van", ...) only match as standalone words, never as a substring inside an unrelated word (regression: "while Wang" was wrongly extracted as "le Wang")', () => {
+  const text = 'target samples can improve performance, while Wang et al. (2021) demonstrated that entropy minimization reduces errors.';
+  const citations = CE.extractAuthorDateCitations(text);
+  assert.strictEqual(citations.length, 1);
+  assert.strictEqual(citations[0].authors, 'Wang et al.');
+});
+
+test('a valid name particle at an actual word boundary still works ("Van der Berg")', () => {
+  const text = 'This is confirmed by Van der Berg (2020) in a related study.';
+  const citations = CE.extractAuthorDateCitations(text);
+  assert.strictEqual(citations.length, 1);
+  assert.ok(citations[0].authors.includes('Van der Berg'));
+});
+
+test('a sentence-initial discourse word ("Moreover", "However", ...) followed by a correctly-formatted citation is NOT flagged as two authors before "et al." (regression)', () => {
+  const cases = [
+    'improve performance (Koh et al., 2021). Moreover, Taori et al. (2020) found that robustness transfers poorly.',
+    'this is well established. However, Smith et al. (2019) challenged this view in later work.',
+    'the model performs well. Furthermore, Lee et al. (2022) extended this to other domains.',
+  ];
+  cases.forEach((text) => {
+    const issues = CE.detectMalformedCitations(text);
+    assert.strictEqual(issues.some(i => i.type === 'multiple_authors_before_et_al'), false, 'false positive for: ' + text);
+  });
+});
+
+test('a genuine two-listed-authors-before-et-al issue is still caught even with the discourse-word exclusion in place', () => {
+  const issues = CE.detectMalformedCitations('(Agus, Supardi, et al., 2023)');
+  assert.ok(issues.some(i => i.type === 'multiple_authors_before_et_al'));
 });
 
 console.log('\n' + '='.repeat(50));

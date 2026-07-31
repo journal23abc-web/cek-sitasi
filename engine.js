@@ -120,6 +120,24 @@ function extractNumericCitations(text) {
 // extractAuthorDateCitations never sees it at all, which would otherwise silently show up as a
 // false "reference not cited in text" instead of the real, more specific problem) or just look
 // unprofessional even when the citation IS otherwise extractable and matchable.
+// Grabs enough surrounding text around a match (nearby author name(s), year, enclosing
+// parentheses) to make an issue actually locatable via Ctrl+F in the document — a bare "Et Al."
+// or "Pitelis &Wagner" fragment is useless to search for when the same malformed pattern shows
+// up more than once with different actual citations.
+function citationContext(text, start, end) {
+  var ctxStart = start;
+  var backLimit = Math.max(0, start - 60);
+  while (ctxStart > backLimit && text[ctxStart - 1] !== '(' && text[ctxStart - 1] !== '.') ctxStart--;
+  while (ctxStart > 0 && /\S/.test(text[ctxStart - 1]) && /\S/.test(text[ctxStart])) ctxStart--; // snap to word boundary
+
+  var ctxEnd = end;
+  var fwdLimit = Math.min(text.length, end + 40);
+  while (ctxEnd < fwdLimit && text[ctxEnd] !== ')' && text[ctxEnd] !== '.') ctxEnd++;
+  if (text[ctxEnd] === ')') ctxEnd++; // include the closing paren itself
+
+  return text.slice(ctxStart, ctxEnd).trim();
+}
+
 function detectMalformedCitations(text) {
   var issues = [];
 
@@ -154,12 +172,13 @@ function detectMalformedCitations(text) {
       var problems = [];
       if (caseWrong) problems.push('huruf besar/kecil salah');
       if (periodMissing) problems.push('tanpa titik di akhir');
+      var ctx = citationContext(text, m.index, m.index + matched.length);
       issues.push({
         type: 'et_al_case',
-        raw: matched,
+        raw: ctx,
         position: m.index,
         message: '"' + matched + '" ' + problems.join(' dan ') + ' — seharusnya "et al.".',
-        suggestion: 'et al.',
+        suggestion: ctx.replace(matched, 'et al.'),
       });
     }
   }
@@ -219,17 +238,31 @@ function detectMalformedCitations(text) {
   // 4. "et al." following TWO OR MORE explicitly listed author names instead of just the first —
   // APA/most styles cite a 3+-author work as "Firstauthor et al.", not "Firstauthor, Secondauthor,
   // et al." (that's mixing the "list everyone" and "abbreviate with et al." conventions).
+  var DISCOURSE_WORDS = new Set([
+    'moreover', 'however', 'furthermore', 'additionally', 'consequently', 'meanwhile',
+    'nevertheless', 'nonetheless', 'therefore', 'thus', 'hence', 'also', 'then', 'indeed',
+    'notably', 'specifically', 'overall', 'finally', 'first', 'second', 'third', 'similarly',
+    'conversely', 'accordingly', 'alternatively', 'importantly', 'interestingly', 'surprisingly',
+    'unfortunately', 'fortunately', 'generally', 'typically', 'essentially', 'basically',
+    'ultimately', 'subsequently', 'previously', 'recently', 'currently', 'lastly', 'next',
+    'again', 'still', 'yet', 'besides', 'likewise', 'regardless', 'nowadays', 'meanwhile',
+  ]);
   var twoThenEtAlRe = /\b([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,\s*([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,?\s*(et\s+al\.?)/giu;
   while ((m = twoThenEtAlRe.exec(text)) !== null) {
     // Skip if the second token is itself an initial (e.g. "Smith, J., et al." is fine — that's
     // just the first author's initial, not a second author being listed).
     if (/^[A-Z]\.?$/.test(m[2])) continue;
+    // Skip if the FIRST token is a common sentence-initial discourse word — "Moreover, Taori et
+    // al. (2020)" is "Moreover" starting the sentence + a correctly-formatted "Taori et al."
+    // citation, not two authors named "Moreover" and "Taori".
+    if (DISCOURSE_WORDS.has(m[1].toLowerCase())) continue;
+    var ctx4 = citationContext(text, m.index, m.index + m[0].length);
     issues.push({
       type: 'multiple_authors_before_et_al',
-      raw: m[0],
+      raw: ctx4,
       position: m.index,
       message: '"et al." semestinya langsung mengikuti penulis PERTAMA saja, bukan setelah ' + (m[2] ? 'dua nama (' + m[1] + ', ' + m[2] + ')' : 'beberapa nama') + ' disebutkan.',
-      suggestion: m[1] + ' et al.',
+      suggestion: ctx4.replace(m[0], m[1] + ' et al.'),
     });
   }
 
@@ -241,12 +274,13 @@ function detectMalformedCitations(text) {
     if (m[2] === ' ' && m[3] === ' ') continue; // already correctly spaced
     var afterAmp = text.slice(m.index, Math.min(text.length, m.index + 80));
     if (/\d{4}/.test(afterAmp)) {
+      var ctx5 = citationContext(text, m.index, m.index + m[0].length);
       issues.push({
         type: 'no_space_around_ampersand',
-        raw: m[0],
+        raw: ctx5,
         position: m.index,
         message: 'Tidak ada spasi di sekitar tanda "&" — seharusnya ada spasi sebelum dan sesudahnya.',
-        suggestion: m[1] + ' & ' + m[4],
+        suggestion: ctx5.replace(m[0], m[1] + ' & ' + m[4]),
       });
     }
   }
@@ -316,7 +350,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
