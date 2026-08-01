@@ -1165,7 +1165,18 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         if (p.firstAuthor) {
           var key = self.keyFromCitationToken(p.firstAuthor) + '_' + p.year;
           citedKeys.add(key);
-          citationDetails.push({ key: key, part: p, raw: c.raw, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
+          var altKey = null;
+          // A 2-"author" citation whose first part looks institutional might actually be ONE
+          // combined institutional name split by "&" (e.g. "Institute of International Finance
+          // & Deloitte" — a joint report by two organizations) rather than two separate personal
+          // co-authors, which citation-text extraction alone can't tell apart. Try the full
+          // joined form as a fallback key too, matching how the reference side keys this same
+          // entry (isInstitutional=true keeps the whole "&"-joined name as one unit).
+          if (p.authorCount === 2 && p.authors && p.authors.length === 2 && isInstitutionalAuthor(p.firstAuthor)) {
+            altKey = self.keyFromCitationToken(p.authors.join(' & ')) + '_' + p.year;
+            citedKeys.add(altKey);
+          }
+          citationDetails.push({ key: key, altKey: altKey, part: p, raw: c.raw, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
         }
       });
     } else {
@@ -1175,7 +1186,15 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       if (authors.length > 0) {
         var key2 = self.keyFromCitationToken(authors[0]) + '_' + c.year;
         citedKeys.add(key2);
-        citationDetails.push({ key: key2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, initial: initialFromCitationToken(authors[0]), position: c.position });
+        var altKey2 = null;
+        // Same institutional-combined fallback as the parenthetical branch above — a narrative
+        // "Institute of International Finance & Deloitte (2023) explains..." citation splits
+        // into two "authors" the same way.
+        if (authors.length === 2 && !hasEtAl && isInstitutionalAuthor(authors[0])) {
+          altKey2 = self.keyFromCitationToken(authors.join(' & ')) + '_' + c.year;
+          citedKeys.add(altKey2);
+        }
+        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, initial: initialFromCitationToken(authors[0]), position: c.position });
         if (authors.length >= style.etAlThreshold && !hasEtAl) {
           self.errors.push({ title: 'Sitasi naratif ' + style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi naratif "' + c.raw + '" menulis ' + authors.length + ' nama.', code: c.raw, correction: authors[0] + ' et al. (' + c.year + ')', severity: 'error' });
         }
@@ -1185,7 +1204,8 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
 
   // cross-reference
   citationDetails.forEach(function(d) {
-    if (!refMap.has(d.key)) {
+    var matchKey = refMap.has(d.key) ? d.key : (d.altKey && refMap.has(d.altKey) ? d.altKey : null);
+    if (!matchKey) {
       var fuzzy = self.fuzzyFind(d.key, refMap);
       if (!fuzzy) {
         self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '" tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error' });
@@ -1193,7 +1213,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '" mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'suggestion' });
       }
     } else {
-      var refs = refMap.get(d.key);
+      var refs = refMap.get(matchKey);
       if (refs.length > 1) {
         // Collision group: try to resolve to ONE specific reference via the citation's initial.
         var candidates = refs.filter(function(ref) {
@@ -1647,6 +1667,42 @@ MultiFormatValidator.prototype.validateCitationFormat = function() {
   });
 };
 
+// Well-known institutional acronyms, for auto-suggesting the full name when a reference's
+// author field is JUST the acronym (e.g. "OECD. (2023)."). Deliberately conservative: only
+// acronyms common enough to be unambiguous get a suggestion — an unlisted or genuinely
+// ambiguous acronym (could plausibly expand several different ways) gets flagged with no
+// suggestion rather than risk offering a wrong "correction".
+var KNOWN_INSTITUTIONAL_ACRONYMS = {
+  'OECD': 'Organisation for Economic Co-operation and Development',
+  'WHO': 'World Health Organization',
+  'UNESCO': 'United Nations Educational, Scientific and Cultural Organization',
+  'UNICEF': 'United Nations Children\u2019s Fund',
+  'IMF': 'International Monetary Fund',
+  'WTO': 'World Trade Organization',
+  'UNDP': 'United Nations Development Programme',
+  'WEF': 'World Economic Forum',
+  'ADB': 'Asian Development Bank',
+  'ILO': 'International Labour Organization',
+  'FAO': 'Food and Agriculture Organization',
+  'UNEP': 'United Nations Environment Programme',
+  'NASA': 'National Aeronautics and Space Administration',
+  'FDA': 'U.S. Food and Drug Administration',
+  'CDC': 'Centers for Disease Control and Prevention',
+  'IEEE': 'Institute of Electrical and Electronics Engineers',
+  'ISO': 'International Organization for Standardization',
+  'NATO': 'North Atlantic Treaty Organization',
+  'ASEAN': 'Association of Southeast Asian Nations',
+  'IIF': 'Institute of International Finance',
+  'BPS': 'Badan Pusat Statistik',
+  'OJK': 'Otoritas Jasa Keuangan',
+  'BI': 'Bank Indonesia',
+  'KEMENKEU': 'Kementerian Keuangan',
+  'KEMENDIKBUD': 'Kementerian Pendidikan dan Kebudayaan',
+  'BAPPENAS': 'Badan Perencanaan Pembangunan Nasional',
+  'LIPI': 'Lembaga Ilmu Pengetahuan Indonesia',
+  'BKPM': 'Badan Koordinasi Penanaman Modal',
+};
+
 MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
   var self = this;
   var institutionalRefs = this.references.filter(function(r) { return r.isInstitutional; });
@@ -1656,7 +1712,14 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
     var trimmedName = r.firstAuthor.trim();
     var isAcronymOnly = ACRONYM_PATTERN.test(trimmedName);
     if (isAcronymOnly) {
-      self.errors.push({ title: 'Referensi institusi hanya berupa singkatan', description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya.', code: r.raw.substring(0, 120), severity: 'error' });
+      var fullName = KNOWN_INSTITUTIONAL_ACRONYMS[trimmedName.toUpperCase()];
+      self.errors.push({
+        title: 'Referensi institusi hanya berupa singkatan',
+        description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya.' + (fullName ? '' : ' Singkatan ini tidak ada di daftar yang saya kenali, jadi tidak bisa disarankan otomatis — mohon isi nama lengkapnya secara manual.'),
+        code: r.raw.substring(0, 120),
+        correction: fullName ? r.raw.replace(trimmedName, fullName + ' [' + trimmedName + ']') : undefined,
+        severity: 'error',
+      });
       return;
     }
 
