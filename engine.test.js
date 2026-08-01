@@ -593,6 +593,36 @@ test('malformed-citation suggestions use the dedicated "correction" field (rende
 
 console.log('\n=== Regression: real-world false positives/negatives found via user documents ===');
 
+test('a bare well-known institutional acronym in text ("OECD, 2023") correctly resolves/matches a reference written out in full (no false "not found" error), AND is separately flagged for not being spelled out in full on its first use, per APA7 (regression)', () => {
+  const r = validate(
+    'Studi menunjukkan bahwa (OECD, 2023) hal ini penting.',
+    'Organisation for Economic Co-operation and Development. (2023). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi tidak ada di daftar referensi'), false);
+  assert.strictEqual((r.suggestions || []).length, 0);
+  const firstUseErr = r.errors.find((e) => e.title === 'Singkatan institusi dipakai sebelum diperkenalkan lengkap');
+  assert.ok(firstUseErr);
+  assert.strictEqual(firstUseErr.correction, '(Organisation for Economic Co-operation and Development [OECD], 2023)');
+});
+
+test('when the acronym IS properly introduced in full first ("Full Name [ACR]"), later bare-acronym citations of the SAME institution (even a different year/publication) are correctly NOT flagged', () => {
+  const r = validate(
+    'Sebuah studi (Organisation for Economic Co-operation and Development [OECD], 2023a) menyatakan hal ini. Studi lain (OECD, 2023b) juga menunjukkan hal ini.',
+    'Organisation for Economic Co-operation and Development. (2023a). Title A. Publisher.\n' +
+    'Organisation for Economic Co-operation and Development. (2023b). Title B. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Singkatan institusi dipakai sebelum diperkenalkan lengkap'), false);
+});
+
+
+test('the institutional-acronym-only reference suggestion is the plain full name, WITHOUT a "[ACRONYM]" bracket — APA7 puts that bracket only on the first in-text citation, never in the reference list entry itself (regression)', () => {
+  const r = validate(
+    'Studi menunjukkan bahwa hal ini penting.',
+    'OECD. (2023). Title. Publisher.');
+  const err = r.errors.find((e) => e.title.includes('singkatan'));
+  assert.ok(err);
+  assert.strictEqual(err.correction, 'Organisation for Economic Co-operation and Development. (2023). Title. Publisher.');
+  assert.ok(!err.correction.includes('['), 'the reference-list correction must not include a bracketed acronym');
+});
+
 test('name particles ("le", "de", "van", ...) only match as standalone words, never as a substring inside an unrelated word (regression: "while Wang" was wrongly extracted as "le Wang")', () => {
   const text = 'target samples can improve performance, while Wang et al. (2021) demonstrated that entropy minimization reduces errors.';
   const citations = CE.extractAuthorDateCitations(text);

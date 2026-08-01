@@ -446,7 +446,11 @@ function parseSingleAuthorDate(text) {
   var cleanAuthorPart = authorPart.replace(/\s*,?\s*et\s+al\.?/i, '').trim();
   var usedAmp = /&/.test(authorPart);
   var usedAnd = /\b(and|dan)\b/i.test(authorPart);
-  var authors = splitOnSeparators(cleanAuthorPart);
+  // A "Full Name [ACR]"/"Full Name (ACR)" bracket pairing means this is ONE institution
+  // introducing its own acronym — its official name may itself legitimately contain "and"
+  // (e.g. "Organisation for Economic Co-operation and Development [OECD]"), which must NOT be
+  // misread as a personal-author separator splitting it into two fake "co-authors".
+  var authors = extractAcronymPairing(cleanAuthorPart) ? [cleanAuthorPart] : splitOnSeparators(cleanAuthorPart);
   var authorCount = authors.length;
   if (hasEtAl) authorCount = Math.max(authorCount, 3);
   var firstAuthor = authors[0] || null;
@@ -1222,6 +1226,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         });
         if (d.initial && candidates.length === 1) {
           matchedRefs.add(candidates[0]);
+          d.matchedRef = candidates[0];
           self.citationCounts.set(candidates[0], (self.citationCounts.get(candidates[0]) || 0) + 1);
           if (candidates[0].authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + candidates[0].authorCount + ' penulis', description: 'Referensi "' + candidates[0].firstAuthor + ' (' + candidates[0].year + ')" hanya punya ' + candidates[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
@@ -1232,6 +1237,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       } else {
         refs.forEach(function(ref) {
           matchedRefs.add(ref);
+          d.matchedRef = ref;
           self.citationCounts.set(ref, (self.citationCounts.get(ref) || 0) + 1);
           if (ref.authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
@@ -1253,6 +1259,52 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       var found = false;
       for (var ck of citedKeys) { if (self.isFuzzyMatch(key, ck)) { found = true; break; } }
       if (!found) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'error' });
+    }
+  });
+
+  // APA7: an institutional/group author with a recognizable acronym must be spelled out in
+  // FULL with the acronym in brackets — "Full Name [ACR]" — on its FIRST in-text citation;
+  // only later citations may use the bare acronym alone. Group all matched citations by which
+  // reference they resolved to, sort by document position, and check whether the very first one
+  // is already the bare-acronym form (meaning the full form never appeared before it, or at all).
+  var citationsByRef = new Map();
+  citationDetails.forEach(function(d) {
+    if (!d.matchedRef || !d.matchedRef.isInstitutional) return;
+    var acr = (d.part.firstAuthor || '').trim();
+    var pairing = extractAcronymPairing(acr);
+    var groupKeySource, isFullFormHere, acronymText;
+    if (pairing) {
+      // this citation itself already spells out "Full Name [ACR]" — the correct first-use form.
+      groupKeySource = pairing.full;
+      isFullFormHere = true;
+      acronymText = pairing.acronym;
+    } else if (ACRONYM_PATTERN.test(acr)) {
+      var resolved = self.resolveInstitutionalName(acr);
+      if (!resolved || resolved === acr) return; // acronym not recognized at all — nothing to check
+      groupKeySource = resolved;
+      isFullFormHere = false;
+      acronymText = acr;
+    } else {
+      return; // full institution name written out plainly, no acronym involved here
+    }
+    // Keyed by the resolved full name (not the specific reference object) — introducing
+    // "Organization [ACR]" once covers every later citation of that SAME institution,
+    // regardless of which particular year/publication from it is being cited each time.
+    var groupKey = groupKeySource.toLowerCase();
+    if (!citationsByRef.has(groupKey)) citationsByRef.set(groupKey, []);
+    citationsByRef.get(groupKey).push({ position: d.position, raw: d.raw, acronym: acronymText, fullName: groupKeySource, isFullForm: isFullFormHere });
+  });
+  citationsByRef.forEach(function(mentions) {
+    mentions.sort(function(a, b) { return a.position - b.position; });
+    var first = mentions[0];
+    if (!first.isFullForm) {
+      self.errors.push({
+        title: 'Singkatan institusi dipakai sebelum diperkenalkan lengkap',
+        description: 'Sitasi pertama untuk "' + first.acronym + '" di teks langsung memakai singkatannya. APA7 mengharuskan kemunculan PERTAMA ditulis lengkap dengan singkatan dalam kurung siku, baru sitasi berikutnya boleh memakai singkatan saja.',
+        code: first.raw,
+        correction: first.raw.replace(first.acronym, first.fullName + ' [' + first.acronym + ']'),
+        severity: 'error',
+      });
     }
   });
 
@@ -1328,6 +1380,13 @@ MultiFormatValidator.prototype.resolveInstitutionalName = function(name) {
   if (pairing) return pairing.full;
   if (ACRONYM_PATTERN.test(trimmed) && this.acronymMap && this.acronymMap[trimmed.toLowerCase()]) {
     return this.acronymMap[trimmed.toLowerCase()];
+  }
+  // Fall back to a small list of universally recognized institutional acronyms (OECD, WHO,
+  // IMF, ...) even when the document itself never explicitly writes out "Full Name (ACR)" —
+  // very common in practice, since authors often treat well-known acronyms as not needing
+  // introduction, even though strict APA7 style technically still wants it spelled out once.
+  if (ACRONYM_PATTERN.test(trimmed) && KNOWN_INSTITUTIONAL_ACRONYMS[trimmed.toUpperCase()]) {
+    return KNOWN_INSTITUTIONAL_ACRONYMS[trimmed.toUpperCase()];
   }
   return trimmed;
 };
@@ -1715,9 +1774,9 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
       var fullName = KNOWN_INSTITUTIONAL_ACRONYMS[trimmedName.toUpperCase()];
       self.errors.push({
         title: 'Referensi institusi hanya berupa singkatan',
-        description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya.' + (fullName ? '' : ' Singkatan ini tidak ada di daftar yang saya kenali, jadi tidak bisa disarankan otomatis — mohon isi nama lengkapnya secara manual.'),
+        description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya. Tanda kurung siku "[' + trimmedName + ']" hanya dipakai pada SITASI PERTAMA di teks (mis. "(' + (fullName || 'Nama Lengkap') + ' [' + trimmedName + '], ' + (r.year || '20XX') + ')"), bukan di daftar referensi ini.' + (fullName ? '' : ' Singkatan ini tidak ada di daftar yang saya kenali, jadi tidak bisa disarankan otomatis — mohon isi nama lengkapnya secara manual.'),
         code: r.raw.substring(0, 120),
-        correction: fullName ? r.raw.replace(trimmedName, fullName + ' [' + trimmedName + ']') : undefined,
+        correction: fullName ? r.raw.replace(trimmedName, fullName) : undefined,
         severity: 'error',
       });
       return;
