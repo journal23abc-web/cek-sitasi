@@ -350,7 +350,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -1185,7 +1185,11 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       });
     } else {
       var cleanAuthors = c.authors.replace(/\s*et\s+al\.?/i, '');
-      var authors = splitOnSeparators(cleanAuthors);
+      // Same guard as the parenthetical branch above: a "Full Name [ACR]" pairing means this is
+      // ONE institution introducing its own acronym, whose official name may itself contain
+      // "and" (e.g. "Organisation for Economic Co-operation and Development [OECD]") — must not
+      // be split into fake co-authors on that "and".
+      var authors = extractAcronymPairing(cleanAuthors) ? [cleanAuthors] : splitOnSeparators(cleanAuthors);
       var hasEtAl = /et\s+al/i.test(c.authors);
       if (authors.length > 0) {
         var key2 = self.keyFromCitationToken(authors[0]) + '_' + c.year;

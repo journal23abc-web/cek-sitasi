@@ -612,6 +612,21 @@ test('when the acronym IS properly introduced in full first ("Full Name [ACR]"),
   assert.strictEqual(r.errors.some((e) => e.title === 'Singkatan institusi dipakai sebelum diperkenalkan lengkap'), false);
 });
 
+test('a NARRATIVE citation with "[ACR]" right before the year ("Organisation ... [OECD] (2023)") is actually extracted at all — it was previously invisible to the extractor entirely (regression)', () => {
+  const cites = CE.extractAuthorDateCitations(
+    'According to the Organisation for Economic Co-operation and Development [OECD] (2023), digitalization is a necessity.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Organisation for Economic Co-operation and Development [OECD]');
+});
+
+test('a narrative "Full Name [ACR] (Year)" citation correctly matches its reference with NO false "possible mismatch" suggestion, even when the institution\'s own name contains "and" (regression: the narrative branch had its own separate and-splitting bug, distinct from the parenthetical one)', () => {
+  const r = validate(
+    'According to the Organisation for Economic Co-operation and Development [OECD] (2023), digitalization is a necessity.',
+    'Organisation for Economic Co-operation and Development [OECD] (2023). Title. Publisher.');
+  assert.strictEqual(r.errors.length, 0);
+  assert.strictEqual((r.suggestions || []).length, 0);
+});
+
 
 test('the institutional-acronym-only reference suggestion is the plain full name, WITHOUT a "[ACRONYM]" bracket — APA7 puts that bracket only on the first in-text citation, never in the reference list entry itself (regression)', () => {
   const r = validate(
