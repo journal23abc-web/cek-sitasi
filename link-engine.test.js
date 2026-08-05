@@ -292,6 +292,27 @@ test('a bare acronym citation ("BSP, 2023") inside a multi-citation group links 
   assert.strictEqual(result.unmatched.length, 0);
 });
 
+console.log('\n=== Regression: grouped multi-year narrative citations ("BSP (2020, 2024, 2025, 2026a)") were collapsing into a single overlapping span ===');
+
+test('all four years in a grouped multi-year narrative citation get their own distinct, non-overlapping hyperlink to their respective reference', () => {
+  var paras = [
+    para(run('The Bangko Sentral ng Pilipinas (BSP) regulates banks. Sources: ') + run('BSP (2020, 2024, 2025, 2026a)') + run(' and ') + run('Philippine Deposit Insurance Corporation (2025)') + run('.')),
+    para(run('REFERENCES')),
+    para(run('Bangko Sentral ng Pilipinas. (2020). Title A. Publisher.')),
+    para(run('Bangko Sentral ng Pilipinas. (2024). Title B. Publisher.')),
+    para(run('Bangko Sentral ng Pilipinas. (2025). Title C. Publisher.')),
+    para(run('Bangko Sentral ng Pilipinas. (2026a). Title D. Publisher.')),
+    para(run('Philippine Deposit Insurance Corporation. (2025). Title E. Publisher.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 5);
+  assert.strictEqual(result.unmatched.length, 0);
+  var texts = hyperlinkTexts(xmlDoc);
+  // each year's span must be distinct (non-overlapping) and together reconstruct the original text exactly
+  assert.strictEqual(texts.slice(0, 4).join(''), 'BSP (2020, 2024, 2025, 2026a)');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

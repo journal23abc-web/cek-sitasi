@@ -482,6 +482,10 @@
         addMatch(c.position, c.position + c.raw.length, bm, c.raw, null);
       });
     } else {
+      // Tracks, per shared author-position, where the previously-linked span for a grouped
+      // multi-year narrative citation ("BSP (2020, 2024, 2025, 2026a)") ended — see the
+      // narrative branch below for why this is needed.
+      var narrativeGroupEnd = {};
       CE.extractAuthorDateCitations(articleText).forEach(function (c) {
         if (c.type === 'parenthetical') {
           // raw = m[0] asli persis dari teks dokumen -> panjang akurat.
@@ -535,9 +539,19 @@
           var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap);
           var authorIdx = articleText.indexOf(c.authors, c.position);
           var realStart = authorIdx >= 0 && authorIdx <= c.position + c.raw.length ? authorIdx : c.position;
-          var yearIdx = articleText.indexOf(c.year, realStart);
-          var endAbs = yearIdx >= 0 ? yearIdx + c.year.length + 1 : realStart + c.raw.length;
-          addMatch(realStart, endAbs, bm2, c.raw, c.year);
+          // Grouped multi-year citation for the SAME author, e.g. "BSP (2020, 2024, 2025,
+          // 2026a)", produces several citation objects that all share this SAME realStart.
+          // Without tracking where the PREVIOUS year's span ended, every subsequent year would
+          // re-search from realStart again, producing fully overlapping spans ("BSP (2020",
+          // "BSP (2020, 2024", "BSP (2020, 2024, 2025", ...) — the overlap-dedup step later on
+          // then keeps only the first and silently drops the rest. Search (and start the new
+          // span) from right after the previous one instead.
+          var searchFrom = narrativeGroupEnd[realStart] || realStart;
+          var yearIdx = articleText.indexOf(c.year, searchFrom);
+          var endAbs = yearIdx >= 0 ? yearIdx + c.year.length + 1 : searchFrom + c.raw.length;
+          var matchStart = narrativeGroupEnd[realStart] ? narrativeGroupEnd[realStart] : realStart;
+          addMatch(matchStart, endAbs, bm2, c.raw, c.year);
+          narrativeGroupEnd[realStart] = endAbs;
         }
       });
     }
