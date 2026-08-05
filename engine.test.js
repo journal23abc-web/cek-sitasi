@@ -720,7 +720,27 @@ test('a genuinely mixed citation style (real numeric citations alongside author-
   assert.strictEqual(r.errors.some((e) => e.title === 'Gaya sitasi tidak konsisten'), true);
 });
 
-console.log('\n=== Regression: templated-title false positives in duplicate-reference detection ===');
+console.log('\n=== Regression: grouped multi-year narrative citations silently dropping all but the first year ===');
+
+test('a narrative citation listing several years for the same author ("Author (2020, 2024, 2025, 2026a)") extracts ALL of them, not just the first', () => {
+  const cites = CE.extractAuthorDateCitations('Sources: Bangko Sentral ng Pilipinas (2020, 2024, 2025, 2026a) and Philippine Deposit Insurance Corporation (2025).');
+  const bspYears = cites.filter((c) => c.authors === 'Bangko Sentral ng Pilipinas').map((c) => c.year).sort();
+  assert.deepStrictEqual(bspYears, ['2020', '2024', '2025', '2026a']);
+  assert.ok(cites.some((c) => c.authors === 'Philippine Deposit Insurance Corporation' && c.year === '2025'));
+});
+
+test('all four references in a grouped multi-year narrative citation correctly match their reference-list entries, with no false "not found" errors', () => {
+  const r = validate(
+    'Sources: Bangko Sentral ng Pilipinas (2020, 2024, 2025, 2026a) and Philippine Deposit Insurance Corporation (2025).',
+    'Bangko Sentral ng Pilipinas. (2020). Title A. Publisher.\n' +
+    'Bangko Sentral ng Pilipinas. (2024). Title B. Publisher.\n' +
+    'Bangko Sentral ng Pilipinas. (2025). Title C. Publisher.\n' +
+    'Bangko Sentral ng Pilipinas. (2026a). Title D. Publisher.\n' +
+    'Philippine Deposit Insurance Corporation. (2025). Title E. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi tidak ada di daftar referensi'), false);
+});
+
+
 
 test('two references with near-identical TITLES but clearly different AUTHORS (a shared title template across different entities, e.g. bank product pages) are NOT flagged as duplicates', () => {
   const r = validate(

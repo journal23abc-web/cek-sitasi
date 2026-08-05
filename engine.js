@@ -405,7 +405,27 @@ function extractAuthorDateCitations(text) {
     // real on-page location (e.g. writing hyperlinks back into the source document).
     var authorsPos = text.indexOf(authors, m.index);
     var position = authorsPos !== -1 ? authorsPos : m.index;
-    citations.push({ type: 'narrative', raw: authors + ' (' + year + ')', authors: authors, year: year, position: position });
+    // Grouped multi-year narrative citation for the SAME author, e.g. "Bangko Sentral ng
+    // Pilipinas (2020, 2024, 2025, 2026a)" or "APA (2023a, 2023b, 2023c)" — the regex above
+    // only ever captures the FIRST year (stopping at "[,)]"), silently dropping the rest when a
+    // comma follows instead of the closing paren. Scan forward for any additional
+    // comma-separated years and emit one citation per year, mirroring how the parenthetical
+    // ("Author, 2020, 2021)") path already handles this same pattern.
+    var years = [year];
+    if (text.charAt(m.index + m[0].length - 1) === ',') {
+      var scanPos = m.index + m[0].length;
+      var yearListRe = /^\s*(\d{4}[a-z]?|n\.d\.)\s*([,)])/;
+      while (true) {
+        var ym = yearListRe.exec(text.slice(scanPos));
+        if (!ym) break;
+        years.push(ym[1]);
+        scanPos += ym[0].length;
+        if (ym[2] === ')') break;
+      }
+    }
+    years.forEach(function (y) {
+      citations.push({ type: 'narrative', raw: authors + ' (' + y + ')', authors: authors, year: y, position: position });
+    });
   }
   return citations;
 }
