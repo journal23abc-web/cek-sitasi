@@ -1327,12 +1327,12 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     mentions.sort(function(a, b) { return a.position - b.position; });
     var first = mentions[0];
     if (!first.isFullForm) {
-      self.errors.push({
+      self.suggestions.push({
         title: 'Singkatan institusi dipakai sebelum diperkenalkan lengkap',
-        description: 'Sitasi pertama untuk "' + first.acronym + '" di teks langsung memakai singkatannya. APA7 mengharuskan kemunculan PERTAMA ditulis lengkap dengan singkatan dalam kurung siku, baru sitasi berikutnya boleh memakai singkatan saja.',
+        description: 'Sitasi pertama untuk "' + first.acronym + '" di teks langsung memakai singkatannya. APA7 mengharuskan kemunculan PERTAMA ditulis lengkap dengan singkatan dalam kurung siku, baru sitasi berikutnya boleh memakai singkatan saja — meskipun banyak jurnal tidak terlalu ketat menerapkan aturan ini.',
         code: first.raw,
         correction: first.raw.replace(first.acronym, first.fullName + ' [' + first.acronym + ']'),
-        severity: 'error',
+        severity: 'suggestion',
       });
     }
   });
@@ -1835,12 +1835,15 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
     var isAcronymOnly = ACRONYM_PATTERN.test(trimmedName);
     if (isAcronymOnly) {
       var fullName = KNOWN_INSTITUTIONAL_ACRONYMS[trimmedName.toUpperCase()];
-      self.errors.push({
+      // Well-known acronyms (OECD, WHO, IMF, ...) are standard practice to leave abbreviated
+      // even in the reference list — flagging these is unnecessary noise. Only flag acronyms
+      // NOT in the known list, where a reader genuinely has no way to know what it stands for.
+      if (fullName) return;
+      self.suggestions.push({
         title: 'Referensi institusi hanya berupa singkatan',
-        description: 'Entri referensi "' + trimmedName + '" sebaiknya menuliskan nama lengkap institusi, bukan hanya singkatannya. Tanda kurung siku "[' + trimmedName + ']" hanya dipakai pada SITASI PERTAMA di teks (mis. "(' + (fullName || 'Nama Lengkap') + ' [' + trimmedName + '], ' + (r.year || '20XX') + ')"), bukan di daftar referensi ini.' + (fullName ? '' : ' Singkatan ini tidak ada di daftar yang saya kenali, jadi tidak bisa disarankan otomatis — mohon isi nama lengkapnya secara manual.'),
+        description: 'Entri referensi "' + trimmedName + '" hanya berupa singkatan yang tidak saya kenali, jadi pembaca mungkin tidak tahu artinya. Pertimbangkan menuliskan nama lengkap institusinya. (Untuk singkatan yang sudah umum dikenal seperti OECD/WHO/IMF, ini biasanya tidak masalah dan tidak perlu diubah.)',
         code: r.raw.substring(0, 120),
-        correction: fullName ? r.raw.replace(trimmedName, fullName) : undefined,
-        severity: 'error',
+        severity: 'suggestion',
       });
       return;
     }

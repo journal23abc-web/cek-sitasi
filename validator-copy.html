@@ -278,6 +278,7 @@
     </div>
     <div class="status-pill" style="gap:14px;">
       <a href="index.html" class="ghost-link">🏠 Beranda</a>
+      <button id="onbHelpBtn" class="ghost-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="themeToggle" class="ghost-link" style="cursor:pointer;">☀️ Terang</button>
       <a href="validator-upload.html" target="_blank" rel="noopener" class="ghost-link">📤 Upload File &amp; Ekspor Laporan (DOCX)</a>
       <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot"></span>ENGINE READY</span>
@@ -491,6 +492,22 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_validator_copy',
+  eyebrow: 'Cara Pakai',
+  title: 'Selamat datang di Validator Sitasi 👋',
+  subtitle: 'Alat ini mengecek kecocokan antara sitasi di teks dan daftar referensi, plus format penulisannya — semua berjalan langsung di browser Anda.',
+  items: [
+    { icon: '📋', title: 'Dua cara memasukkan naskah', desc: 'Tempel seluruh naskah sekaligus (sistem otomatis memisahkan artikel dari daftar referensi), atau isi manual di tab "Isi Manual" kalau mau kontrol penuh.' },
+    { icon: '🔍', title: 'Gaya Sitasi', desc: 'Biarkan di "Auto-detect" kalau tidak yakin gayanya apa — sistem akan menebak dari pola sitasi yang ditemukan di naskah Anda.' },
+    { icon: '✅', title: 'Tombol "Validasi Sitasi"', desc: 'Klik untuk memulai pengecekan. Hasilnya langsung muncul di bawah, lengkap dengan lokasi tiap masalah di naskah Anda.' },
+    { icon: '🔴🔵', title: 'Perlu Diperbaiki vs Saran', desc: 'Hasil terbagi dua: "Perlu Diperbaiki" (masalah nyata) dan "Saran" (anjuran gaya penulisan yang lebih longgar, boleh diabaikan kalau jurnal Anda tidak terlalu ketat soal itu).' },
+    { icon: '📋', title: 'Salin & Unduh', desc: 'Setelah hasil keluar, bisa langsung salin semua koreksi sekaligus, atau unduh laporan lengkapnya sebagai PDF.' },
+  ],
+});
+</script>
 <script src="engine.js?v=13"></script>
 <script src="journal-rules-engine.js?v=1"></script>
 <script src="app.js?v=17"></script>

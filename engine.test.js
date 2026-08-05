@@ -593,15 +593,14 @@ test('malformed-citation suggestions use the dedicated "correction" field (rende
 
 console.log('\n=== Regression: real-world false positives/negatives found via user documents ===');
 
-test('a bare well-known institutional acronym in text ("OECD, 2023") correctly resolves/matches a reference written out in full (no false "not found" error), AND is separately flagged for not being spelled out in full on its first use, per APA7 (regression)', () => {
+test('a bare well-known institutional acronym in text ("OECD, 2023") correctly resolves/matches a reference written out in full (no false "not found" error), AND is separately flagged (as a suggestion, not a hard error — many journals don\'t strictly enforce this) for not being spelled out in full on its first use, per APA7 (regression)', () => {
   const r = validate(
     'Studi menunjukkan bahwa (OECD, 2023) hal ini penting.',
     'Organisation for Economic Co-operation and Development. (2023). Title. Publisher.');
   assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi tidak ada di daftar referensi'), false);
-  assert.strictEqual((r.suggestions || []).length, 0);
-  const firstUseErr = r.errors.find((e) => e.title === 'Singkatan institusi dipakai sebelum diperkenalkan lengkap');
-  assert.ok(firstUseErr);
-  assert.strictEqual(firstUseErr.correction, '(Organisation for Economic Co-operation and Development [OECD], 2023)');
+  const firstUseSuggestion = (r.suggestions || []).find((s) => s.title === 'Singkatan institusi dipakai sebelum diperkenalkan lengkap');
+  assert.ok(firstUseSuggestion);
+  assert.strictEqual(firstUseSuggestion.correction, '(Organisation for Economic Co-operation and Development [OECD], 2023)');
 });
 
 test('when the acronym IS properly introduced in full first ("Full Name [ACR]"), later bare-acronym citations of the SAME institution (even a different year/publication) are correctly NOT flagged', () => {
@@ -628,14 +627,20 @@ test('a narrative "Full Name [ACR] (Year)" citation correctly matches its refere
 });
 
 
-test('the institutional-acronym-only reference suggestion is the plain full name, WITHOUT a "[ACRONYM]" bracket — APA7 puts that bracket only on the first in-text citation, never in the reference list entry itself (regression)', () => {
+test('a well-known institutional acronym (OECD) in the reference list is NOT flagged at all — spelling these out is unnecessary noise since readers already recognize them (regression)', () => {
   const r = validate(
     'Studi menunjukkan bahwa hal ini penting.',
     'OECD. (2023). Title. Publisher.');
-  const err = r.errors.find((e) => e.title.includes('singkatan'));
-  assert.ok(err);
-  assert.strictEqual(err.correction, 'Organisation for Economic Co-operation and Development. (2023). Title. Publisher.');
-  assert.ok(!err.correction.includes('['), 'the reference-list correction must not include a bracketed acronym');
+  assert.strictEqual((r.suggestions || []).some((s) => s.title.includes('singkatan')), false);
+});
+
+test('an UNRECOGNIZED institutional acronym in the reference list still gets a helpful suggestion, since a reader has no way to know what it stands for', () => {
+  const r = validate(
+    'Studi menunjukkan bahwa hal ini penting.',
+    'ZQXP. (2023). Title. Publisher.');
+  const s = (r.suggestions || []).find((e) => e.title.includes('singkatan'));
+  assert.ok(s);
+  assert.strictEqual(s.correction, undefined);
 });
 
 test('name particles ("le", "de", "van", ...) only match as standalone words, never as a substring inside an unrelated word (regression: "while Wang" was wrongly extracted as "le Wang")', () => {
@@ -701,7 +706,7 @@ test('a citation of such an institution correctly matches its reference, with no
   const r = validate(
     'Recent trends (Gonzales, 2025; PSA, 2026) show inflation stabilizing.',
     'Gonzales, R. (2025). Title. Publisher.\nPhilippine Statistics Authority (PSA). (2026). Summary inflation report.');
-  assert.strictEqual((r.suggestions || []).some((s) => s.description.includes('PSA')), false);
+  assert.strictEqual((r.suggestions || []).some((s) => s.title === 'Kemungkinan ketidakcocokan' && s.description.includes('PSA')), false);
 });
 
 console.log('\n=== Regression: table/score rank numbers wrongly counted as a "numeric citation style" ===');
