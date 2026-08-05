@@ -41,13 +41,21 @@
   // Resolves a bookmark for a citation "part" that may actually be a joint institutional
   // reference split by "&" (e.g. "Institute of International Finance & Deloitte") rather than
   // two separate personal co-authors — citation-text extraction alone can't tell these apart.
-  // Tries the normal single-first-author key first, then the full "&"-joined form as a fallback.
-  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex) {
+  // Tries the normal single-first-author key first, then the full "&"-joined form, then (for a
+  // bare acronym like "BSP") its resolved full institutional name, as fallbacks.
+  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap) {
     var key = keyOf(surnameFromCitationToken(firstAuthor), year, false);
     if (refIndex[key]) return refIndex[key];
     if (allAuthorNames && allAuthorNames.length === 2 && CE.isInstitutionalAuthor(firstAuthor)) {
       var altKey = keyOf(allAuthorNames.join(' & '), year, true);
       if (refIndex[altKey]) return refIndex[altKey];
+    }
+    if (CE.isInstitutionalAuthor(firstAuthor)) {
+      var resolved = CE.resolveInstitutionalNameFromMap(firstAuthor, acronymMap);
+      if (resolved && resolved !== firstAuthor) {
+        var resolvedKey = keyOf(resolved, year, true);
+        if (refIndex[resolvedKey]) return refIndex[resolvedKey];
+      }
     }
     return null;
   }
@@ -389,6 +397,7 @@
       styleId = detected.styleId;
     }
     var style = CE.STYLES[styleId];
+    var acronymMap = CE.buildAcronymMapFromText(articleText + '\n' + referenceText);
 
     var parsed = CE.parseReferenceListDetailed(referenceText, styleId);
 
@@ -489,7 +498,7 @@
               var part = c.parts[idx];
               var bmSeg = null;
               if (part && part.firstAuthor) {
-                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex);
+                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap);
               }
               // trim spasi di tepi segmen supaya link tidak "makan" spasi pemisah
               var leadWs = segText.match(/^\s*/)[0].length;
@@ -510,7 +519,7 @@
             for (var i = 0; i < c.parts.length; i++) {
               var part2 = c.parts[i];
               if (!part2.firstAuthor) continue;
-              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex);
+              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap);
               if (bmFound) { bm = bmFound; bmYear = part2.year; break; }
             }
             addMatch(c.position, c.position + c.raw.length, bm, c.raw, bmYear);
@@ -523,7 +532,7 @@
           // awal SESUNGGUHNYA dari `authors` yang sudah bersih itu di dalam teks.
           var narrativeAuthorTokens = c.authors.split(/\s*(?:&|,|\band\b|\bdan\b|\bet\s+al\.?)\s*/i).filter(Boolean);
           var firstTok = narrativeAuthorTokens[0];
-          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex);
+          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap);
           var authorIdx = articleText.indexOf(c.authors, c.position);
           var realStart = authorIdx >= 0 && authorIdx <= c.position + c.raw.length ? authorIdx : c.position;
           var yearIdx = articleText.indexOf(c.year, realStart);

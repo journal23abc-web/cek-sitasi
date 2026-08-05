@@ -1391,9 +1391,11 @@ MultiFormatValidator.prototype.validateAuthorPage = function() {
   });
 };
 
-MultiFormatValidator.prototype.buildAcronymMap = function() {
+// Standalone version of the acronym-pairing scan (see MultiFormatValidator.prototype.
+// buildAcronymMap below) — usable without a full validator instance, e.g. by link-engine.js,
+// which works with lower-level parsing functions rather than instantiating a validator.
+function buildAcronymMapFromText(combinedText) {
   var map = {};
-  var combined = this.articleText + '\n' + this.referenceText;
   // Institution names routinely include lowercase connector words that must NOT break the
   // capitalized-word chain — "of"/"the"/"and" in English, "dan"/"untuk"/"bagi" in Indonesian,
   // "ng"/"sa"/"at"/"para" in Filipino/Tagalog (e.g. "Bangko Sentral ng Pilipinas" = "Central
@@ -1401,19 +1403,23 @@ MultiFormatValidator.prototype.buildAcronymMap = function() {
   var connector = '(?:of|the|and|dan|untuk|bagi|ng|sa|at|para|de|la|del)';
   var re = new RegExp('((?:(?:[\\p{Lu}\\p{Lo}][\\p{L}\'\u2019\\-]*|' + connector + ')\\s+){1,8}[\\p{Lu}\\p{Lo}][\\p{L}\'\u2019\\-]*)\\s*[\\(\\[]([A-Z]{2,8})[\\)\\]]', 'gu');
   var m;
-  while ((m = re.exec(combined)) !== null) {
+  while ((m = re.exec(combinedText)) !== null) {
     map[m[2].toLowerCase()] = m[1].trim().replace(/^(?:The|A|An)\s+/i, '').replace(/[.,;:]$/, '');
   }
-  this.acronymMap = map;
+  return map;
+}
+
+MultiFormatValidator.prototype.buildAcronymMap = function() {
+  this.acronymMap = buildAcronymMapFromText(this.articleText + '\n' + this.referenceText);
 };
 
-MultiFormatValidator.prototype.resolveInstitutionalName = function(name) {
+function resolveInstitutionalNameFromMap(name, acronymMap) {
   if (!name) return name;
   var trimmed = name.trim();
   var pairing = extractAcronymPairing(trimmed);
   if (pairing) return pairing.full;
-  if (ACRONYM_PATTERN.test(trimmed) && this.acronymMap && this.acronymMap[trimmed.toLowerCase()]) {
-    return this.acronymMap[trimmed.toLowerCase()];
+  if (ACRONYM_PATTERN.test(trimmed) && acronymMap && acronymMap[trimmed.toLowerCase()]) {
+    return acronymMap[trimmed.toLowerCase()];
   }
   // Fall back to a small list of universally recognized institutional acronyms (OECD, WHO,
   // IMF, ...) even when the document itself never explicitly writes out "Full Name (ACR)" —
@@ -1423,6 +1429,10 @@ MultiFormatValidator.prototype.resolveInstitutionalName = function(name) {
     return KNOWN_INSTITUTIONAL_ACRONYMS[trimmed.toUpperCase()];
   }
   return trimmed;
+}
+
+MultiFormatValidator.prototype.resolveInstitutionalName = function(name) {
+  return resolveInstitutionalNameFromMap(name, this.acronymMap);
 };
 
 MultiFormatValidator.prototype.keyFromRefAuthor = function(r) {
@@ -2435,6 +2445,8 @@ var CitationEngine = {
   normalizeTitle: normalizeTitle,
   bigramSimilarity: bigramSimilarity,
   isInstitutionalAuthor: isInstitutionalAuthor,
+  buildAcronymMapFromText: buildAcronymMapFromText,
+  resolveInstitutionalNameFromMap: resolveInstitutionalNameFromMap,
   extractAcronymPairing: extractAcronymPairing,
   looksLikePersonalName: looksLikePersonalName,
   DOIChecker: DOIChecker,

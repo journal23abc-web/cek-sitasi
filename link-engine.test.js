@@ -277,6 +277,21 @@ test('in a multi-citation group "(Smith, 2020; Jones, 2019)", the opening "(" at
   assert.strictEqual(texts[0] + '; ' + texts[1], '(Smith, 2020; Jones, 2019)');
 });
 
+console.log('\n=== Regression: bare institutional acronym citations (e.g. "BSP") now correctly link to their spelled-out reference ===');
+
+test('a bare acronym citation ("BSP, 2023") inside a multi-citation group links correctly to a reference written out in full, when the acronym was introduced elsewhere in the article as "Full Name (BSP)"', () => {
+  var paras = [
+    para(run('The Bangko Sentral ng Pilipinas (BSP) regulates digital banks. Inflation intensified ') + run('(Ferreira, 2019; BSP, 2023)') + run(' during this period.')),
+    para(run('REFERENCES')),
+    para(run('Bangko Sentral ng Pilipinas. (2023). Circular. Publisher.')),
+    para(run('Ferreira, C. (2019). Title. Publisher.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 2);
+  assert.strictEqual(result.unmatched.length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);
