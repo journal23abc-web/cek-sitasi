@@ -61,11 +61,16 @@ function isInstitutionalAuthor(str) {
   // silently fail to match each other even when they were textually identical.
   var s = str.trim().replace(/\.$/, '');
   if (ACRONYM_PATTERN.test(s)) return true;
+  // A string ending in "(ACR)"/"[ACR]" is unambiguously an institution introducing its own
+  // acronym (e.g. "Philippine Statistics Authority (PSA)") — check this BEFORE the word-shape
+  // check below, since that check requires every word to look like a capitalized word or a
+  // known connector, which a trailing "(PSA)" token never satisfies on its own.
+  if (extractAcronymPairing(s)) return true;
   if (INSTITUTION_KEYWORDS.test(s)) return true;
   if (looksLikePersonalName(s)) return false;
   // Multi-word title-case string with 3+ words and no comma, no personal-name shape -> likely org
   var words = s.split(/\s+/);
-  if (words.length >= 2 && !s.includes(',') && words.every(function(w){ return /^[\p{Lu}\p{Lo}]/u.test(w) || /^(of|the|and|dan|untuk|bagi)$/i.test(w); })) {
+  if (words.length >= 2 && !s.includes(',') && words.every(function(w){ return /^[\p{Lu}\p{Lo}]/u.test(w) || /^(of|the|and|dan|untuk|bagi|ng|sa|at|para|de|la|del)$/i.test(w); })) {
     return true;
   }
   return false;
@@ -350,7 +355,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -1369,10 +1374,15 @@ MultiFormatValidator.prototype.validateAuthorPage = function() {
 MultiFormatValidator.prototype.buildAcronymMap = function() {
   var map = {};
   var combined = this.articleText + '\n' + this.referenceText;
-  var re = /((?:[\p{Lu}\p{Lo}][\p{L}'’\-]*\s+){1,8}[\p{Lu}\p{Lo}][\p{L}'’\-]*)\s*[\(\[]([A-Z]{2,8})[\)\]]/gu;
+  // Institution names routinely include lowercase connector words that must NOT break the
+  // capitalized-word chain — "of"/"the"/"and" in English, "dan"/"untuk"/"bagi" in Indonesian,
+  // "ng"/"sa"/"at"/"para" in Filipino/Tagalog (e.g. "Bangko Sentral ng Pilipinas" = "Central
+  // Bank of the Philippines" — "ng" means "of" and is always lowercase).
+  var connector = '(?:of|the|and|dan|untuk|bagi|ng|sa|at|para|de|la|del)';
+  var re = new RegExp('((?:(?:[\\p{Lu}\\p{Lo}][\\p{L}\'\u2019\\-]*|' + connector + ')\\s+){1,8}[\\p{Lu}\\p{Lo}][\\p{L}\'\u2019\\-]*)\\s*[\\(\\[]([A-Z]{2,8})[\\)\\]]', 'gu');
   var m;
   while ((m = re.exec(combined)) !== null) {
-    map[m[2].toLowerCase()] = m[1].trim().replace(/[.,;:]$/, '');
+    map[m[2].toLowerCase()] = m[1].trim().replace(/^(?:The|A|An)\s+/i, '').replace(/[.,;:]$/, '');
   }
   this.acronymMap = map;
 };
@@ -1634,6 +1644,14 @@ MultiFormatValidator.prototype.detectDuplicateReferences = function() {
         if (a.title.length < 25 || b.title.length < 25) continue; // short titles: one word can differ a lot yet still look "similar" by bigram count
         var sim = bigramSimilarity(a.title, b.title);
         if (sim >= 0.88) {
+          // A near-identical TITLE alone isn't sufficient — many templated source types (bank
+          // product pages, government circulars, etc.) share boilerplate title phrasing across
+          // genuinely different entities (e.g. "OwnBank Savings Account — interest rates and
+          // terms" vs "Union Savings+ Account — interest rates and terms"). Require the authors
+          // to also be reasonably similar, since a real duplicate entry almost always has the
+          // same or near-identical author field too.
+          var authorSim = (a.firstAuthor && b.firstAuthor) ? bigramSimilarity(a.firstAuthor, b.firstAuthor) : 0;
+          if (authorSim < 0.5) continue;
           var pairKey = i + '_' + j;
           if (reportedPairs.has(pairKey)) continue;
           reportedPairs.add(pairKey);
@@ -1682,7 +1700,18 @@ MultiFormatValidator.prototype.detectMixedCitationStyles = function() {
   var bracket = (text.match(/\[\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\]/g) || []).length;
   // Exclude 4-digit numbers here — those are years inside author-date citations like
   // "(2020)", not numeric citation markers. Genuine numeric-style citations are 1-3 digits.
-  var parenNumeric = (text.match(/\(\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\)/g) || []).filter(function(m) { return !/^\(\d{4}\)$/.test(m); }).length;
+  // Also exclude table-style rank numbers ("4.48 (1)", "4.28 (Joint 1)") — common in
+  // scoring/ranking tables (MCDA, TOPSIS, AHP, etc.) — identified by either directly following a
+  // decimal score value, or containing "Joint" (a tie-rank indicator no real citation ever has).
+  var parenNumericRe = /(\d+\.\d+\s*)?\((?:Joint\s+)?\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\)/g;
+  var parenNumeric = 0;
+  var pnMatch;
+  while ((pnMatch = parenNumericRe.exec(text)) !== null) {
+    if (pnMatch[1]) continue; // preceded by a decimal score -> table rank cell, not a citation
+    if (/joint/i.test(pnMatch[0])) continue; // "(Joint 1)" -> tie-rank indicator, not a citation
+    if (/^\(\d{4}\)$/.test(pnMatch[0])) continue; // plain 4-digit year
+    parenNumeric++;
+  }
   var authorDate = (text.match(/\([\p{Lu}\p{Lo}][^()]*?,?\s*\d{4}[a-z]?\)/gu) || []).length;
   var authorPage = (text.match(/\([\p{Lu}\p{Lo}][\p{L}'\-]+\s+\d+(?:[-–]\d+)?\)/gu) || []).length;
 
@@ -1784,39 +1813,6 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
         severity: 'error',
       });
       return;
-    }
-
-    // Find an acronym associated with this institution (from a "Full Name [ACR]" pairing anywhere in the text)
-    var acronym = null;
-    if (self.acronymMap) {
-      for (var acr in self.acronymMap) {
-        if (Object.prototype.hasOwnProperty.call(self.acronymMap, acr) &&
-            normalizeKeyName(self.acronymMap[acr], true) === normalizeKeyName(trimmedName, true)) {
-          acronym = acr.toUpperCase();
-          break;
-        }
-      }
-    }
-    if (!acronym) return; // institution is never abbreviated anywhere -> nothing to check
-
-    var escapedFull = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    var pairingRegex = new RegExp(escapedFull + '\\s*[\\(\\[]' + acronym + '[\\)\\]]', 'i');
-    var pairingMatch = pairingRegex.exec(self.articleText);
-
-    var bareRegex = new RegExp('\\b' + acronym + '\\b', 'g');
-    var firstBareIdx = -1, bm;
-    while ((bm = bareRegex.exec(self.articleText)) !== null) {
-      if (pairingMatch && bm.index >= pairingMatch.index && bm.index < pairingMatch.index + pairingMatch[0].length) continue;
-      firstBareIdx = bm.index;
-      break;
-    }
-
-    if (firstBareIdx !== -1 && (!pairingMatch || firstBareIdx < pairingMatch.index)) {
-      self.errors.push({
-        title: 'Singkatan institusi dipakai sebelum nama lengkap diperkenalkan',
-        description: 'Sitasi PERTAMA untuk institusi ini harus menuliskan nama lengkap beserta singkatannya, misalnya "' + trimmedName + ' [' + acronym + ']", baru sitasi berikutnya boleh memakai "' + acronym + '" saja. Saat ini singkatan "' + acronym + '" ditemukan dipakai duluan, sebelum (atau tanpa) pengenalan nama lengkap.',
-        severity: 'error'
-      });
     }
   });
 };

@@ -668,6 +668,75 @@ test('a genuine two-listed-authors-before-et-al issue is still caught even with 
   const issues = CE.detectMalformedCitations('(Agus, Supardi, et al., 2023)');
   assert.ok(issues.some(i => i.type === 'multiple_authors_before_et_al'));
 });
+console.log('\n=== Regression: Filipino/Tagalog institution names with lowercase connector words (e.g. "ng" = "of") ===');
+
+test('an institution name with a Filipino connector word ("Bangko Sentral ng Pilipinas") is correctly recognized as institutional, not misread as a personal surname', () => {
+  const ref = CE.parseReferenceLine('Bangko Sentral ng Pilipinas. (2023). Summary of monetary policy decisions.', 'apa7');
+  assert.strictEqual(ref.isInstitutional, true);
+  assert.strictEqual(ref.firstAuthor, 'Bangko Sentral ng Pilipinas');
+});
+
+test('a narrative citation of an institution name containing a Filipino connector word is fully extracted, not truncated to just the last word', () => {
+  const cites = CE.extractAuthorDateCitations('According to Bangko Sentral ng Pilipinas (2024), digital banks expanded.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Bangko Sentral ng Pilipinas');
+});
+
+test('a bare acronym ("BSP") correctly resolves to its full Filipino institution name when introduced via "Full Name (ACR)" in prose (not just inside a formal citation)', () => {
+  const r = validate(
+    'The Bangko Sentral ng Pilipinas (BSP) initially authorized six digital banks. This is confirmed by (BSP, 2023).',
+    'Bangko Sentral ng Pilipinas. (2023). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi tidak ada di daftar referensi'), false);
+  assert.strictEqual(r.errors.some((e) => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
+console.log('\n=== Regression: "Full Name (ACR)" trailing-bracket institutions not caught by the word-shape heuristic ===');
+
+test('an institution reference ending directly in "(ACR)" (e.g. "Philippine Statistics Authority (PSA)") is recognized as institutional even though the trailing "(PSA)" token breaks the plain word-shape check', () => {
+  const ref = CE.parseReferenceLine('Philippine Statistics Authority (PSA). (2026). Summary inflation report.', 'apa7');
+  assert.strictEqual(ref.isInstitutional, true);
+});
+
+test('a citation of such an institution correctly matches its reference, with no false "possible mismatch" suggestion', () => {
+  const r = validate(
+    'Recent trends (Gonzales, 2025; PSA, 2026) show inflation stabilizing.',
+    'Gonzales, R. (2025). Title. Publisher.\nPhilippine Statistics Authority (PSA). (2026). Summary inflation report.');
+  assert.strictEqual((r.suggestions || []).some((s) => s.description.includes('PSA')), false);
+});
+
+console.log('\n=== Regression: table/score rank numbers wrongly counted as a "numeric citation style" ===');
+
+test('rank numbers in a scoring table ("4.48 (1)", "4.28 (Joint 1)") are NOT counted toward "mixed citation style", even alongside genuine author-date citations', () => {
+  const r = validate(
+    'Results: 4.48 (1), 4.28 (Joint 1), 4.10 (3), 4.05 (4), 3.75 (10). This is supported by (Smith, 2020) and (Jones, 2021) and (Brown, 2022).',
+    'Smith, A. (2020). Title. Publisher.\nJones, B. (2021). Title. Publisher.\nBrown, C. (2022). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Gaya sitasi tidak konsisten'), false);
+});
+
+test('a genuinely mixed citation style (real numeric citations alongside author-date) is still correctly flagged', () => {
+  const r = validate(
+    'This is shown (1). Also shown (2), (3), (4), and (5). Additionally (Smith, 2020) and (Jones, 2021) and (Brown, 2022) agree.',
+    'Smith, A. (2020). Title. Publisher.\nJones, B. (2021). Title. Publisher.\nBrown, C. (2022). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Gaya sitasi tidak konsisten'), true);
+});
+
+console.log('\n=== Regression: templated-title false positives in duplicate-reference detection ===');
+
+test('two references with near-identical TITLES but clearly different AUTHORS (a shared title template across different entities, e.g. bank product pages) are NOT flagged as duplicates', () => {
+  const r = validate(
+    'Studi (OwnBank, 2026) dan (UnionDigital Bank, 2026) menunjukkan hal ini.',
+    'OwnBank. (2026). OwnBank Savings Account — interest rates and terms. Publisher.\n' +
+    'UnionDigital Bank, Inc. (2026). Union Savings+ Account — interest rates and terms. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Referensi kemungkinan duplikat'), false);
+});
+
+test('a genuine duplicate (same/similar author AND near-identical title) is still correctly flagged', () => {
+  const r = validate(
+    'Studi (Smith, 2020a) dan (Smith, 2020b) menunjukkan hal ini.',
+    'Smith, J. (2020a). The impact of digital technology on business growth outcomes. Journal A, 1(1), 1-10.\n' +
+    'Smith, J. (2020b). The impact of digital technology on business growth outcome. Journal A, 1(1), 1-10.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Referensi kemungkinan duplikat'), true);
+});
 
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
@@ -676,5 +745,4 @@ if (fail > 0) {
   failures.forEach(f => console.log('  - ' + f.name + ': ' + f.err.message));
   process.exit(1);
 }
-
 
