@@ -418,6 +418,21 @@ test('figure/table linking is OFF by default (no options.linkFiguresTables passe
   assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, 0);
 });
 
+console.log('\n=== Regression: narrative citation with a possessive apostrophe ("Bandura\u2019s (1986)") now correctly links ===');
+
+test('a narrative citation with a curly-quote possessive ("Bandura\u2019s (1986) theory") correctly links to its reference — the possessive grammar suffix must not become part of the matching key', () => {
+  var paras = [
+    para(run('Derived from Bandura\u2019s (1986) social cognitive theory, this concept is central.')),
+    para(run('REFERENCES')),
+    para(run('Bandura, A. (1986). Social foundations of thought and action. Prentice-Hall.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.unmatched.length, 0);
+  assert.strictEqual(result.linked, 1);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

@@ -27,6 +27,11 @@
   function surnameFromCitationToken(token) {
     var s = (token || '').trim();
     if (!s) return '';
+    // A trailing possessive ('s / 's) is grammar, not part of the name — "Bandura's (1986)
+    // theory" must match the reference "Bandura, A. (1986)" the same as plain "Bandura (1986)"
+    // would. Same fix as engine.js's own surnameFromCitationToken (separate copy here since
+    // link-engine.js works with lower-level parsing).
+    s = s.replace(/['\u2019]s$/, '');
     var toks = s.split(/\s+/);
     if (toks.length === 1) return s;
     var leading = toks.slice(0, -1);

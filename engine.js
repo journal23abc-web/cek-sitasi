@@ -355,7 +355,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -664,6 +664,9 @@ function looksLikeInitialToken(t) {
 function surnameFromCitationToken(token) {
   var s = (token || '').trim();
   if (!s) return '';
+  // A trailing possessive ('s / 's) is grammar, not part of the name — "Bandura's (1986) theory"
+  // must match the reference "Bandura, A. (1986)" the same as plain "Bandura (1986)" would.
+  s = s.replace(/['\u2019]s$/, '');
   var toks = s.split(/\s+/);
   if (toks.length === 1) return s;
   var leading = toks.slice(0, -1);
@@ -1182,10 +1185,14 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         }
       } else {
         var fa = c.parts.map(function(p){return self.keyFromCitationToken(p.firstAuthor);});
-        var isAlpha = fa.every(function(v,i){return i===0 || fa[i-1] <= fa[i];});
+        // localeCompare (bukan operator < / > mentah) supaya huruf berdiakritik (Ç, Ú, É, Ñ, ...)
+        // dibandingkan berdasarkan huruf dasarnya, bukan urutan kode-Unicode mentahnya — kode
+        // Unicode taruh huruf besar berdiakritik SETELAH huruf kecil 'z' biasa, yang salah
+        // secara alfabetis (mis. "Çivitci" harus di antara "C" dan "D", bukan di akhir).
+        var isAlpha = fa.every(function(v,i){return i===0 || fa[i-1].localeCompare(fa[i], 'en', { sensitivity: 'base' }) <= 0;});
         if (!isAlpha) {
           var sortedParts = c.parts.map(function(p, i) { return { part: p, key: fa[i] }; })
-            .sort(function(a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; })
+            .sort(function(a, b) { return a.key.localeCompare(b.key, 'en', { sensitivity: 'base' }); })
             .map(function(x) { return x.part.raw; });
           self.errors.push({ title: 'Multiple citations tidak alfabetis', description: 'Beberapa sitasi dalam satu kurung harus diurutkan alfabetis berdasarkan penulis pertama.', code: c.raw, correction: '(' + sortedParts.join('; ') + ')', severity: 'error' });
         }

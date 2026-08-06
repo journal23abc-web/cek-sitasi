@@ -441,6 +441,29 @@ test('a genuinely out-of-order reference list is still correctly flagged (sanity
   assert.strictEqual(r.errors.some(e => e.title === 'Daftar referensi tidak alfabetis'), true);
 });
 
+test('a diacritic surname ("Çivitci") inside a multi-citation group is correctly sorted by its BASE letter (C, between "Bandura" and "Rienties"), not pushed to the end via raw Unicode code-point comparison (regression)', () => {
+  const r = validate(
+    'Beberapa studi (Çivitci, 2010; Rienties et al., 2018; Travis & Bunde, 2020) menunjukkan hal ini.',
+    'Çivitci, A. (2010). Title A. Journal, 1(1), 1-10.\n' +
+    'Rienties, B., et al. (2018). Title B. Journal, 2(1), 1-10.\n' +
+    'Travis, C., & Bunde, D. (2020). Title C. Journal, 3(1), 1-10.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Multiple citations tidak alfabetis'), false);
+});
+
+test('a narrative citation with a possessive apostrophe ("Bandura\u2019s (1986) theory") correctly matches the reference "Bandura, A. (1986)" — the possessive grammar suffix must not become part of the matching key (regression)', () => {
+  const r = validate(
+    'Derived from Bandura\u2019s (1986) social cognitive theory, this concept is central.',
+    'Bandura, A. (1986). Social foundations of thought and action. Prentice-Hall.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
+test('a narrative citation with a plain straight-quote possessive ("Bandura\'s (1986)") also matches correctly', () => {
+  const r = validate(
+    "Derived from Bandura's (1986) social cognitive theory, this concept is central.",
+    'Bandura, A. (1986). Social foundations of thought and action. Prentice-Hall.');
+  assert.strictEqual(r.errors.some(e => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
 console.log('\n=== Malformed in-text citation format detection ===');
 
 test('missing space before citation opening parenthesis is detected', () => {
