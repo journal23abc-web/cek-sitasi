@@ -496,15 +496,13 @@
 <script>
 initOnboarding({
   key: 'onb_seen_validator_copy',
-  eyebrow: 'Cara Pakai',
-  title: 'Selamat datang di Validator Sitasi 👋',
-  subtitle: 'Alat ini mengecek kecocokan antara sitasi di teks dan daftar referensi, plus format penulisannya — semua berjalan langsung di browser Anda.',
-  items: [
-    { icon: '📋', title: 'Dua cara memasukkan naskah', desc: 'Tempel seluruh naskah sekaligus (sistem otomatis memisahkan artikel dari daftar referensi), atau isi manual di tab "Isi Manual" kalau mau kontrol penuh.' },
-    { icon: '🔍', title: 'Gaya Sitasi', desc: 'Biarkan di "Auto-detect" kalau tidak yakin gayanya apa — sistem akan menebak dari pola sitasi yang ditemukan di naskah Anda.' },
-    { icon: '✅', title: 'Tombol "Validasi Sitasi"', desc: 'Klik untuk memulai pengecekan. Hasilnya langsung muncul di bawah, lengkap dengan lokasi tiap masalah di naskah Anda.' },
-    { icon: '🔴🔵', title: 'Perlu Diperbaiki vs Saran', desc: 'Hasil terbagi dua: "Perlu Diperbaiki" (masalah nyata) dan "Saran" (anjuran gaya penulisan yang lebih longgar, boleh diabaikan kalau jurnal Anda tidak terlalu ketat soal itu).' },
-    { icon: '📋', title: 'Salin & Unduh', desc: 'Setelah hasil keluar, bisa langsung salin semua koreksi sekaligus, atau unduh laporan lengkapnya sebagai PDF.' },
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Validator Sitasi', desc: 'Alat ini mengecek kecocokan antara sitasi di teks dan daftar referensi, plus format penulisannya — semua berjalan langsung di browser Anda. Ikuti tur singkat ini untuk kenal tombol-tombolnya.' },
+    { target: '#styleSelect', title: 'Gaya Sitasi', desc: 'Biarkan di "Auto-detect" kalau tidak yakin gayanya apa — sistem akan menebak dari pola sitasi yang ditemukan di naskah Anda.' },
+    { target: '#tab-btn-paste', title: 'Tempel Dokumen Lengkap', desc: 'Cara tercepat: tempel seluruh naskah sekaligus di sini, sistem otomatis memisahkan artikel dari daftar referensi.' },
+    { target: '#tab-btn-manual', title: 'Isi Manual (alternatif)', desc: 'Kalau mau kontrol penuh, isi kolom artikel dan referensi secara terpisah di sini.' },
+    { target: '#validateBtn', title: 'Tombol "Validasi Sitasi"', desc: 'Klik untuk memulai pengecekan. Hasilnya langsung muncul di bawah, lengkap dengan lokasi tiap masalah di naskah Anda.' },
   ],
 });
 </script>

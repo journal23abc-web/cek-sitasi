@@ -99,20 +99,32 @@
       .then(function (zip) {
         var docFile = zip.file('word/document.xml');
         if (!docFile) throw new Error('word/document.xml tidak ditemukan — file mungkin bukan .docx yang valid.');
-        return docFile.async('string').then(function (xmlStr) { return { zip: zip, xmlStr: xmlStr }; });
+        var relsFile = zip.file('word/_rels/document.xml.rels');
+        return Promise.all([
+          docFile.async('string'),
+          relsFile ? relsFile.async('string') : Promise.resolve(null),
+        ]).then(function (parts) { return { zip: zip, xmlStr: parts[0], relsStr: parts[1] }; });
       })
       .then(function (bundle) {
         var xmlDoc = new DOMParser().parseFromString(bundle.xmlStr, 'application/xml');
         if (xmlDoc.getElementsByTagName('parsererror').length) {
           throw new Error('Gagal mem-parsing XML dokumen.');
         }
+        // word/_rels/document.xml.rels seharusnya selalu ada di .docx yang valid (dipakai untuk
+        // relasi ke styles.xml, dst.), tapi kalau entah kenapa tidak ada, buat kerangka minimal
+        // supaya fitur auto-link URL referensi tetap bisa jalan alih-alih gagal total.
+        var relsStr = bundle.relsStr || '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+        var relsXmlDoc = new DOMParser().parseFromString(relsStr, 'application/xml');
         var styleId = els.styleSelect.value;
         var result = window.CitationLinker.linkDocx(xmlDoc, {
           styleId: styleId,
           linkScope: els.linkScope.value,
           linkColor: els.applyColor.checked ? els.linkColor.value : null,
           narrowToHighlight: els.narrowToHighlight.checked,
-          onlyHighlighted: els.onlyHighlighted.checked
+          onlyHighlighted: els.onlyHighlighted.checked,
+          linkReferenceUrls: els.linkReferenceUrls ? els.linkReferenceUrls.checked : true,
+          linkFiguresTables: els.linkFiguresTables ? els.linkFiguresTables.checked : false,
+          relsXmlDoc: relsXmlDoc
         });
         if (result.error === 'NO_HEADING') {
           throw new Error('Heading daftar referensi tidak ditemukan. Pastikan ada paragraf tersendiri bertuliskan "References" / "Daftar Pustaka" / "Bibliography" sebelum daftar referensi dimulai.');
@@ -120,6 +132,9 @@
         var serializer = new XMLSerializer();
         var newXmlStr = serializer.serializeToString(xmlDoc);
         bundle.zip.file('word/document.xml', newXmlStr);
+        if (result.urlsLinked > 0) {
+          bundle.zip.file('word/_rels/document.xml.rels', serializer.serializeToString(relsXmlDoc));
+        }
         return bundle.zip.generateAsync({
           type: 'blob',
           mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -174,7 +189,8 @@
       '<div class="sum-card"><div class="n">' + result.refCount + '</div><div class="l">Referensi</div></div>' +
       '<div class="sum-card ok"><div class="n">' + result.linked + '</div><div class="l">Tertaut</div></div>' +
       '<div class="sum-card ' + (result.unmatched.length ? 'warn' : 'ok') + '"><div class="n">' + result.unmatched.length + '</div><div class="l">Tidak Cocok</div></div>' +
-      '<div class="sum-card fmt"><div class="n">' + escHtml(result.styleName) + '</div><div class="l">Gaya</div></div>';
+      '<div class="sum-card fmt"><div class="n">' + escHtml(result.styleName) + '</div><div class="l">Gaya</div></div>' +
+      (result.urlsLinked ? '<div class="sum-card ok"><div class="n">' + result.urlsLinked + '</div><div class="l">URL Referensi Ditautkan</div></div>' : '');
 
     var html = '';
     if (result.unmatched.length) {

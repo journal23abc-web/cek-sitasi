@@ -313,6 +313,111 @@ test('all four years in a grouped multi-year narrative citation get their own di
   assert.strictEqual(texts.slice(0, 4).join(''), 'BSP (2020, 2024, 2025, 2026a)');
 });
 
+console.log('\n=== New: auto-link plain URLs/DOIs in reference entries ===');
+
+test('a plain https:// URL in a reference entry gets wrapped in a hyperlink pointing to it, with a new relationship entry created', () => {
+  var paras = [
+    para(run('Studi ini penting.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10. https://doi.org/10.1234/abcd')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.urlsLinked, 1);
+  var rel = relsXmlDoc.getElementsByTagName('Relationship')[0];
+  assert.strictEqual(rel.getAttribute('Target'), 'https://doi.org/10.1234/abcd');
+  assert.strictEqual(rel.getAttribute('TargetMode'), 'External');
+  var hls = xmlDoc.getElementsByTagName('w:hyperlink');
+  assert.strictEqual(hls.length, 1);
+  assert.strictEqual(hls[0].getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'), rel.getAttribute('Id'));
+});
+
+test('a bare "doi: 10.xxxx/yyyy" (no https:// prefix) in a reference is also linkified, resolving to the full doi.org URL', () => {
+  var paras = [
+    para(run('Studi ini penting.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10. doi: 10.5678/xyz-123')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.urlsLinked, 1);
+  assert.strictEqual(relsXmlDoc.getElementsByTagName('Relationship')[0].getAttribute('Target'), 'https://doi.org/10.5678/xyz-123');
+});
+
+test('a URL already wrapped in a real hyperlink is left untouched (not double-wrapped)', () => {
+  var paras = [
+    para(run('Studi ini penting.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. ') + '<w:hyperlink xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId9"><w:r><w:t>https://doi.org/10.1234/already</w:t></w:r></w:hyperlink>'),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.urlsLinked, 0);
+  assert.strictEqual(relsXmlDoc.getElementsByTagName('Relationship').length, 0);
+});
+
+test('URL auto-linking can be turned off via options.linkReferenceUrls: false', () => {
+  var paras = [
+    para(run('Studi ini penting.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10. https://doi.org/10.1234/abcd')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkReferenceUrls: false });
+  assert.strictEqual(result.urlsLinked, 0);
+});
+
+console.log('\n=== New: optional Figure/Table cross-reference linking (default OFF) ===');
+
+test('mentions of "Figure N"/"Table N" in the body link to their caption paragraph, while the caption itself is untouched', () => {
+  var paras = [
+    para(run('Sebagaimana ditunjukkan pada Figure 1, hasil penelitian menunjukkan tren positif.')),
+    para(run('Figure 1. Grafik tren penjualan.')),
+    para(run('Lebih lanjut, Table 2 merangkum data, dan Figure 1 kembali disebut di sini.')),
+    para(run('Table 2. Ringkasan statistik.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  assert.strictEqual(result.figuresTablesCaptionsFound, 2);
+  assert.strictEqual(result.figuresTablesLinked, 3); // 2x "Figure 1" mentions + 1x "Table 2" mention (captions themselves excluded)
+  var bms = Array.from(xmlDoc.getElementsByTagName('w:bookmarkStart')).map((b) => b.getAttribute('w:name'));
+  assert.ok(bms.includes('figtbl_fig_1'));
+  assert.ok(bms.includes('figtbl_tbl_2'));
+});
+
+test('a mentioned figure/table with no matching caption is left as plain text — never guessed', () => {
+  var paras = [
+    para(run('Sebagaimana disebutkan di Table 3, data tidak lengkap.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  assert.strictEqual(result.figuresTablesLinked, 0);
+});
+
+test('figure/table linking is OFF by default (no options.linkFiguresTables passed)', () => {
+  var paras = [
+    para(run('Lihat Figure 1 untuk detail.')),
+    para(run('Figure 1. Grafik detail.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.figuresTablesLinked, 0);
+  assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

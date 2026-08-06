@@ -148,7 +148,20 @@
       <input type="color" id="linkColor" value="#0000FF" disabled style="margin-left:6px;width:34px;height:26px;padding:2px;border-radius:5px;border:1px solid var(--hairline);background:var(--input-bg);cursor:pointer;">
     </div>
 
-    <div class="field-label" style="margin-top:22px;"><span class="step-num">5</span>Highlight Manual di Word <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional, lanjutan)</span></div>
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">5</span>Opsi Tautan Tambahan <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
+    <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
+      Selain sitasi, dua jenis tautan tambahan yang bisa diaktifkan/nonaktifkan terpisah:
+    </p>
+    <div class="checkbox-row" style="margin-top:0;">
+      <input type="checkbox" id="linkReferenceUrls" checked>
+      <label for="linkReferenceUrls">Jadikan URL/DOI polos di daftar referensi bisa diklik (link ke luar dokumen)</label>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="linkFiguresTables">
+      <label for="linkFiguresTables">Tautkan sebutan "Figure N" / "Table N" di teks ke gambar/tabel aslinya (lompat internal, seperti sitasi)</label>
+    </div>
+
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">6</span>Highlight Manual di Word <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional, lanjutan)</span></div>
     <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
       Kalau Anda sendiri sudah men-<i>highlight</i> manual sebagian teks sitasi di file Word-nya
       (warna apa saja), sistem bisa mempersempit link ke bagian yang di-highlight itu SAJA —
@@ -194,15 +207,15 @@
 <script>
 initOnboarding({
   key: 'onb_seen_link_upload',
-  eyebrow: 'Cara Pakai',
-  title: 'Selamat datang di Tautkan Sitasi 👋',
-  subtitle: 'Alat ini membuat setiap in-text citation di naskah Word Anda bisa diklik — langsung meloncat ke referensinya. Format & isi naskah tidak berubah sama sekali.',
-  items: [
-    { icon: '📄', title: 'Upload naskah .docx', desc: 'Seret file ke kotak upload, atau klik untuk memilih. Semua proses berjalan langsung di browser Anda — file tidak pernah diunggah ke server mana pun.' },
-    { icon: '🔗', title: 'Cakupan link (opsional)', desc: 'Default-nya seluruh sitasi jadi bisa diklik, mis. "(Smith, 2019)". Bisa juga dipersempit ke tahunnya saja kalau mau.' },
-    { icon: '🎨', title: 'Warna teks (opsional)', desc: 'Defaultnya teks sitasi tidak diwarnai (cuma jadi bisa diklik). Bisa diaktifkan kalau mau teks sitasi yang tertaut diberi warna beda, misalnya biru khas hyperlink.' },
-    { icon: '✨', title: 'Highlight manual (lanjutan, opsional)', desc: 'Kalau Anda sendiri sudah menandai sebagian sitasi dengan highlight warna di Word, sistem bisa mempersempit link ke bagian yang di-highlight itu saja.' },
-    { icon: '⬇️', title: 'Proses & Unduh', desc: 'Klik "Proses & Tautkan Sitasi", lalu setelah selesai klik "Unduh Naskah Bertaut" untuk mendapat file .docx baru dengan sitasi yang sudah bisa diklik.' },
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Tautkan Sitasi', desc: 'Alat ini membuat setiap in-text citation di naskah Word Anda bisa diklik — langsung meloncat ke referensinya. Format & isi naskah tidak berubah sama sekali. Ikuti tur singkat ini dulu.' },
+    { target: '#dropzone', title: 'Upload naskah .docx', desc: 'Seret file ke sini, atau klik untuk memilih. Semua proses berjalan langsung di browser Anda — file tidak pernah diunggah ke server mana pun.' },
+    { target: '#styleSelect', title: 'Gaya Sitasi', desc: 'Biarkan di "Auto-detect" kalau tidak yakin — sistem akan menebak sendiri dari naskah Anda.' },
+    { target: '#linkScope', title: 'Cakupan Link', desc: 'Pilih bagian mana dari tiap sitasi yang ingin dibuat bisa diklik: seluruh sitasi, atau tahunnya saja.' },
+    { target: '#applyColor', title: 'Warna Teks Sitasi (opsional)', desc: 'Default-nya teks sitasi tidak diwarnai, cuma jadi bisa diklik. Aktifkan ini kalau mau teks sitasi diberi warna beda supaya terlihat jelas mana yang sudah tertaut.' },
+    { target: '#linkReferenceUrls', title: 'Opsi Tautan Tambahan', desc: 'URL/DOI polos di daftar referensi otomatis dibuat bisa diklik (aktif secara default). Bisa juga diaktifkan supaya sebutan "Figure N"/"Table N" di teks langsung meloncat ke gambar/tabel aslinya.' },
+    { target: '#processBtn', title: 'Tombol "Proses & Tautkan Sitasi"', desc: 'Setelah file dan opsi siap, klik di sini untuk memulai. Setelah selesai, akan muncul tombol untuk mengunduh naskah bertaut.' },
   ],
 });
 </script>

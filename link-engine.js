@@ -15,6 +15,7 @@
 (function (global) {
   var CE = global.CitationEngine;
   var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  var R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
   var XML_NS = 'http://www.w3.org/XML/1998/namespace';
 
   var HEADING_RE = /(\breferences?\b|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
@@ -156,6 +157,21 @@
     colorEl.setAttributeNS(W_NS, 'w:val', colorHex.replace('#', ''));
   }
 
+  // Underline standar khas hyperlink — dipakai untuk link URL eksternal baru (lihat
+  // wrapWithExternalHyperlink), bukan untuk sitasi internal yang formatnya sengaja dijaga apa
+  // adanya secara default.
+  function applyUnderlineToRun(xmlDoc, runEl) {
+    var rPrList = runEl.getElementsByTagName('w:rPr');
+    var rPr;
+    if (rPrList.length) rPr = rPrList[0];
+    else { rPr = xmlDoc.createElementNS(W_NS, 'w:rPr'); runEl.insertBefore(rPr, runEl.firstChild); }
+    var uList = rPr.getElementsByTagName('w:u');
+    var uEl;
+    if (uList.length) uEl = uList[0];
+    else { uEl = xmlDoc.createElementNS(W_NS, 'w:u'); rPr.appendChild(uEl); }
+    uEl.setAttributeNS(W_NS, 'w:val', 'single');
+  }
+
   // Membungkus rentang [s,e) teks paragraf dengan <w:hyperlink w:anchor="...">, memecah
   // hanya run yang tersentuh dan menjaga rPr asli tiap run — run lain tidak disentuh sama sekali.
   // colorHex (opsional) diterapkan HANYA ke run yang masuk hyperlink, bukan ke potongan
@@ -185,6 +201,49 @@
       if (matchText) {
         var mRun = createRun(xmlDoc, rPr, matchText);
         applyColorToRun(xmlDoc, mRun, colorHex);
+        matchRuns.push(mRun);
+      }
+      if (idx === overlapping.length - 1 && afterText) afterRun = createRun(xmlDoc, rPr, afterText);
+    });
+    matchRuns.forEach(function (r) { hl.appendChild(r); });
+
+    var insertBefore = overlapping[0].run;
+    if (beforeRun) p.insertBefore(beforeRun, insertBefore);
+    p.insertBefore(hl, insertBefore);
+    if (afterRun) p.insertBefore(afterRun, insertBefore);
+    overlapping.forEach(function (inf) { p.removeChild(inf.run); });
+    return true;
+  }
+
+  // Sama seperti wrapWithHyperlink, tapi untuk URL EKSTERNAL (link ke luar dokumen, mis. DOI/
+  // halaman jurnal) — pakai r:id yang menunjuk ke entri di word/_rels/document.xml.rels, bukan
+  // w:anchor yang menunjuk ke bookmark internal. colorHex default biru+underline khas hyperlink
+  // kalau tidak diberikan, karena ini benar-benar link baru yang sebelumnya tidak bisa diklik
+  // sama sekali — beda dari sitasi internal yang formatnya sengaja dijaga apa adanya by default.
+  function wrapWithExternalHyperlink(xmlDoc, p, s, e, rId, colorHex) {
+    var info = getRunInfos(p);
+    var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
+    if (overlapping.length === 0) return false;
+    if (overlapping.some(function (inf) { return !inf.spliceable; })) return false;
+
+    var hl = xmlDoc.createElementNS(W_NS, 'w:hyperlink');
+    hl.setAttributeNS(R_NS, 'r:id', rId);
+    hl.setAttributeNS(W_NS, 'w:history', '1');
+
+    var beforeRun = null, afterRun = null, matchRuns = [];
+    overlapping.forEach(function (inf, idx) {
+      var rPrList = inf.run.getElementsByTagName('w:rPr');
+      var rPr = rPrList.length ? rPrList[0] : null;
+      var localS = Math.max(s, inf.start) - inf.start;
+      var localE = Math.min(e, inf.end) - inf.start;
+      var beforeText = inf.text.slice(0, localS);
+      var matchText = inf.text.slice(localS, localE);
+      var afterText = inf.text.slice(localE);
+      if (idx === 0 && beforeText) beforeRun = createRun(xmlDoc, rPr, beforeText);
+      if (matchText) {
+        var mRun = createRun(xmlDoc, rPr, matchText);
+        applyColorToRun(xmlDoc, mRun, colorHex || '0563C1');
+        applyUnderlineToRun(xmlDoc, mRun);
         matchRuns.push(mRun);
       }
       if (idx === overlapping.length - 1 && afterText) afterRun = createRun(xmlDoc, rPr, afterText);
@@ -366,6 +425,203 @@
   //                                              hyperlink) untuk teks sitasi yang ditautkan.
   //                                              null/kosong = format asli TIDAK diubah sama sekali.
   // ============================================================
+  // ---------- Auto-link URL/DOI polos di daftar referensi ----------
+  // Banyak naskah punya URL/DOI di entri referensi yang cuma teks BIASA (bukan hyperlink asli,
+  // sering karena tempel-dari-Word-lain atau autoformat gagal) — jadi tidak bisa diklik sama
+  // sekali. Bagian ini mendeteksi pola URL/DOI dalam teks referensi dan membuatnya bisa diklik,
+  // memakai <w:hyperlink r:id="..."> yang menunjuk ke entri BARU di word/_rels/document.xml.rels
+  // (link ke luar dokumen — beda dari w:anchor yang dipakai sitasi in-text untuk lompat internal).
+  var URL_RE = /\bhttps?:\/\/[^\s<>()\[\]{}"'\u2018\u2019\u201c\u201d]+/gi;
+  var BARE_DOI_RE = /\b(?:doi\s*[:.]?\s*)(10\.\d{4,9}\/[^\s<>()\[\]{}"'\u2018\u2019\u201c\u201d,;]+)/gi;
+
+  // URL yang diakhiri tanda baca kalimat (titik/koma penutup kalimat, kurung tutup tanpa
+  // pasangan, dst.) hampir selalu bukan bagian dari URL itu sendiri — potong dari belakang.
+  function trimTrailingPunctuation(url) {
+    var out = url;
+    while (out.length && /[.,;:!?)\]]/.test(out.charAt(out.length - 1))) {
+      // kurung tutup ")" cuma dipotong kalau tidak ada kurung buka "(" yang belum tertutup di
+      // dalam URL itu sendiri (beberapa URL Wikipedia/DOI sah memuat "(" "..." ")").
+      if (out.charAt(out.length - 1) === ')' && (out.match(/\(/g) || []).length > (out.match(/\)/g) || []).length - 1) break;
+      out = out.slice(0, -1);
+    }
+    return out;
+  }
+
+  function findExternalUrlMatches(text) {
+    var matches = [];
+    var seen = {}; // hindari overlap kalau URL_RE & BARE_DOI_RE kebetulan tumpang tindih di posisi yang sama
+    var m;
+    URL_RE.lastIndex = 0;
+    while ((m = URL_RE.exec(text)) !== null) {
+      var trimmed = trimTrailingPunctuation(m[0]);
+      if (trimmed.length < 10) continue; // terlalu pendek untuk URL sungguhan, kemungkinan salah tangkap
+      matches.push({ start: m.index, end: m.index + trimmed.length, url: trimmed });
+      for (var i = m.index; i < m.index + trimmed.length; i++) seen[i] = true;
+    }
+    BARE_DOI_RE.lastIndex = 0;
+    while ((m = BARE_DOI_RE.exec(text)) !== null) {
+      var doiStart = m.index + m[0].indexOf(m[1]);
+      var doiEnd = doiStart + m[1].length;
+      if (seen[doiStart]) continue; // sudah tercakup match URL_RE (mis. "https://doi.org/10.xxxx")
+      var trimmedDoi = trimTrailingPunctuation(m[1]);
+      matches.push({ start: doiStart, end: doiStart + trimmedDoi.length, url: 'https://doi.org/' + trimmedDoi });
+    }
+    matches.sort(function (a, b) { return a.start - b.start; });
+    return matches;
+  }
+
+  // Kembalikan rId yang sudah ada untuk URL ini kalau sudah pernah ditambahkan (mis. dua
+  // referensi berbeda kebetulan mengarah ke domain/DOI landing page yang sama), atau buat entri
+  // Relationship baru di file .rels dan kembalikan rId barunya.
+  function ensureExternalRelationship(relsXmlDoc, url) {
+    var root = relsXmlDoc.documentElement;
+    var rels = root.getElementsByTagName('Relationship');
+    var maxNum = 0;
+    for (var i = 0; i < rels.length; i++) {
+      if (rels[i].getAttribute('Target') === url && rels[i].getAttribute('TargetMode') === 'External') {
+        return rels[i].getAttribute('Id');
+      }
+      var m = /^rId(\d+)$/.exec(rels[i].getAttribute('Id') || '');
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+    }
+    var newId = 'rId' + (maxNum + 1);
+    var newRel = relsXmlDoc.createElement('Relationship');
+    newRel.setAttribute('Id', newId);
+    newRel.setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink');
+    newRel.setAttribute('Target', url);
+    newRel.setAttribute('TargetMode', 'External');
+    root.appendChild(newRel);
+    return newId;
+  }
+
+  // Menaut setiap URL/DOI polos yang ditemukan di paragraf REFERENSI (bukan badan artikel —
+  // link internal sitasi sudah ditangani terpisah). Melewati URL yang sudah di dalam
+  // <w:hyperlink> (sudah bisa diklik, tidak perlu disentuh).
+  function linkifyReferenceUrls(xmlDoc, relsXmlDoc, refParas) {
+    var linked = 0;
+    refParas.forEach(function (paraObj) {
+      var p = paraObj.el;
+      var info = getRunInfos(p);
+      var matches = findExternalUrlMatches(info.text);
+      // proses dari BELAKANG ke DEPAN: membungkus satu match mengubah struktur run tapi TIDAK
+      // mengubah teks, jadi posisi karakter match lain di paragraf yang SAMA tetap valid — kecuali
+      // urutan pemrosesan harus mundur supaya insert/remove run untuk satu match tidak membuat
+      // referensi DOM match berikutnya (yang sudah dihitung dari p yang sama) jadi basi.
+      matches.slice().reverse().forEach(function (mt) {
+        var overlapping = info.infos.filter(function (inf) { return inf.end > mt.start && inf.start < mt.end; });
+        if (overlapping.length === 0) return;
+        var alreadyLinked = overlapping.every(function (inf) { return !!findWrapperHyperlink(inf.run, p); });
+        if (alreadyLinked) return; // URL ini sudah bisa diklik, tidak perlu disentuh
+        if (overlapping.some(function (inf) { return !inf.spliceable; })) return; // sebagian di wrapper lain (tracked-change dst.) — lewati demi aman
+        var rId = ensureExternalRelationship(relsXmlDoc, mt.url);
+        if (wrapWithExternalHyperlink(xmlDoc, p, mt.start, mt.end, rId)) linked++;
+      });
+    });
+    return linked;
+  }
+
+  // ---------- Opsional: tautkan sebutan "Figure N" / "Table N" ke gambar/tabelnya ----------
+  // Beda dari sitasi & URL referensi di atas: ini FITUR OPSIONAL (default nonaktif), diaktifkan
+  // lewat options.linkFiguresTables. Caption ("Figure 1. Contoh...") dikenali dari paragraf yang
+  // TEKSNYA DIAWALI pola "Figure N"/"Table N" (mengabaikan spasi di depan) — paragraf itu diberi
+  // bookmark, lalu setiap kemunculan "Figure N"/"Table N" LAIN di badan artikel (bukan caption-nya
+  // sendiri) yang merujuk nomor yang sama ditautkan ke bookmark itu.
+  var CAPTION_START_RE = /^\s*(Figure|Fig\.?|Gambar|Table|Tabel)\s*\.?\s*(\d+)\b/i;
+  var FIGTBL_MENTION_RE = /\b(Figure|Fig\.?|Gambar|Table|Tabel)\s*\.?\s*(\d+)\b/gi;
+
+  function figTblType(label) {
+    return /^(table|tabel)/i.test(label) ? 'tbl' : 'fig';
+  }
+
+  // Menyusun daftar caption (paragraf yang DIAWALI "Figure N"/"Table N") beserta posisi absolut
+  // tiap paragraf di dalam teks gabungan seluruh badan artikel (sama seperti articleText di
+  // linkDocx) — dibutuhkan supaya kemunculan in-text bisa dicocokkan lintas paragraf memakai satu
+  // sistem koordinat yang konsisten.
+  function findFigureTableCaptions(bodyParas) {
+    var captions = []; // { type, number, paraIndex, start (posisi absolut label "Figure N" di teks gabungan) }
+    var offset = 0;
+    bodyParas.forEach(function (p, idx) {
+      var m = CAPTION_START_RE.exec(p.text);
+      if (m) {
+        captions.push({
+          type: figTblType(m[1]),
+          number: m[2],
+          paraIndex: idx,
+          start: offset + m.index,
+          end: offset + m.index + m[0].length,
+        });
+      }
+      offset += p.text.length + 1; // +1 untuk pemisah '\n' yang dipakai saat menggabungkan paragraf jadi satu teks
+    });
+    return captions;
+  }
+
+  // Menautkan setiap kemunculan "Figure N"/"Table N" LAIN (bukan caption-nya sendiri) ke bookmark
+  // caption yang sesuai. Butuh bodyParas + articleText (posisi absolut) dari linkDocx supaya bisa
+  // memetakan balik posisi match ke paragraf & offset lokalnya masing-masing.
+  function linkFigureTableReferences(xmlDoc, bodyParas, articleText, bookmarkSeqStart) {
+    var captions = findFigureTableCaptions(bodyParas);
+    if (captions.length === 0) return { linked: 0, captionsFound: 0 };
+
+    // Beri tiap caption bookmark unik (dibuat SEKALI per nomor+tipe — kalau ada dua caption
+    // dengan nomor sama, mis. penomoran ulang di draft, yang PERTAMA ditemukan dipakai).
+    var bookmarkOf = {}; // 'fig_1' -> nama bookmark
+    var bmId = bookmarkSeqStart;
+    captions.forEach(function (c) {
+      var key = c.type + '_' + c.number;
+      if (bookmarkOf[key]) return; // nomor duplikat, sudah ada bookmark dari caption pertama
+      var name = 'figtbl_' + key;
+      insertBookmark(xmlDoc, bodyParas[c.paraIndex].el, name, bmId++);
+      bookmarkOf[key] = name;
+    });
+
+    // Hitung offset absolut awal tiap paragraf (sama seperti findFigureTableCaptions di atas)
+    // supaya posisi match dari regex full-text bisa dipetakan balik ke [paraIndex, localOffset].
+    var paraOffsets = [];
+    var running = 0;
+    bodyParas.forEach(function (p) { paraOffsets.push(running); running += p.text.length + 1; });
+    function paraIndexAt(absPos) {
+      for (var i = paraOffsets.length - 1; i >= 0; i--) {
+        if (absPos >= paraOffsets[i]) return i;
+      }
+      return 0;
+    }
+
+    var captionSpans = captions.map(function (c) { return { start: c.start, end: c.end }; });
+    function isCaptionSelfMention(matchStart, matchEnd) {
+      return captionSpans.some(function (s) { return matchStart >= s.start && matchEnd <= s.end; });
+    }
+
+    var linked = 0;
+    var m;
+    FIGTBL_MENTION_RE.lastIndex = 0;
+    // Kumpulkan dulu semua match SEBELUM membungkus siapa pun — membungkus satu match mengubah
+    // struktur run paragrafnya (walau tidak mengubah teks), jadi lebih aman memproses per-PARAGRAF
+    // dari BELAKANG ke DEPAN agar match lain dalam paragraf yang sama tidak jadi basi posisinya.
+    var matchesByPara = {};
+    while ((m = FIGTBL_MENTION_RE.exec(articleText)) !== null) {
+      if (isCaptionSelfMention(m.index, m.index + m[0].length)) continue;
+      var type = figTblType(m[1]);
+      var key = type + '_' + m[2];
+      var bookmarkName = bookmarkOf[key];
+      if (!bookmarkName) continue; // sebut "Figure 9" tapi tidak ada caption Figure 9 -> lewati, jangan tebak
+      var pIdx = paraIndexAt(m.index);
+      var localStart = m.index - paraOffsets[pIdx];
+      var localEnd = localStart + m[0].length;
+      if (!matchesByPara[pIdx]) matchesByPara[pIdx] = [];
+      matchesByPara[pIdx].push({ start: localStart, end: localEnd, bookmarkName: bookmarkName });
+    }
+    Object.keys(matchesByPara).forEach(function (pIdxStr) {
+      var pIdx = parseInt(pIdxStr, 10);
+      var p = bodyParas[pIdx].el;
+      matchesByPara[pIdxStr].slice().reverse().forEach(function (mt) {
+        if (wrapWithHyperlink(xmlDoc, p, mt.start, mt.end, mt.bookmarkName, null)) linked++;
+      });
+    });
+
+    return { linked: linked, captionsFound: captions.length };
+  }
+
   function linkDocx(xmlDoc, options) {
     options = options || {};
     var narrowToHighlight = options.narrowToHighlight !== false;
@@ -621,6 +877,22 @@
       });
     });
 
+    // URL/DOI polos di daftar referensi -> jadi bisa diklik. Default AKTIF (kebanyakan orang
+    // mau ini otomatis); butuh relsXmlDoc (word/_rels/document.xml.rels, sudah di-parse) yang
+    // dikirim si pemanggil, karena link eksternal perlu entri Relationship baru yang TIDAK bisa
+    // dibuat cukup dari document.xml saja.
+    var urlsLinked = 0;
+    if (options.linkReferenceUrls !== false && options.relsXmlDoc) {
+      urlsLinked = linkifyReferenceUrls(xmlDoc, options.relsXmlDoc, refParas);
+    }
+
+    // Sebutan "Figure N"/"Table N" -> tautkan ke gambar/tabel aslinya. Fitur OPSIONAL, default
+    // NONAKTIF — beda dari dua fitur di atas, ini cuma jalan kalau eksplisit diminta.
+    var figTblResult = { linked: 0, captionsFound: 0 };
+    if (options.linkFiguresTables) {
+      figTblResult = linkFigureTableReferences(xmlDoc, bodyParas, articleText, 8000);
+    }
+
     return {
       styleId: styleId,
       styleName: style.name,
@@ -635,11 +907,21 @@
       skippedNotHighlighted: skippedNotHighlighted,
       newlyLinked: newCount,
       retargeted: retargetedCount,
-      alreadyLinked: alreadyCount
+      alreadyLinked: alreadyCount,
+      urlsLinked: urlsLinked,
+      figuresTablesLinked: figTblResult.linked,
+      figuresTablesCaptionsFound: figTblResult.captionsFound
     };
   }
 
-  var CitationLinker = { linkDocx: linkDocx };
+  var CitationLinker = {
+    linkDocx: linkDocx,
+    findExternalUrlMatches: findExternalUrlMatches,
+    ensureExternalRelationship: ensureExternalRelationship,
+    linkifyReferenceUrls: linkifyReferenceUrls,
+    findFigureTableCaptions: findFigureTableCaptions,
+    linkFigureTableReferences: linkFigureTableReferences,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = CitationLinker;
   if (typeof window !== 'undefined') window.CitationLinker = CitationLinker;
   else if (typeof self !== 'undefined') self.CitationLinker = CitationLinker;
