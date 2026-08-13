@@ -947,7 +947,7 @@
 
   function updateScopusLoadStatus() {
     if (!scopusDatabase) {
-      els.scopusLoadStatus.textContent = 'Belum ada data dimuat.';
+      els.scopusLoadStatus.textContent = 'Data Scopus tidak ditemukan otomatis di repo (scopus_sources.json). Muat manual di bawah, atau taruh berkasnya sejajar dengan engine.js di GitHub Anda supaya termuat otomatis lain kali.';
       els.scopusLoadStatus.className = 'status info';
       els.scopusCheckBtn.disabled = true;
       return;
@@ -955,7 +955,8 @@
     var parts = [];
     if (scopusDatabase.sourceCount) parts.push(scopusDatabase.sourceCount.toLocaleString('id-ID') + ' jurnal/sumber');
     if (scopusDatabase.proceedingsCount) parts.push(scopusDatabase.proceedingsCount.toLocaleString('id-ID') + ' prosiding');
-    var statusText = '✅ Data dimuat: ' + parts.join(', ') + '.';
+    var source = els.scopusAutoLoaded ? ' (otomatis dari repo)' : ' (dimuat manual)';
+    var statusText = '✅ Data dimuat' + source + ': ' + parts.join(', ') + '.';
     if (!lastResult) statusText += ' Jalankan Validasi Sitasi dulu di bawah sebelum bisa mengecek Scopus.';
     els.scopusLoadStatus.textContent = statusText;
     els.scopusLoadStatus.className = 'status success';
@@ -976,6 +977,38 @@
     });
   }
 
+  // Coba fetch otomatis dari file di repo yang sama (mis. kalau scopus_sources.json ditaruh
+  // sejajar dengan engine.js dkk. di GitHub) — supaya pengguna tidak perlu upload manual tiap
+  // kali. Kalau berkasnya tidak ada (404) atau gagal di-parse, diam-diam lanjut ke opsi upload
+  // manual tanpa menampilkan ini sebagai error yang mengganggu.
+  function tryFetchJSON(url) {
+    return fetch(url).then(function(res) {
+      if (!res.ok) return null;
+      return res.json().catch(function() { return null; });
+    }).catch(function() { return null; });
+  }
+
+  function autoLoadScopusData() {
+    if (!els.scopusSourcesFile) return;
+    els.scopusLoadStatus.textContent = '⏳ Mencoba memuat data Scopus dari repo...';
+    els.scopusLoadStatus.className = 'status info';
+    Promise.all([tryFetchJSON('scopus_sources.json'), tryFetchJSON('scopus_proceedings.json')])
+      .then(function(res) {
+        var sources = res[0], proceedings = res[1];
+        if (!sources && !proceedings) {
+          // Tidak ketemu di repo — bukan error, cuma berarti belum ditaruh di sana. Tampilkan
+          // opsi upload manual sebagai alternatif.
+          updateScopusLoadStatus();
+          return;
+        }
+        scopusDatabase = new window.ScopusMatcher.ScopusDatabase();
+        if (sources) scopusDatabase.loadSourceListCompact(sources);
+        if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
+        els.scopusAutoLoaded = true;
+        updateScopusLoadStatus();
+      });
+  }
+
   if (els.scopusSourcesFile) {
     function loadScopusFiles() {
       els.scopusLoadStatus.textContent = '⏳ Memuat...';
@@ -987,6 +1020,7 @@
           if (!scopusDatabase) scopusDatabase = new window.ScopusMatcher.ScopusDatabase();
           if (sources) scopusDatabase.loadSourceListCompact(sources);
           if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
+          els.scopusAutoLoaded = false; // dimuat manual, timpa status "otomatis dari repo" kalau ada
           updateScopusLoadStatus();
         })
         .catch(function(err) {
@@ -1011,6 +1045,8 @@
         if (tabBtn) tabBtn.click();
       }, 30);
     });
+
+    autoLoadScopusData();
   }
 
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
