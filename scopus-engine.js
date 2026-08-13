@@ -165,12 +165,18 @@
   // dihasilkan dari Scopus Source List resmi (kolom: ISSN, EISSN, Source Title, Active or
   // Inactive, Coverage, Source Type) — [issn, eissn, title, active(0/1), coverage, sourceType].
   // Lebih murah dibanding array-of-object untuk dataset ~49 ribu baris.
+  // row = [issn, eissn, title, active, coverage, sourceType, discontinued?, historyNote?, relatedTitle?]
+  // 3 field terakhir opsional untuk kompatibilitas mundur dengan format lama (6 kolom).
   ScopusDatabase.prototype.loadSourceListCompact = function (compactArray) {
     var self = this;
     (compactArray || []).forEach(function (row) {
       self.sourceCount++;
       var issn = row[0], eissn = row[1], title = row[2], active = row[3], coverage = row[4], sourceType = row[5];
-      var src = { issn: issn, eissn: eissn, title: title, active: !!active, coverage: coverage, sourceType: sourceType };
+      var discontinued = row[6], historyNote = row[7], relatedTitle = row[8];
+      var src = {
+        issn: issn, eissn: eissn, title: title, active: !!active, coverage: coverage, sourceType: sourceType,
+        discontinued: !!discontinued, historyNote: historyNote || null, relatedTitle: relatedTitle || null,
+      };
       var nissn = normalizeISSN(issn);
       var neissn = normalizeISSN(eissn);
       if (nissn) self.bySourceISSN[nissn] = src;
@@ -298,7 +304,15 @@
       if (yearCovered === false) {
         return { status: STATUS.UNKNOWN, confidence: best ? best.score : 0, method: 'JOURNAL_FOUND_YEAR_NOT_COVERED', matchedSource: src };
       }
-      return { status: STATUS.SCOPUS_SOURCE_ONLY, confidence: best ? best.score : 0, method: 'JOURNAL_IN_SOURCE_LIST', matchedSource: src };
+      // "Discontinued by Scopus" (beda dari sekadar Inactive/ganti nama) sering berarti Scopus
+      // men-delist jurnal ini karena masalah kualitas/integritas terbitan — status tetap
+      // SCOPUS_SOURCE_ONLY (cakupan tahun yang disitasi tetap data historis yang sah), tapi
+      // pemanggil (UI) sebaiknya menampilkan ini sebagai peringatan tersendiri, bukan disamakan
+      // begitu saja dengan jurnal Inactive biasa (yang biasanya cuma ganti nama/gabung).
+      return {
+        status: STATUS.SCOPUS_SOURCE_ONLY, confidence: best ? best.score : 0, method: 'JOURNAL_IN_SOURCE_LIST', matchedSource: src,
+        discontinuedWarning: !!src.discontinued,
+      };
     }
 
     return { status: STATUS.UNKNOWN, confidence: best ? best.score : 0, method: 'NO_RELIABLE_MATCH' };

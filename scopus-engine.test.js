@@ -223,6 +223,51 @@ test('loadProceedingsCompact indexes a [isbn, title, year, publisher] row and ma
   assert.strictEqual(found.title, 'Some Conference Proceedings 2020');
 });
 
+console.log('\n=== ScopusDatabase: distinguishing "Discontinued by Scopus" from ordinary Inactive (renamed/merged) ===');
+
+test('a journal marked "Discontinued by Scopus" (field index 6) surfaces discontinuedWarning: true on a SOURCE_ONLY match, while status stays SCOPUS_SOURCE_ONLY (historical coverage is still legitimate)', () => {
+  const db = new SM.ScopusDatabase();
+  db.loadSourceListCompact([
+    ['1013-3119', null, 'Some Discontinued Journal', 0, '1989-2018', 'Journal', 1, 'Formerly known as', 'Old Name'],
+  ]);
+  const r = ref('Smith, J. (2015). Some paper. Some Discontinued Journal, 12(3), 100-120.');
+  const result = SM.checkReference(r, db);
+  assert.strictEqual(result.status, SM.STATUS.SCOPUS_SOURCE_ONLY);
+  assert.strictEqual(result.discontinuedWarning, true);
+});
+
+test('an ordinary Inactive journal (renamed/merged, but NOT flagged "Discontinued by Scopus") does NOT raise discontinuedWarning', () => {
+  const db = new SM.ScopusDatabase();
+  db.loadSourceListCompact([
+    ['1234-5678', null, 'Some Renamed Journal', 0, '1989-2020', 'Journal', 0, 'Continued as', 'New Name'],
+  ]);
+  const r = ref('Smith, J. (2015). Some paper. Some Renamed Journal, 12(3), 100-120.');
+  const result = SM.checkReference(r, db);
+  assert.strictEqual(result.status, SM.STATUS.SCOPUS_SOURCE_ONLY);
+  assert.strictEqual(result.discontinuedWarning, false);
+});
+
+test('an Active journal never raises discontinuedWarning', () => {
+  const db = new SM.ScopusDatabase();
+  db.loadSourceListCompact([
+    ['1234-5678', null, 'Some Active Journal', 1, '2000-2026', 'Journal', 0, '', ''],
+  ]);
+  const r = ref('Smith, J. (2023). Some paper. Some Active Journal, 12(3), 100-120.');
+  const result = SM.checkReference(r, db);
+  assert.strictEqual(result.discontinuedWarning, false);
+});
+
+test('the compact loader remains backward-compatible with the OLD 6-field format (no discontinued/history/related columns) — extra fields simply default to falsy/null', () => {
+  const db = new SM.ScopusDatabase();
+  db.loadSourceListCompact([
+    ['1234-5678', null, 'Old Format Journal', 1, '2000-2026', 'Journal'], // cuma 6 field, format lama
+  ]);
+  const found = db.findBySourceISSN('1234-5678');
+  assert.strictEqual(found.discontinued, false);
+  assert.strictEqual(found.historyNote, null);
+  assert.strictEqual(found.relatedTitle, null);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

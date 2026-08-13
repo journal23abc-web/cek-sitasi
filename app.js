@@ -932,15 +932,26 @@
       var ref = r.ref;
       var label = (ref.firstAuthor || '-') + (ref.year ? ' (' + ref.year + ')' : '');
       var explain;
+      var discWarningHtml = '';
       if (r.status === 'SCOPUS') explain = r.method === 'DOI_EXACT' ? 'Dokumen ditemukan persis lewat DOI.' : 'Dokumen ditemukan lewat kecocokan metadata (judul, penulis, jurnal, tahun) yang sangat tinggi (' + Math.round(r.confidence * 100) + '%).';
       else if (r.status === 'PROBABLE_SCOPUS') explain = 'Metadata cukup mirip (' + Math.round(r.confidence * 100) + '%) dengan salah satu dokumen di database, tapi belum cukup pasti untuk diklaim tertemukan persis.';
-      else if (r.status === 'SCOPUS_SOURCE_ONLY') explain = 'Jurnal/sumbernya (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') terindeks Scopus, tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat.';
+      else if (r.status === 'SCOPUS_SOURCE_ONLY') {
+        explain = 'Jurnal/sumbernya (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') terindeks Scopus, tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat.';
+        if (r.discontinuedWarning) {
+          var related = r.matchedSource && r.matchedSource.relatedTitle;
+          discWarningHtml = '<div class="issue-item warning" style="margin-top:8px;padding:10px 12px;">'
+            + '<b>⚠️ Perhatian: jurnal ini ditandai "Discontinued by Scopus"</b> — beda dari sekadar tidak aktif/ganti nama. Scopus biasanya menghentikan cakupan sebuah jurnal karena masalah kualitas/integritas terbitan, bukan cuma administratif. Cakupan tahun yang tercantum tetap data historis yang sah, tapi ada baiknya diperiksa lebih lanjut kredibilitas jurnal ini untuk tahun tersebut.'
+            + (related ? '<br><span style="color:var(--text-faint);">Nama terkait: ' + esc(related) + '</span>' : '')
+            + '</div>';
+        }
+      }
       else if (r.method === 'JOURNAL_FOUND_YEAR_NOT_COVERED') explain = 'Jurnalnya ada di Source List Scopus, tetapi tahun ' + esc(ref.year || '-') + ' berada di luar rentang cakupan Scopus untuk jurnal ini (cakupan: ' + esc((r.matchedSource && r.matchedSource.coverage) || '-') + ').';
       else explain = 'Belum ditemukan bukti yang cukup — bisa jadi referensi ini memang bukan Scopus, atau database yang dimuat belum mencakupnya.';
       html += '<div class="issue-item ' + meta.cls + '">';
       html += '<div class="issue-header"><span class="issue-sev">' + meta.icon + ' ' + meta.badge + '</span><span class="issue-title">' + esc(label) + '</span></div>';
       html += '<div class="issue-desc">' + explain + '</div>';
       html += '<div class="code-block" style="cursor:default;">' + esc((ref.raw || '').slice(0, 150)) + '</div>';
+      html += discWarningHtml;
       html += '</div>';
     });
     el.innerHTML = html;
