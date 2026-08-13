@@ -170,6 +170,7 @@
       renderAll(result, []);
       renderReportPreview();
       updateScopusLoadStatus();
+      runScopusCheckIfReady();
 
       // DOI checking (async, progressive)
       var refsWithDoi = result.references.filter(function(r) { return r.doi; });
@@ -857,8 +858,9 @@
         html += 'CrossRef — Judul: ' + esc(m.crossref.title||'-') + ' | Penulis: ' + esc(m.crossref.authors||'-') + ' | Tahun: ' + esc(m.crossref.year||'-');
         html += '</div>';
       }
-      if (issue.status === 'no_doi' && issue.ref) {
-        html += '<button class="doi-search-btn" data-doi-search-idx="' + idx + '" style="margin-top:8px;">🔍 Cari DOI</button>';
+      if ((issue.status === 'no_doi' || issue.status === 'fake') && issue.ref) {
+        if (issue.status === 'fake') html += '<p style="font-size:11px;color:var(--text-dim);margin:6px 0 0;">DOI "' + esc(issue.doi) + '" mungkin salah ketik atau memang tidak ada — coba cari DOI yang benar berdasarkan judul/penulis/tahun:</p>';
+        html += '<button class="doi-search-btn" data-doi-search-idx="' + idx + '" style="margin-top:8px;">🔍 Cari DOI' + (issue.status === 'fake' ? ' yang Benar' : '') + '</button>';
         html += '<div class="doi-search-results" id="doiSearchResults' + idx + '"></div>';
       }
       html += '</div>';
@@ -919,11 +921,11 @@
     var el = document.getElementById('list-scopus');
     if (!el) return;
     if (!scopusDatabase) {
-      el.innerHTML = '<div class="no-issues">🎓 Muat data Scopus Source List dulu di panel "Cek Status Scopus" di atas (sebelum tombol Validasi), lalu klik tombolnya untuk mengecek referensi Anda.</div>';
+      el.innerHTML = '<div class="no-issues">🎓 Data Scopus Source List belum tersedia — taruh <code>scopus_sources.json</code> di repo (termuat otomatis), atau unggah manual di panel "Cek Status Scopus" di atas. Begitu tersedia, pengecekan berjalan otomatis.</div>';
       return;
     }
     if (!scopusResults || scopusResults.length === 0) {
-      el.innerHTML = '<div class="no-issues">🎓 Data sudah dimuat. Klik "Cek Status Scopus untuk Semua Referensi" di atas untuk menjalankan pengecekan.</div>';
+      el.innerHTML = '<div class="no-issues">🎓 Data sudah tersedia — jalankan Validasi Sitasi di atas, pengecekan Scopus akan berjalan otomatis begitu selesai.</div>';
       return;
     }
     var html = '';
@@ -969,10 +971,25 @@
     if (scopusDatabase.proceedingsCount) parts.push(scopusDatabase.proceedingsCount.toLocaleString('id-ID') + ' prosiding');
     var source = els.scopusAutoLoaded ? ' (otomatis dari repo)' : ' (dimuat manual)';
     var statusText = '✅ Data dimuat' + source + ': ' + parts.join(', ') + '.';
-    if (!lastResult) statusText += ' Jalankan Validasi Sitasi dulu di bawah sebelum bisa mengecek Scopus.';
+    if (!lastResult) statusText += ' Pengecekan Scopus akan berjalan otomatis begitu Anda menjalankan Validasi Sitasi di bawah.';
+    else statusText += ' Referensi sudah dicek otomatis — lihat tab "Scopus".';
     els.scopusLoadStatus.textContent = statusText;
     els.scopusLoadStatus.className = 'status success';
     els.scopusCheckBtn.disabled = !lastResult;
+  }
+
+  // Menjalankan cek Scopus otomatis begitu DUA syarat terpenuhi: data sudah dimuat (otomatis
+  // dari repo ATAU upload manual — cara memuatnya tetap opsional) DAN validasi sitasi sudah
+  // dijalankan. Tidak perlu klik tombol apa pun — sama seperti alur cek DOI yang juga otomatis.
+  // Dipanggil dari 3 tempat: setelah validasi utama selesai, setelah fetch otomatis dari repo
+  // selesai, dan setelah upload manual selesai — supaya urutan mana pun (data dulu atau validasi
+  // dulu) tetap berujung ke pengecekan otomatis.
+  function runScopusCheckIfReady() {
+    if (!scopusDatabase || !lastResult) return;
+    lastScopusResults = window.ScopusMatcher.checkAllReferences(lastResult.references, scopusDatabase);
+    renderScopusList(lastScopusResults);
+    renderReportPreview();
+    updateScopusLoadStatus();
   }
 
   function readJSONFile(fileInput) {
@@ -1018,6 +1035,7 @@
         if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
         els.scopusAutoLoaded = true;
         updateScopusLoadStatus();
+        runScopusCheckIfReady(); // kalau validasi sudah lebih dulu dijalankan sebelum fetch selesai
       });
   }
 
@@ -1034,6 +1052,7 @@
           if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
           els.scopusAutoLoaded = false; // dimuat manual, timpa status "otomatis dari repo" kalau ada
           updateScopusLoadStatus();
+          runScopusCheckIfReady(); // pengecekan langsung jalan, tidak perlu klik tombol
         })
         .catch(function(err) {
           els.scopusLoadStatus.textContent = '⚠️ ' + err.message;
@@ -1043,16 +1062,16 @@
     els.scopusSourcesFile.addEventListener('change', loadScopusFiles);
     els.scopusProceedingsFile.addEventListener('change', loadScopusFiles);
 
+    // Tombol ini sekarang cuma untuk CEK ULANG manual (mis. setelah ganti data) — pengecekan
+    // PERTAMA sudah berjalan otomatis lewat runScopusCheckIfReady() di atas, tidak wajib diklik.
     els.scopusCheckBtn.addEventListener('click', function() {
       if (!scopusDatabase || !lastResult) return;
       els.scopusCheckBtn.disabled = true;
-      els.scopusCheckBtn.textContent = '⏳ Mengecek...';
+      els.scopusCheckBtn.textContent = '⏳ Mengecek ulang...';
       setTimeout(function() { // beri browser kesempatan repaint tombol sebelum kerja berat sinkron
-        lastScopusResults = window.ScopusMatcher.checkAllReferences(lastResult.references, scopusDatabase);
+        runScopusCheckIfReady();
         els.scopusCheckBtn.disabled = false;
-        els.scopusCheckBtn.textContent = '🎓 Cek Status Scopus untuk Semua Referensi';
-        renderScopusList(lastScopusResults);
-        renderReportPreview();
+        els.scopusCheckBtn.textContent = '🔄 Cek Ulang Status Scopus';
         var tabBtn = document.getElementById('tab-btn-scopus');
         if (tabBtn) tabBtn.click();
       }, 30);
