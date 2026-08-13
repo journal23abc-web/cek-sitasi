@@ -129,6 +129,47 @@ test('overallPass requires every enabled rule to pass', () => {
   assert.strictEqual(result.overallPass, false);
 });
 
+console.log('\n=== scopus rule (replaces the international/local heuristic with verified Scopus status) ===');
+
+test('scopus rule fails with an explanatory detail when no Scopus check has been run yet, rather than silently passing/failing', () => {
+  const refs = [{ raw: 'a' }, { raw: 'b' }];
+  const rules = { scopus: { enabled: true, minScopusPercent: 100 } };
+  const result = JR.evaluateRules(refs, rules, {}, []);
+  const check = result.checks.find((c) => c.id === 'scopus');
+  assert.strictEqual(check.pass, false);
+  assert.strictEqual(check.actual, null);
+  assert.ok(check.detail.includes('Belum ada hasil pengecekan Scopus'));
+});
+
+test('scopus rule counts both SCOPUS and SCOPUS_SOURCE_ONLY as satisfying the requirement, but not PROBABLE_SCOPUS or UNKNOWN', () => {
+  const refs = [{ raw: 'a' }, { raw: 'b' }, { raw: 'c' }, { raw: 'd' }];
+  const rules = { scopus: { enabled: true, minScopusPercent: 50 } };
+  const scopusResults = [
+    { status: 'SCOPUS' }, { status: 'SCOPUS_SOURCE_ONLY' }, { status: 'PROBABLE_SCOPUS' }, { status: 'UNKNOWN' },
+  ];
+  const result = JR.evaluateRules(refs, rules, {}, scopusResults);
+  const check = result.checks.find((c) => c.id === 'scopus');
+  assert.strictEqual(check.actual, 50); // 2 dari 4 (SCOPUS + SOURCE_ONLY)
+  assert.strictEqual(check.pass, true); // 50% >= 50% ambang batas
+});
+
+test('scopus rule defaults to requiring 100% ("harus Scopus") when minScopusPercent is not specified', () => {
+  const refs = [{ raw: 'a' }, { raw: 'b' }];
+  const rules = { scopus: { enabled: true } };
+  const scopusResults = [{ status: 'SCOPUS' }, { status: 'UNKNOWN' }];
+  const result = JR.evaluateRules(refs, rules, {}, scopusResults);
+  const check = result.checks.find((c) => c.id === 'scopus');
+  assert.strictEqual(check.required, 100);
+  assert.strictEqual(check.pass, false); // cuma 50%, tidak memenuhi 100%
+});
+
+test('defaultRules includes the new scopus rule (disabled by default, pre-filled at 100%)', () => {
+  const d = JR.defaultRules();
+  assert.ok('scopus' in d);
+  assert.strictEqual(d.scopus.enabled, false);
+  assert.strictEqual(d.scopus.minScopusPercent, 100);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

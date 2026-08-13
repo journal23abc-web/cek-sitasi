@@ -49,8 +49,8 @@
     jrSourceTypeEnabled: document.getElementById('jrSourceTypeEnabled'),
     jrSourceTypeMinPercent: document.getElementById('jrSourceTypeMinPercent'),
     jrSourceTypeType: document.getElementById('jrSourceTypeType'),
-    jrOriginEnabled: document.getElementById('jrOriginEnabled'),
-    jrOriginMinPercent: document.getElementById('jrOriginMinPercent'),
+    jrScopusEnabled: document.getElementById('jrScopusEnabled'),
+    jrScopusMinPercent: document.getElementById('jrScopusMinPercent'),
     jrApplyBtn: document.getElementById('jrApplyBtn'),
     jrResultsPanel: document.getElementById('jrResultsPanel'),
     reportFileName: document.getElementById('reportFileName'),
@@ -446,7 +446,7 @@
 
     if (sections.indexOf('journalrules') !== -1 && window.JournalRulesEngine) {
       var jrConfig = readJournalRulesConfig();
-      var jrEval = window.JournalRulesEngine.evaluateRules(result.references, jrConfig, jrOverrides);
+      var jrEval = window.JournalRulesEngine.evaluateRules(result.references, jrConfig, jrOverrides, lastScopusResults);
       if (jrEval.totalRules > 0) {
         html += '<h2>Aturan Jurnal Custom</h2>';
         html += '<p class="rp-meta">' + (jrEval.overallPass ? '✅' : '⚠️') + ' ' + jrEval.passCount + ' dari ' + jrEval.totalRules + ' aturan terpenuhi</p><ul>';
@@ -696,7 +696,7 @@
       minCount: { enabled: els.jrMinCountEnabled.checked, value: parseInt(els.jrMinCountValue.value, 10) || 0 },
       yearRange: { enabled: els.jrYearRangeEnabled.checked, years: parseInt(els.jrYearRangeYears.value, 10) || 10, minPercent: parseInt(els.jrYearRangeMinPercent.value, 10) || 0 },
       sourceType: { enabled: els.jrSourceTypeEnabled.checked, type: els.jrSourceTypeType.value, minPercent: parseInt(els.jrSourceTypeMinPercent.value, 10) || 0 },
-      origin: { enabled: els.jrOriginEnabled.checked, minInternationalPercent: parseInt(els.jrOriginMinPercent.value, 10) || 0 },
+      scopus: { enabled: els.jrScopusEnabled.checked, minScopusPercent: parseInt(els.jrScopusMinPercent.value, 10) || 0 },
     };
   }
 
@@ -704,7 +704,7 @@
     if (!lastResult) return;
     var JR = window.JournalRulesEngine;
     var rules = readJournalRulesConfig();
-    var evalResult = JR.evaluateRules(lastResult.references, rules, jrOverrides);
+    var evalResult = JR.evaluateRules(lastResult.references, rules, jrOverrides, lastScopusResults);
     var classified = JR.classifyReferencesOrigin(lastResult.references, jrOverrides);
 
     var html = '';
@@ -722,6 +722,7 @@
     }
 
     html += '<div class="field-label" style="margin-top:18px;">Klasifikasi Asal Referensi (bisa dikoreksi manual)</div>' +
+      '<p style="font-size:11.5px;color:var(--text-faint);margin:-6px 0 10px;">Tabel ini cuma informasi tambahan (tebakan kata kunci) — <b>tidak lagi dipakai untuk aturan wajib</b>. Untuk aturan "harus terindeks Scopus", gunakan panel "Cek Status Scopus" di atas.</p>' +
       '<table class="jr-origin-table"><thead><tr><th>Referensi</th><th>Asal</th><th>Keyakinan</th></tr></thead><tbody>';
     classified.forEach(function(c) {
       var label = (c.ref.firstAuthor || '-') + (c.ref.year ? ' (' + c.ref.year + ')' : '');

@@ -91,7 +91,7 @@
     'website': 'Situs Web', 'report': 'Laporan', 'unknown': 'Tidak Diketahui',
   };
 
-  function evaluateRules(references, rules, overrides) {
+  function evaluateRules(references, rules, overrides, scopusResults) {
     rules = rules || {};
     var total = references.length;
     var checks = [];
@@ -150,6 +150,32 @@
       });
     }
 
+    // "Internasional" digantikan status Scopus TERVERIFIKASI (bukan cuma tebakan kata kunci
+    // seperti rule "origin" di atas) — sesuai permintaan: internasional = Scopus, dan (secara
+    // default) WAJIB Scopus. Status SCOPUS penuh dan SCOPUS_SOURCE_ONLY (jurnalnya terkonfirmasi
+    // ada di Source List Scopus, meski dokumen spesifiknya belum) dihitung "memenuhi" — keduanya
+    // sama-sama bukti nyata jurnal terindeks Scopus. PROBABLE_SCOPUS (kecocokan sebagian) dan
+    // UNKNOWN tidak dihitung, karena belum benar-benar terkonfirmasi.
+    if (rules.scopus && rules.scopus.enabled) {
+      var minScopusPercent = Number(rules.scopus.minScopusPercent);
+      if (isNaN(minScopusPercent)) minScopusPercent = 100;
+      if (!scopusResults || scopusResults.length === 0) {
+        checks.push({
+          id: 'scopus', label: 'Minimal ' + minScopusPercent + '% referensi terindeks Scopus',
+          pass: false, actual: null, required: minScopusPercent,
+          detail: 'Belum ada hasil pengecekan Scopus — jalankan "Cek Status Scopus untuk Semua Referensi" dulu di panel Scopus sebelum aturan ini bisa dievaluasi.',
+        });
+      } else {
+        var scopusConfirmed = scopusResults.filter(function (r) { return r.status === 'SCOPUS' || r.status === 'SCOPUS_SOURCE_ONLY'; }).length;
+        var scopusActualPercent = pct(scopusConfirmed, total);
+        checks.push({
+          id: 'scopus', label: 'Minimal ' + minScopusPercent + '% referensi terindeks Scopus',
+          pass: scopusActualPercent >= minScopusPercent, actual: scopusActualPercent, required: minScopusPercent,
+          detail: scopusConfirmed + ' dari ' + total + ' referensi (' + scopusActualPercent + '%) terkonfirmasi terindeks Scopus (status SCOPUS atau SOURCE ONLY); minimal ' + minScopusPercent + '%. Berdasarkan Scopus Source List yang dimuat, bukan tebakan kata kunci.',
+        });
+      }
+    }
+
     var enabledChecks = checks; // every pushed check is already for an enabled rule
     var passCount = enabledChecks.filter(function (c) { return c.pass; }).length;
     return {
@@ -167,6 +193,7 @@
       yearRange: { enabled: false, years: 10, minPercent: 80 },
       sourceType: { enabled: false, type: 'journal-article', minPercent: 70 },
       origin: { enabled: false, minInternationalPercent: 50 },
+      scopus: { enabled: false, minScopusPercent: 100 },
     };
   }
 
