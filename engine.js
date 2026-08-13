@@ -1129,14 +1129,26 @@ MultiFormatValidator.prototype.validate = function() {
   this.failedLines = parsed.failedLines;
   var family = this.style.family;
 
+  // Apa pun yang berada SEBELUM heading "Introduction"/"Pendahuluan" (judul, metadata penulis,
+  // kotak "How to Cite" / kutip-naskah-ini-sendiri, info artikel, abstrak) dikecualikan dari
+  // pemindaian sitasi — bagian itu sering memuat pola mirip sitasi yang SEBENARNYA bukan sitasi
+  // sungguhan (paling umum: "To cite this article: Nama, A. (2026)..." yang secara kebetulan
+  // persis berbentuk sitasi naratif). Teks artikel ITU SENDIRI tidak dipotong (articleText tetap
+  // utuh) — supaya nomor baris yang dilaporkan untuk masalah lain tetap sesuai dokumen asli;
+  // yang difilter cuma OBJEK SITASI yang posisinya jatuh sebelum offset ini. Kalau heading tidak
+  // ditemukan, offset-nya 0 -> tidak ada yang terfilter (perilaku lama, aman secara default).
+  var introHeading = findIntroductionHeading(this.articleText);
+  var introOffset = introHeading ? introHeading.offset + introHeading.lineLength : 0;
+  function afterIntro(c) { return c.position >= introOffset; }
+
   if (family === 'numeric') {
-    this.citations = extractNumericCitations(this.articleText);
+    this.citations = extractNumericCitations(this.articleText).filter(afterIntro);
     this.validateNumeric();
   } else if (family === 'author-date') {
-    this.citations = extractAuthorDateCitations(this.articleText);
+    this.citations = extractAuthorDateCitations(this.articleText).filter(afterIntro);
     this.validateAuthorDate();
   } else if (family === 'author-page') {
-    this.citations = extractAuthorPageCitations(this.articleText);
+    this.citations = extractAuthorPageCitations(this.articleText).filter(afterIntro);
     this.validateAuthorPage();
   }
 
@@ -1875,7 +1887,9 @@ MultiFormatValidator.prototype.validateCitationFormat = function() {
     extra_space_in_paren: 'Spasi berlebih di dalam tanda kurung sitasi',
     no_space_after_paren: 'Sitasi tanpa spasi setelah tanda kurung',
   };
-  var issues = detectMalformedCitations(this.articleText);
+  var introHeading2 = findIntroductionHeading(this.articleText);
+  var introOffset2 = introHeading2 ? introHeading2.offset + introHeading2.lineLength : 0;
+  var issues = detectMalformedCitations(this.articleText).filter(function(issue) { return issue.position >= introOffset2; });
   issues.forEach(function(issue) {
     self.errors.push({
       title: TITLES[issue.type] || 'Format sitasi bermasalah',
@@ -2026,7 +2040,32 @@ function findReferencesHeading(fullText) {
   return candidates[candidates.length - 1];
 }
 
-// A reference-list "chunk" is considered structurally complete once it has a year and ends in
+var INTRODUCTION_HEADING_RE = /^(introduction|pendahuluan|latar\s*belakang)$/i;
+
+// Sama arsitekturnya seperti findReferencesHeading, tapi mengambil kemunculan PERTAMA (bukan
+// terakhir) yang diikuti konten substansial — "Introduction"/"Pendahuluan" normalnya muncul
+// SEKALI, di awal naskah, sehingga kemunculan pertama yang masuk akal adalah yang benar.
+function findIntroductionHeading(fullText) {
+  var lines = fullText.split('\n');
+  var offset = 0;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var trimmed = line.trim();
+    if (trimmed.length > 0 && trimmed.length <= 60) {
+      var stripped = trimmed.replace(/^[\dIVXLC]+[.\)]\s*/i, '').replace(/[:.\s]+$/, '');
+      var wordCount = stripped.split(/\s+/).filter(Boolean).length;
+      if (INTRODUCTION_HEADING_RE.test(stripped) && wordCount <= 4) {
+        var afterOffset = offset + line.length;
+        var afterText = fullText.slice(afterOffset).trim();
+        if (afterText.length >= 30) return { lineIndex: i, offset: offset, lineLength: line.length, text: trimmed };
+      }
+    }
+    offset += line.length + 1;
+  }
+  return null;
+}
+
+
 // a way real references normally end (sentence-final punctuation, or a trailing DOI/URL) — used
 // to stop merging further lines onto it, so unrelated content starting right after (see below)
 // can't get glued on just because it doesn't itself look like a new reference's opening line.
@@ -2561,6 +2600,7 @@ var CitationEngine = {
   findReferencesHeading: findReferencesHeading,
   YearRange: YearRange,
   detectSourceType: detectSourceType,
+  findIntroductionHeading: findIntroductionHeading,
   extractBibliographicFields: extractBibliographicFields,
   looksLikeNonInvertedAuthorList: looksLikeNonInvertedAuthorList,
   DOI_NOT_EXPECTED_TYPES: DOI_NOT_EXPECTED_TYPES,

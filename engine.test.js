@@ -844,6 +844,40 @@ test('parseReferenceLine extracts an explicit ISSN/eISSN when present in the ref
   assert.strictEqual(ref.eissn, '8765-432X');
 });
 
+console.log('\n=== Regression: citation-like text before "Introduction" (e.g. "How to Cite" self-citation box) no longer falsely detected as an in-text citation ===');
+
+test('findIntroductionHeading finds the "INTRODUCTION" heading and reports the offset right after it', () => {
+  const text = 'Title page stuff.\n\nTo cite this article: Smith, J. (2026). Some Title. Journal, 1(1), 1-10.\n\nINTRODUCTION\n\nActual body content that is long enough to count as substantial.';
+  const h = CE.findIntroductionHeading(text);
+  assert.ok(h);
+  assert.strictEqual(h.text, 'INTRODUCTION');
+});
+
+test('a "How to Cite" self-citation box before the Introduction heading is no longer flagged as "reference not cited" / "3+ authors without et al." (regression)', () => {
+  const r = validate(
+    'To cite this article: Shiddiq, A. K., Faiz, M. N. (2026). Some Title. Journal, 1(1), 66-81.\n\nINTRODUCTION\n\nSome real body text discussing the topic (Smith, 2020) at length, long enough to be substantial content for this test.',
+    'Smith, J. (2020). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => (e.code || '').includes('Shiddiq')), false);
+  assert.strictEqual(r.errors.some((e) => (e.description || '').includes('Shiddiq')), false);
+});
+
+test('a genuine citation appearing AFTER the Introduction heading is still correctly detected and matched', () => {
+  const r = validate(
+    'To cite this article: Shiddiq, A. K. (2026). Some Title. Journal, 1(1), 66-81.\n\nINTRODUCTION\n\nThis is discussed by Jones (2021) in detail, providing enough substantial content for the test.',
+    'Jones, K. (2021). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
+test('a document with NO Introduction heading at all falls back to the old behavior (nothing filtered) — safe default, no regression for documents that lack this heading', () => {
+  const r = validate(
+    'To cite this article: Shiddiq, A. K., Faiz, M. N. (2026). Some Title. Journal, 1(1), 66-81.',
+    'Shiddiq, A. K., & Faiz, M. N. (2026). Some Title. Journal, 1(1), 66-81.');
+  // Tanpa heading Introduction, sitasi how-to-cite TETAP terdeteksi seperti perilaku lama (di
+  // sini justru "cocok" karena referensinya memang ada) — poinnya adalah tidak error/crash dan
+  // perilaku lama tetap berjalan sebagai fallback yang aman.
+  assert.strictEqual(r.errors.some((e) => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
 
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

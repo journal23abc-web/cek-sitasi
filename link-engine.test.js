@@ -433,6 +433,23 @@ test('a narrative citation with a curly-quote possessive ("Bandura\u2019s (1986)
   assert.strictEqual(result.linked, 1);
 });
 
+console.log('\n=== Regression: "How to Cite" self-citation box before Introduction is not linked as a real citation ===');
+
+test('a "How to Cite" box before the Introduction heading is not turned into a hyperlink, while a genuine citation after it still is', () => {
+  var paras = [
+    para(run('To cite this article: Shiddiq, A. K., Faiz, M. N. (2026). Some Title. Journal, 1(1), 66-81.')),
+    para(run('INTRODUCTION')),
+    para(run('This is discussed by Jones (2021) in detail, providing enough substantial content for the test.')),
+    para(run('REFERENCES')),
+    para(run('Jones, K. (2021). Title. Publisher.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 1); // cuma "Jones (2021)", bukan kotak how-to-cite
+  var texts = hyperlinkTexts(xmlDoc);
+  assert.ok(!texts.some((t) => t.includes('Shiddiq')));
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

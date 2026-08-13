@@ -651,6 +651,13 @@
     var articleText = bodyParas.map(function (p) { return p.text; }).join('\n');
     var referenceText = refParas.map(function (p) { return p.text; }).join('\n');
 
+    // Apa pun sebelum heading "Introduction"/"Pendahuluan" (metadata, kotak "How to Cite",
+    // abstrak) dikecualikan dari penautan — bagian itu sering memuat pola "Nama, A. (Tahun)"
+    // yang KEBETULAN persis berbentuk sitasi (paling umum: kotak "To cite this article: ...")
+    // tapi bukan sitasi sungguhan. Sama seperti perlakuan di engine.js's validate().
+    var introHeading = CE.findIntroductionHeading ? CE.findIntroductionHeading(articleText) : null;
+    var introOffset = introHeading ? introHeading.offset + introHeading.lineLength : 0;
+
     var styleId = options.styleId;
     var detected = null;
     if (!styleId || styleId === 'auto') {
@@ -735,7 +742,7 @@
     }
 
     if (style.family === 'numeric') {
-      CE.extractNumericCitations(articleText).forEach(function (c) {
+      CE.extractNumericCitations(articleText).filter(function (c) { return c.position >= introOffset; }).forEach(function (c) {
         var bm = null;
         for (var k = 0; k < c.numbers.length; k++) {
           if (numIndex[c.numbers[k]]) { bm = numIndex[c.numbers[k]]; break; }
@@ -747,7 +754,7 @@
       // multi-year narrative citation ("BSP (2020, 2024, 2025, 2026a)") ended — see the
       // narrative branch below for why this is needed.
       var narrativeGroupEnd = {};
-      CE.extractAuthorDateCitations(articleText).forEach(function (c) {
+      CE.extractAuthorDateCitations(articleText).filter(function (c) { return c.position >= introOffset; }).forEach(function (c) {
         if (c.type === 'parenthetical') {
           // raw = m[0] asli persis dari teks dokumen -> panjang akurat.
           // Kalau kurungnya berisi beberapa sitasi dipisah ';' (mis. "(Jones & Brown, 2019;
