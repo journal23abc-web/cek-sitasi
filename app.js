@@ -23,6 +23,10 @@
     doiProgress: document.getElementById('doiProgress'),
     doiLabel: document.getElementById('doiLabel'),
     doiFill: document.getElementById('doiFill'),
+    scopusSourcesFile: document.getElementById('scopusSourcesFile'),
+    scopusProceedingsFile: document.getElementById('scopusProceedingsFile'),
+    scopusLoadStatus: document.getElementById('scopusLoadStatus'),
+    scopusCheckBtn: document.getElementById('scopusCheckBtn'),
     results: document.getElementById('results'),
     parseStatusBanner: document.getElementById('parseStatusBanner'),
     sortByPosition: document.getElementById('sortByPosition'),
@@ -57,6 +61,8 @@
   var lastResult = null;
   var lastValidator = null;
   var lastDoiIssues = [];
+  var scopusDatabase = null; // dibangun sekali saat file JSON dimuat, dipakai ulang lintas validasi
+  var lastScopusResults = [];
   var lastStyleId = 'apa7';
   var lastConfidence = null;
   var currentYearRange = null; // { from: number, to: number, label: string }
@@ -156,12 +162,14 @@
       lastResult = result;
       lastValidator = validator;
       lastDoiIssues = [];
+      lastScopusResults = [];
       jrOverrides = {};
 
       els.loading.classList.remove('active');
       els.results.classList.add('active');
       renderAll(result, []);
       renderReportPreview();
+      updateScopusLoadStatus();
 
       // DOI checking (async, progressive)
       var refsWithDoi = result.references.filter(function(r) { return r.doi; });
@@ -235,6 +243,7 @@
     renderIssueList('list-errors', result.errors);
     renderIssueList('list-suggestions', result.suggestions);
     renderDoiList(doiIssues);
+    renderScopusList(lastScopusResults);
     renderAllTab(result.errors.concat(result.suggestions));
   }
 
@@ -420,6 +429,19 @@
         html += '<li>' + (cls ? '<mark class="' + cls + '">[' + esc(d.status.toUpperCase()) + ']</mark>' : '[' + esc(d.status.toUpperCase()) + ']') + ' ' + esc(d.title) + ' — ' + esc(d.description) + '</li>';
       });
       html += '</ul>';
+    }
+
+    if (sections.indexOf('scopus') !== -1 && lastScopusResults && lastScopusResults.length > 0) {
+      html += '<h2>Status Scopus</h2>';
+      html += '<p class="rp-meta">Dicocokkan terhadap Scopus Source List yang dimuat secara lokal — lihat catatan metodologi di bawah.</p><ul>';
+      var scopusClsMap = { SCOPUS: 'hl-green', PROBABLE_SCOPUS: 'hl-green', SCOPUS_SOURCE_ONLY: 'hl-yellow', UNKNOWN: null };
+      lastScopusResults.forEach(function(r) {
+        var label = (r.ref.firstAuthor || '-') + (r.ref.year ? ' (' + r.ref.year + ')' : '');
+        var cls = scopusClsMap[r.status];
+        html += '<li>' + (cls ? '<mark class="' + cls + '">[' + esc(r.status.replace(/_/g, ' ')) + ']</mark>' : '[' + esc(r.status) + ']') + ' <b>' + esc(label) + '</b></li>';
+      });
+      html += '</ul>';
+      html += '<p class="rp-meta"><i>Catatan: "SOURCE ONLY" berarti jurnalnya terindeks Scopus tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat — bukan berarti pasti tidak Scopus. "UNKNOWN" berarti belum ditemukan bukti yang cukup, bukan konfirmasi non-Scopus.</i></p>';
     }
 
     if (sections.indexOf('journalrules') !== -1 && window.JournalRulesEngine) {
@@ -882,6 +904,112 @@
           bindCopyBlocks(resultsEl);
         });
       });
+    });
+  }
+
+  var SCOPUS_STATUS_LABEL = {
+    SCOPUS: { badge: 'SCOPUS', cls: 'suggestion', icon: '✅' },
+    PROBABLE_SCOPUS: { badge: 'PROBABLE SCOPUS', cls: 'suggestion', icon: '🟢' },
+    SCOPUS_SOURCE_ONLY: { badge: 'SOURCE ONLY', cls: 'warning', icon: '🟡' },
+    UNKNOWN: { badge: 'UNKNOWN', cls: 'info', icon: '⚪' },
+  };
+
+  function renderScopusList(scopusResults) {
+    var el = document.getElementById('list-scopus');
+    if (!el) return;
+    if (!scopusDatabase) {
+      el.innerHTML = '<div class="no-issues">🎓 Muat data Scopus Source List dulu di panel "Cek Status Scopus" di atas (sebelum tombol Validasi), lalu klik tombolnya untuk mengecek referensi Anda.</div>';
+      return;
+    }
+    if (!scopusResults || scopusResults.length === 0) {
+      el.innerHTML = '<div class="no-issues">🎓 Data sudah dimuat. Klik "Cek Status Scopus untuk Semua Referensi" di atas untuk menjalankan pengecekan.</div>';
+      return;
+    }
+    var html = '';
+    scopusResults.forEach(function(r) {
+      var meta = SCOPUS_STATUS_LABEL[r.status] || SCOPUS_STATUS_LABEL.UNKNOWN;
+      var ref = r.ref;
+      var label = (ref.firstAuthor || '-') + (ref.year ? ' (' + ref.year + ')' : '');
+      var explain;
+      if (r.status === 'SCOPUS') explain = r.method === 'DOI_EXACT' ? 'Dokumen ditemukan persis lewat DOI.' : 'Dokumen ditemukan lewat kecocokan metadata (judul, penulis, jurnal, tahun) yang sangat tinggi (' + Math.round(r.confidence * 100) + '%).';
+      else if (r.status === 'PROBABLE_SCOPUS') explain = 'Metadata cukup mirip (' + Math.round(r.confidence * 100) + '%) dengan salah satu dokumen di database, tapi belum cukup pasti untuk diklaim tertemukan persis.';
+      else if (r.status === 'SCOPUS_SOURCE_ONLY') explain = 'Jurnal/sumbernya (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') terindeks Scopus, tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat.';
+      else if (r.method === 'JOURNAL_FOUND_YEAR_NOT_COVERED') explain = 'Jurnalnya ada di Source List Scopus, tetapi tahun ' + esc(ref.year || '-') + ' berada di luar rentang cakupan Scopus untuk jurnal ini (cakupan: ' + esc((r.matchedSource && r.matchedSource.coverage) || '-') + ').';
+      else explain = 'Belum ditemukan bukti yang cukup — bisa jadi referensi ini memang bukan Scopus, atau database yang dimuat belum mencakupnya.';
+      html += '<div class="issue-item ' + meta.cls + '">';
+      html += '<div class="issue-header"><span class="issue-sev">' + meta.icon + ' ' + meta.badge + '</span><span class="issue-title">' + esc(label) + '</span></div>';
+      html += '<div class="issue-desc">' + explain + '</div>';
+      html += '<div class="code-block" style="cursor:default;">' + esc((ref.raw || '').slice(0, 150)) + '</div>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }
+
+  function updateScopusLoadStatus() {
+    if (!scopusDatabase) {
+      els.scopusLoadStatus.textContent = 'Belum ada data dimuat.';
+      els.scopusLoadStatus.className = 'status info';
+      els.scopusCheckBtn.disabled = true;
+      return;
+    }
+    var parts = [];
+    if (scopusDatabase.sourceCount) parts.push(scopusDatabase.sourceCount.toLocaleString('id-ID') + ' jurnal/sumber');
+    if (scopusDatabase.proceedingsCount) parts.push(scopusDatabase.proceedingsCount.toLocaleString('id-ID') + ' prosiding');
+    var statusText = '✅ Data dimuat: ' + parts.join(', ') + '.';
+    if (!lastResult) statusText += ' Jalankan Validasi Sitasi dulu di bawah sebelum bisa mengecek Scopus.';
+    els.scopusLoadStatus.textContent = statusText;
+    els.scopusLoadStatus.className = 'status success';
+    els.scopusCheckBtn.disabled = !lastResult;
+  }
+
+  function readJSONFile(fileInput) {
+    return new Promise(function(resolve, reject) {
+      var file = fileInput.files && fileInput.files[0];
+      if (!file) { resolve(null); return; }
+      var reader = new FileReader();
+      reader.onload = function() {
+        try { resolve(JSON.parse(reader.result)); }
+        catch (e) { reject(new Error('Gagal membaca ' + file.name + ' sebagai JSON: ' + e.message)); }
+      };
+      reader.onerror = function() { reject(new Error('Gagal membaca berkas ' + file.name + '.')); };
+      reader.readAsText(file);
+    });
+  }
+
+  if (els.scopusSourcesFile) {
+    function loadScopusFiles() {
+      els.scopusLoadStatus.textContent = '⏳ Memuat...';
+      els.scopusLoadStatus.className = 'status info';
+      Promise.all([readJSONFile(els.scopusSourcesFile), readJSONFile(els.scopusProceedingsFile)])
+        .then(function(res) {
+          var sources = res[0], proceedings = res[1];
+          if (!sources && !proceedings) { updateScopusLoadStatus(); return; }
+          if (!scopusDatabase) scopusDatabase = new window.ScopusMatcher.ScopusDatabase();
+          if (sources) scopusDatabase.loadSourceListCompact(sources);
+          if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
+          updateScopusLoadStatus();
+        })
+        .catch(function(err) {
+          els.scopusLoadStatus.textContent = '⚠️ ' + err.message;
+          els.scopusLoadStatus.className = 'status err';
+        });
+    }
+    els.scopusSourcesFile.addEventListener('change', loadScopusFiles);
+    els.scopusProceedingsFile.addEventListener('change', loadScopusFiles);
+
+    els.scopusCheckBtn.addEventListener('click', function() {
+      if (!scopusDatabase || !lastResult) return;
+      els.scopusCheckBtn.disabled = true;
+      els.scopusCheckBtn.textContent = '⏳ Mengecek...';
+      setTimeout(function() { // beri browser kesempatan repaint tombol sebelum kerja berat sinkron
+        lastScopusResults = window.ScopusMatcher.checkAllReferences(lastResult.references, scopusDatabase);
+        els.scopusCheckBtn.disabled = false;
+        els.scopusCheckBtn.textContent = '🎓 Cek Status Scopus untuk Semua Referensi';
+        renderScopusList(lastScopusResults);
+        renderReportPreview();
+        var tabBtn = document.getElementById('tab-btn-scopus');
+        if (tabBtn) tabBtn.click();
+      }, 30);
     });
   }
 

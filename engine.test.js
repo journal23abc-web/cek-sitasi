@@ -786,7 +786,65 @@ test('a genuine duplicate (same/similar author AND near-identical title) is stil
   assert.strictEqual(r.errors.some((e) => e.title === 'Referensi kemungkinan duplikat'), true);
 });
 
-console.log('\n' + '='.repeat(50));
+console.log('\n=== Scopus-prep fixes: broader journal-article detection, IEEE author-list vs institution, new bibliographic fields ===');
+
+test('detectSourceType recognizes the modern "volume, article-number" journal format (no issue-in-parens), e.g. "205, 107590" (regression)', () => {
+  const ref = CE.parseReferenceLine('Smith, J., & Doe, A. (2023). Deep learning for crop disease detection. Computers and Electronics in Agriculture, 205, 107590. https://doi.org/10.1016/j.compag.2022.107590', 'apa7');
+  assert.strictEqual(ref.sourceType, 'journal-article');
+});
+
+test('detectSourceType recognizes an "e"-prefixed article ID format, e.g. "14, e0251234" (PLOS/eLife style)', () => {
+  assert.strictEqual(CE.detectSourceType('Jones, K. (2020). Some study. PLOS ONE, 14, e0251234.'), 'journal-article');
+});
+
+test('detectSourceType recognizes the IEEE "vol. N, p. M" abbreviated form', () => {
+  const ref = CE.parseReferenceLine('[1] J. Smith and A. Doe, "Deep learning for crop disease detection," Computers and Electronics in Agriculture, vol. 205, p. 107590, 2023, doi: 10.1016/j.compag.2022.107590.', 'ieee');
+  assert.strictEqual(ref.sourceType, 'journal-article');
+});
+
+test('an IEEE-style non-inverted two-person author list ("J. Smith and A. Doe") is correctly split into two individual authors, NOT misread as one institution name (regression)', () => {
+  const ref = CE.parseReferenceLine('[1] J. Smith and A. Doe, "Deep learning for crop disease detection," Computers and Electronics in Agriculture, vol. 205, p. 107590, 2023, doi: 10.1016/j.compag.2022.107590.', 'ieee');
+  assert.deepStrictEqual(ref.authors, ['J. Smith', 'A. Doe']);
+  assert.strictEqual(ref.isInstitutional, false);
+  assert.strictEqual(ref.authorCount, 2);
+});
+
+test('an institution name that legitimately contains "and" ("Organisation for Economic Co-operation and Development") is still correctly recognized as institutional (sanity check against over-correction from the fix above)', () => {
+  const ref = CE.parseReferenceLine('Organisation for Economic Co-operation and Development. (2023). Title. Publisher.', 'apa7');
+  assert.strictEqual(ref.isInstitutional, true);
+  assert.deepStrictEqual(ref.authors, ['Organisation for Economic Co-operation and Development']);
+});
+
+test('parseReferenceLine now extracts journal, volume, issue, and pages for a classic "12(3), 100-120" reference', () => {
+  const ref = CE.parseReferenceLine('Green, B. (2020). Some title here. Journal of Agriculture Science, 12(3), 100-120.', 'apa7');
+  assert.strictEqual(ref.journal, 'Journal of Agriculture Science');
+  assert.strictEqual(ref.volume, '12');
+  assert.strictEqual(ref.issue, '3');
+  assert.strictEqual(ref.pages, '100-120');
+});
+
+test('parseReferenceLine extracts articleNumber (not pages) for a "volume, article-number" reference with no page range', () => {
+  const ref = CE.parseReferenceLine('Smith, J., & Doe, A. (2023). Deep learning for crop disease detection. Computers and Electronics in Agriculture, 205, 107590. https://doi.org/10.1016/j.compag.2022.107590', 'apa7');
+  assert.strictEqual(ref.journal, 'Computers and Electronics in Agriculture');
+  assert.strictEqual(ref.volume, '205');
+  assert.strictEqual(ref.articleNumber, '107590');
+  assert.strictEqual(ref.pages, null);
+});
+
+test('parseReferenceLine cleanly extracts the journal name for an IEEE-style reference, without a stray trailing comma/quote from the title boundary (regression)', () => {
+  const ref = CE.parseReferenceLine('[1] J. Smith and A. Doe, "Deep learning for crop disease detection," Computers and Electronics in Agriculture, vol. 205, p. 107590, 2023, doi: 10.1016/j.compag.2022.107590.', 'ieee');
+  assert.strictEqual(ref.journal, 'Computers and Electronics in Agriculture');
+  assert.strictEqual(ref.volume, '205');
+  assert.strictEqual(ref.pages, '107590');
+});
+
+test('parseReferenceLine extracts an explicit ISSN/eISSN when present in the reference text', () => {
+  const ref = CE.parseReferenceLine('Smith, J. (2020). Title. Journal of X. ISSN: 1234-5678, eISSN: 8765-432X.', 'apa7');
+  assert.strictEqual(ref.issn, '1234-5678');
+  assert.strictEqual(ref.eissn, '8765-432X');
+});
+
+
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
   console.log('\nFailures:');

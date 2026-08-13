@@ -354,6 +354,28 @@
     </div>
   </div>
 
+  <details class="collapsible" id="scopusPanel">
+    <summary>🎓 Cek Status Scopus <span style="color:var(--text-faint);font-weight:400;">(opsional — butuh data Scopus Source List)</span></summary>
+    <div class="collapsible-content">
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:0 0 14px;">
+        Cocokkan referensi Anda terhadap daftar sumber Scopus resmi (Elsevier), <b>diproses sepenuhnya di browser Anda</b> — berkasnya tidak diunggah ke mana pun.
+        Muat file <code>scopus_sources.json</code> (wajib) dan <code>scopus_proceedings.json</code> (opsional, untuk prosiding konferensi) terlebih dahulu.
+      </p>
+      <div class="row" style="gap:16px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <label for="scopusSourcesFile" style="display:block;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:6px;">scopus_sources.json</label>
+          <input type="file" id="scopusSourcesFile" accept=".json">
+        </div>
+        <div>
+          <label for="scopusProceedingsFile" style="display:block;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:6px;">scopus_proceedings.json <span style="color:var(--text-faint);">(opsional)</span></label>
+          <input type="file" id="scopusProceedingsFile" accept=".json">
+        </div>
+      </div>
+      <div id="scopusLoadStatus" class="status info" role="status" aria-live="polite"></div>
+      <button class="primary" id="scopusCheckBtn" style="margin-top:12px;" disabled>🎓 Cek Status Scopus untuk Semua Referensi</button>
+    </div>
+  </details>
+
   <div class="loading" id="loading"><div class="spinner"></div>Menganalisis sitasi...</div>
 
   <div class="doi-progress panel" id="doiProgress">
@@ -382,6 +404,7 @@
         <label class="export-check"><input type="checkbox" value="errors" checked> Perlu Diperbaiki</label>
         <label class="export-check"><input type="checkbox" value="suggestions" checked> Saran</label>
         <label class="export-check"><input type="checkbox" value="doi" checked> Validasi DOI</label>
+        <label class="export-check"><input type="checkbox" value="scopus" checked> Status Scopus</label>
         <label class="export-check"><input type="checkbox" value="journalrules" checked> Aturan Jurnal Custom</label>
       </div>
       <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
@@ -403,11 +426,13 @@
       <button class="tab-btn active" data-tab="errors" role="tab" aria-selected="true" aria-controls="tab-errors" id="tab-btn-errors">🔴 Perlu Diperbaiki</button>
       <button class="tab-btn" data-tab="suggestions" role="tab" aria-selected="false" aria-controls="tab-suggestions" id="tab-btn-suggestions" tabindex="-1">🔵 Saran</button>
       <button class="tab-btn" data-tab="doi" role="tab" aria-selected="false" aria-controls="tab-doi" id="tab-btn-doi" tabindex="-1">🔗 DOI</button>
+      <button class="tab-btn" data-tab="scopus" role="tab" aria-selected="false" aria-controls="tab-scopus" id="tab-btn-scopus" tabindex="-1">🎓 Scopus</button>
       <button class="tab-btn" data-tab="all" role="tab" aria-selected="false" aria-controls="tab-all" id="tab-btn-all" tabindex="-1">📋 Semua</button>
     </div>
     <div class="tab-content active" id="tab-errors" role="tabpanel" aria-labelledby="tab-btn-errors"><div class="issue-list" id="list-errors" aria-live="polite"></div></div>
     <div class="tab-content" id="tab-suggestions" role="tabpanel" aria-labelledby="tab-btn-suggestions"><div class="issue-list" id="list-suggestions" aria-live="polite"></div></div>
     <div class="tab-content" id="tab-doi" role="tabpanel" aria-labelledby="tab-btn-doi"><div class="issue-list" id="list-doi" aria-live="polite"></div></div>
+    <div class="tab-content" id="tab-scopus" role="tabpanel" aria-labelledby="tab-btn-scopus"><div class="issue-list" id="list-scopus" aria-live="polite"></div></div>
     <div class="tab-content" id="tab-all" role="tabpanel" aria-labelledby="tab-btn-all">
       <div class="filter-bar" id="filterBar" role="group" aria-label="Filter kategori masalah">
         <button class="filter-chip active" data-filter="all" aria-pressed="true">Semua</button>
@@ -503,11 +528,13 @@ initOnboarding({
     { target: '#tab-btn-paste', title: 'Tempel Dokumen Lengkap', desc: 'Cara tercepat: tempel seluruh naskah sekaligus di sini, sistem otomatis memisahkan artikel dari daftar referensi.' },
     { target: '#tab-btn-manual', title: 'Isi Manual (alternatif)', desc: 'Kalau mau kontrol penuh, isi kolom artikel dan referensi secara terpisah di sini.' },
     { target: '#validateBtn', title: 'Tombol "Validasi Sitasi"', desc: 'Klik untuk memulai pengecekan. Hasilnya langsung muncul di bawah, lengkap dengan lokasi tiap masalah di naskah Anda.' },
+    { target: '#scopusPanel', title: 'Cek Status Scopus (opsional)', desc: 'Kalau Anda punya berkas Scopus Source List (dari Elsevier), muat di sini untuk mengecek referensi mana yang terindeks Scopus — semua diproses lokal di browser Anda, hasilnya muncul di tab "Scopus" setelah validasi dijalankan.' },
   ],
 });
 </script>
 <script src="engine.js?v=13"></script>
 <script src="journal-rules-engine.js?v=1"></script>
-<script src="app.js?v=17"></script>
+<script src="scopus-engine.js?v=1"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

@@ -52,6 +52,21 @@ function looksLikePersonalName(str) {
   return false;
 }
 
+// Recognizes a non-inverted personal-author list — "J. Smith and A. Doe", "J. Smith, A. Doe,
+// and C. Lee", "J. Smith & A. Doe" — the shape IEEE/Vancouver-family styles write authors in.
+// Needed because isInstitutionalAuthor() allows "and"/"&" as connector words (institution names
+// legitimately contain them, e.g. "... Co-operation and Development"), which would otherwise
+// make a genuine 2+ person author list joined by "and" look exactly like ONE institution name.
+// The distinguishing shape here: each segment starts with 1-3 bare capital-letter initials
+// followed by a surname — real institution names essentially never start that way.
+function looksLikeNonInvertedAuthorList(str) {
+  var s = (str || '').trim();
+  if (!s) return false;
+  var person = '(?:\\p{Lu}\\.\\s*){1,3}[\\p{Lu}\\p{Lo}][\\p{L}\'\\-]+';
+  var re = new RegExp('^' + person + '(?:\\s*,?\\s*(?:and|&)\\s*' + person + '|\\s*,\\s*' + person + ')+$', 'u');
+  return re.test(s);
+}
+
 function isInstitutionalAuthor(str) {
   if (!str) return false;
   // A trailing period is a formatting artifact (reference-list author fields like "GEM." from
@@ -638,7 +653,7 @@ function parseAuthorsForStyle(authorStr, styleId) {
   var style = STYLES[styleId];
   if (!authorStr || !authorStr.trim()) return { authors: [], isInstitutional: false };
   var trimmed = authorStr.trim();
-  if (isInstitutionalAuthor(trimmed.replace(/,\s*$/, ''))) {
+  if (!looksLikeNonInvertedAuthorList(trimmed) && isInstitutionalAuthor(trimmed.replace(/,\s*$/, ''))) {
     return { authors: [trimmed.replace(/\.\s*$/, '')], isInstitutional: true };
   }
   var authors;
@@ -826,10 +841,17 @@ function detectSourceType(raw) {
   // Explicit ISBN mention is a strong, unambiguous book signal.
   if (/\bISBN\b/i.test(s)) return 'book';
 
-  // Journal-article pattern: "..., 12(3), 45-67" (vol(issue), pages) or an explicit journal-ish word.
+  // Journal-article pattern. Covers several common shapes:
+  //  - "..., 12(3), 45-67"       (vol(issue), pages — classic)
+  //  - "..., 205, 107590"        (vol, article-number — no issue, single article-ID journals)
+  //  - "..., 14, e0251234"       (vol, "e"-prefixed article ID — PLOS/eLife style)
+  //  - "Volume 45, Article 102345" (spelled-out form)
   var journalPattern = /\b\d{1,4}\s*\(\s*[\w-]+\s*\)\s*,\s*\d+[-–]\d+/;
+  var journalVolArticlePattern = /,\s*\d{1,4}\s*,\s*(?:pp?\.\s*)?e?\d{2,}(?:[-–]\d+)?\b/;
+  var journalVolumeArticleWord = /\bvolume\s+\d+\s*,\s*article\s+\d+/i;
+  var journalVolAbbrevPattern = /\bvol\.?\s*\d+\s*,\s*(?:no\.?\s*\d+\s*,\s*)?pp?\.\s*\d+/i;
   var journalNameHint = /\b(journal|jurnal|review|quarterly|annals?|transactions|majalah\s+ilmiah)\b/i;
-  if (journalPattern.test(s) || journalNameHint.test(s)) return 'journal-article';
+  if (journalPattern.test(s) || journalVolArticlePattern.test(s) || journalVolumeArticleWord.test(s) || journalVolAbbrevPattern.test(s) || journalNameHint.test(s)) return 'journal-article';
 
   // Conference / proceedings.
   if (/\b(prosiding|proceedings|conference|seminar\s+nasional|konferensi|symposium)\b/i.test(s)) return 'conference';
@@ -874,6 +896,69 @@ function extractTitle(line, style, authorEndIdx) {
   return cleaned.split('.')[0].trim();
 }
 
+// Extracts additional bibliographic fields beyond what parseReferenceLine used to return —
+// journal name, ISSN/eISSN, volume, issue, pages, article number. Needed for higher-confidence
+// source matching (e.g. against a journal/document index) where title+author+year alone isn't
+// enough to disambiguate. Best-effort: any field it can't confidently find is left null rather
+// than guessed.
+function extractBibliographicFields(raw, title) {
+  var result = { journal: null, issn: null, eissn: null, volume: null, issue: null, pages: null, articleNumber: null };
+  if (!raw) return result;
+
+  var issnM = raw.match(/\be-?issn\b\s*[:.]?\s*(\d{4}-\d{3}[\dXx])/i);
+  if (issnM) { result.eissn = issnM[1].toUpperCase(); }
+  var issnM2 = raw.match(/\bissn\b\s*[:.]?\s*(\d{4}-\d{3}[\dXx])/i);
+  if (issnM2 && issnM2[0].toLowerCase().indexOf('eissn') === -1 && issnM2[0].toLowerCase().indexOf('e-issn') === -1) {
+    result.issn = issnM2[1].toUpperCase();
+  }
+
+  // "12(3), 45-67" — vol(issue), pages
+  var volIssuePages = raw.match(/\b(\d{1,4})\s*\(\s*([\w-]+)\s*\)\s*,\s*(\d+)[-–](\d+)/);
+  if (volIssuePages) {
+    result.volume = volIssuePages[1];
+    result.issue = volIssuePages[2];
+    result.pages = volIssuePages[3] + '-' + volIssuePages[4];
+  } else {
+    // "vol. 205, no. 3, pp. 45-67" — IEEE-ish
+    var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*no\.?\s*(\d+))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
+    if (ieeeStyle) {
+      result.volume = ieeeStyle[1];
+      if (ieeeStyle[2]) result.issue = ieeeStyle[2];
+      result.pages = ieeeStyle[4] ? (ieeeStyle[3] + '-' + ieeeStyle[4]) : ieeeStyle[3];
+    } else {
+      // "205, 107590" or "14, e0251234" — volume, article-number (no issue, single-article-ID journals)
+      var volArticle = raw.match(/,\s*(\d{1,4})\s*,\s*(?:pp?\.\s*)?(e?\d{2,})(?:[-–](\d+))?\b/);
+      if (volArticle) {
+        result.volume = volArticle[1];
+        if (volArticle[3]) {
+          result.pages = volArticle[2] + '-' + volArticle[3];
+        } else if (/^e\d+$/i.test(volArticle[2]) || volArticle[2].length >= 5) {
+          result.articleNumber = volArticle[2];
+        } else {
+          result.pages = volArticle[2];
+        }
+      }
+    }
+  }
+
+  // Journal name: best-effort — the segment right after the title, up to wherever the
+  // volume/pages/DOI block starts. Deliberately conservative; left null if it doesn't look clean.
+  if (title) {
+    var titleIdx = raw.indexOf(title);
+    if (titleIdx !== -1) {
+      var afterTitle = raw.slice(titleIdx + title.length).replace(/^[.,"\u201d'\s]+/, '');
+      var endMatch = afterTitle.match(/,\s*\d|\bvol\.?\s*\d|https?:\/\/|\bdoi\b\s*:/i);
+      var journalCandidate = endMatch ? afterTitle.slice(0, endMatch.index) : afterTitle.split(/[.,]/)[0];
+      journalCandidate = journalCandidate.replace(/[.,;:\s]+$/, '').trim();
+      if (journalCandidate && journalCandidate.length > 2 && journalCandidate.length < 150) {
+        result.journal = journalCandidate;
+      }
+    }
+  }
+
+  return result;
+}
+
 function parseReferenceLine(line, styleId) {
   var style = STYLES[styleId];
   var raw = line.trim();
@@ -901,10 +986,13 @@ function parseReferenceLine(line, styleId) {
     var titleStart = authorSeg.length;
     var title = extractTitle(rest, style, titleStart);
     var doi = extractDOI(raw);
+    var bibFields = extractBibliographicFields(raw, title);
     return {
       raw: raw, numLabel: numLabel, authors: parsedAuthors.authors, isInstitutional: parsedAuthors.isInstitutional,
       authorCount: parsedAuthors.authors.length, firstAuthor: parsedAuthors.authors[0] || null,
-      year: year, title: title, doi: doi, styleId: styleId, sourceType: detectSourceType(raw),
+      year: year, title: title, journal: bibFields.journal, issn: bibFields.issn, eissn: bibFields.eissn,
+      volume: bibFields.volume, issue: bibFields.issue, pages: bibFields.pages, articleNumber: bibFields.articleNumber,
+      doi: doi, styleId: styleId, sourceType: detectSourceType(raw),
     };
   }
 
@@ -931,10 +1019,13 @@ function parseReferenceLine(line, styleId) {
   var parsedAuthors2 = parseAuthorsForStyle(authorSeg2, styleId);
   var title2 = extractTitle(raw, style, titleStartIdx);
   var doi2 = extractDOI(raw);
+  var bibFields2 = extractBibliographicFields(raw, title2);
   return {
     raw: raw, authors: parsedAuthors2.authors, isInstitutional: parsedAuthors2.isInstitutional,
     authorCount: parsedAuthors2.authors.length, firstAuthor: parsedAuthors2.authors[0] || null,
-    year: year2, title: title2, doi: doi2, styleId: styleId, sourceType: detectSourceType(raw),
+    year: year2, title: title2, journal: bibFields2.journal, issn: bibFields2.issn, eissn: bibFields2.eissn,
+    volume: bibFields2.volume, issue: bibFields2.issue, pages: bibFields2.pages, articleNumber: bibFields2.articleNumber,
+    doi: doi2, styleId: styleId, sourceType: detectSourceType(raw),
   };
 }
 
@@ -2470,6 +2561,8 @@ var CitationEngine = {
   findReferencesHeading: findReferencesHeading,
   YearRange: YearRange,
   detectSourceType: detectSourceType,
+  extractBibliographicFields: extractBibliographicFields,
+  looksLikeNonInvertedAuthorList: looksLikeNonInvertedAuthorList,
   DOI_NOT_EXPECTED_TYPES: DOI_NOT_EXPECTED_TYPES,
   checkReferenceFormatting: checkReferenceFormatting,
 };
