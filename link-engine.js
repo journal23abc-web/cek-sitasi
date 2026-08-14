@@ -436,8 +436,8 @@
   // sekali. Bagian ini mendeteksi pola URL/DOI dalam teks referensi dan membuatnya bisa diklik,
   // memakai <w:hyperlink r:id="..."> yang menunjuk ke entri BARU di word/_rels/document.xml.rels
   // (link ke luar dokumen — beda dari w:anchor yang dipakai sitasi in-text untuk lompat internal).
-  var URL_RE = /\bhttps?:\/\/[^\s<>()\[\]{}"'\u2018\u2019\u201c\u201d]+/gi;
-  var BARE_DOI_RE = /\b(?:doi\s*[:.]?\s*)(10\.\d{4,9}\/[^\s<>()\[\]{}"'\u2018\u2019\u201c\u201d,;]+)/gi;
+  var URL_RE = /\bhttps?:\/\/[^\s<>\[\]{}"'\u2018\u2019\u201c\u201d]+/gi;
+  var BARE_DOI_RE = /\b(?:doi\s*[:.]?\s*)(10\.\d{4,9}\/[^\s<>\[\]{}"'\u2018\u2019\u201c\u201d,;]+)/gi;
 
   // URL yang diakhiri tanda baca kalimat (titik/koma penutup kalimat, kurung tutup tanpa
   // pasangan, dst.) hampir selalu bukan bagian dari URL itu sendiri — potong dari belakang.

@@ -478,6 +478,22 @@ test('"Outside Nigeria, Syed et al. (2024)" links correctly to the Syed referenc
   assert.ok(!texts.some((t) => t.includes('Outside Nigeria')));
 });
 
+console.log('\n=== Regression: URL auto-linking truncating a DOI that legitimately contains parentheses ===');
+
+test('a reference DOI URL ending in a parenthesized issue number (e.g. Virtual Economics\u2019 "10.34021/ve.2023.06.03(1)") is linked to the FULL, untruncated URL, not cut off at the opening paren', () => {
+  var paras = [
+    para(run('Studi ini penting.')),
+    para(run('REFERENCES')),
+    para(run('Titko, J. (2023). Title. Virtual Economics, 6(3), 7\u201319. https://doi.org/10.34021/ve.2023.06.03(1)')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.urlsLinked, 1);
+  var rel = relsXmlDoc.getElementsByTagName('Relationship')[0];
+  assert.strictEqual(rel.getAttribute('Target'), 'https://doi.org/10.34021/ve.2023.06.03(1)');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

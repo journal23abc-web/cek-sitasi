@@ -413,6 +413,47 @@
       <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah berubah langsung sesuai bagian yang Anda centang — itulah yang akan tercetak/tersimpan.<br>Nama berkas yang disarankan: <b>[nama berkas]_Citation Checker</b> — kalau Anda unduh berkali-kali tanpa reload halaman, nomor urut ditambahkan otomatis (2), (3), dst. supaya tidak tertimpa.</div>
     </div>
 
+    <details class="collapsible" id="journalRulesDetails" open>
+      <summary>⚖️ Aturan Jurnal Custom (Opsional)</summary>
+      <div class="collapsible-content">
+        <p class="jr-hint">Atur syarat referensi jurnal tujuan Anda (kalau ada), lalu klik "Terapkan Aturan". Setiap aturan independen — aktifkan hanya yang relevan. Semua perhitungan berjalan di browser Anda, tidak ada yang dikirim ke server.</p>
+
+        <div class="jr-rule">
+          <label class="jr-toggle"><input type="checkbox" id="jrMinCountEnabled"> Jumlah referensi minimal</label>
+          <input type="number" id="jrMinCountValue" class="jr-num" value="20" min="0">
+        </div>
+
+        <div class="jr-rule">
+          <label class="jr-toggle"><input type="checkbox" id="jrYearRangeEnabled"> Minimal persentase tahun terbaru</label>
+          <input type="number" id="jrYearRangeMinPercent" class="jr-num" value="80" min="0" max="100"><span class="jr-txt">% dari</span>
+          <input type="number" id="jrYearRangeYears" class="jr-num" value="10" min="1"><span class="jr-txt">tahun terakhir</span>
+        </div>
+
+        <div class="jr-rule">
+          <label class="jr-toggle"><input type="checkbox" id="jrSourceTypeEnabled"> Minimal persentase jenis sumber</label>
+          <input type="number" id="jrSourceTypeMinPercent" class="jr-num" value="70" min="0" max="100"><span class="jr-txt">%</span>
+          <select id="jrSourceTypeType" class="jr-select">
+            <option value="journal-article">Artikel Jurnal</option>
+            <option value="book">Buku</option>
+            <option value="book-chapter">Bab Buku</option>
+            <option value="conference">Prosiding/Konferensi</option>
+            <option value="thesis">Skripsi/Tesis/Disertasi</option>
+            <option value="website">Situs Web</option>
+            <option value="report">Laporan</option>
+          </select>
+        </div>
+
+        <div class="jr-rule">
+          <label class="jr-toggle"><input type="checkbox" id="jrScopusEnabled"> Minimal persentase terindeks Scopus</label>
+          <input type="number" id="jrScopusMinPercent" class="jr-num" value="100" min="0" max="100"><span class="jr-txt">% referensi terindeks Scopus — jalankan "Cek Status Scopus" di panel Scopus dulu sebelum menerapkan aturan ini</span>
+        </div>
+
+        <button class="jr-apply" id="jrApplyBtn">⚖️ Terapkan Aturan</button>
+
+        <div class="jr-results" id="jrResultsPanel"></div>
+      </div>
+    </details>
+
     <details class="collapsible" id="citationMapDetails" open>
       <summary>🗺️ Peta Sitasi (Teks ↔ Referensi)</summary>
       <div class="collapsible-content"><div id="citationMapPanel"></div></div>
@@ -467,46 +508,6 @@
       <div id="yearRangeBody"></div>
     </div>
 
-    <details class="collapsible" id="journalRulesDetails">
-      <summary>⚖️ Aturan Jurnal Custom (Opsional)</summary>
-      <div class="collapsible-content">
-        <p class="jr-hint">Atur syarat referensi jurnal tujuan Anda (kalau ada), lalu klik "Terapkan Aturan". Setiap aturan independen — aktifkan hanya yang relevan. Semua perhitungan berjalan di browser Anda, tidak ada yang dikirim ke server.</p>
-
-        <div class="jr-rule">
-          <label class="jr-toggle"><input type="checkbox" id="jrMinCountEnabled"> Jumlah referensi minimal</label>
-          <input type="number" id="jrMinCountValue" class="jr-num" value="20" min="0">
-        </div>
-
-        <div class="jr-rule">
-          <label class="jr-toggle"><input type="checkbox" id="jrYearRangeEnabled"> Minimal persentase tahun terbaru</label>
-          <input type="number" id="jrYearRangeMinPercent" class="jr-num" value="80" min="0" max="100"><span class="jr-txt">% dari</span>
-          <input type="number" id="jrYearRangeYears" class="jr-num" value="10" min="1"><span class="jr-txt">tahun terakhir</span>
-        </div>
-
-        <div class="jr-rule">
-          <label class="jr-toggle"><input type="checkbox" id="jrSourceTypeEnabled"> Minimal persentase jenis sumber</label>
-          <input type="number" id="jrSourceTypeMinPercent" class="jr-num" value="70" min="0" max="100"><span class="jr-txt">%</span>
-          <select id="jrSourceTypeType" class="jr-select">
-            <option value="journal-article">Artikel Jurnal</option>
-            <option value="book">Buku</option>
-            <option value="book-chapter">Bab Buku</option>
-            <option value="conference">Prosiding/Konferensi</option>
-            <option value="thesis">Skripsi/Tesis/Disertasi</option>
-            <option value="website">Situs Web</option>
-            <option value="report">Laporan</option>
-          </select>
-        </div>
-
-        <div class="jr-rule">
-          <label class="jr-toggle"><input type="checkbox" id="jrScopusEnabled"> Minimal persentase terindeks Scopus</label>
-          <input type="number" id="jrScopusMinPercent" class="jr-num" value="100" min="0" max="100"><span class="jr-txt">% referensi terindeks Scopus — jalankan "Cek Status Scopus" di panel Scopus dulu sebelum menerapkan aturan ini</span>
-        </div>
-
-        <button class="jr-apply" id="jrApplyBtn">⚖️ Terapkan Aturan</button>
-
-        <div class="jr-results" id="jrResultsPanel"></div>
-      </div>
-    </details>
 
     <div class="preview-shell">
       <div class="preview-toolbar"><span>👁️ Pratinjau Laporan</span></div>

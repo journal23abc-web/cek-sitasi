@@ -842,6 +842,31 @@ function extractYear(line, style) {
   return m3 ? m3[0] : null;
 }
 
+// Strips trailing sentence-punctuation (., ,, ;) unconditionally, but only strips a trailing
+// ")"/"]" if it does NOT have a matching "("/"[" earlier in the string — some publishers
+// legitimately include a parenthesized issue number as part of the DOI suffix itself (e.g.
+// Virtual Economics: 10.34021/ve.2023.06.03(1)), and blindly stripping it would truncate an
+// otherwise-valid DOI.
+function trimDOITrailingPunctuation(doi) {
+  var out = doi;
+  while (out.length) {
+    var last = out.charAt(out.length - 1);
+    if (last === '.' || last === ',' || last === ';') { out = out.slice(0, -1); continue; }
+    if (last === ')') {
+      var opens = (out.match(/\(/g) || []).length, closes = (out.match(/\)/g) || []).length;
+      if (opens >= closes) break; // kurung tutup ini berpasangan sah, berhenti memotong
+      out = out.slice(0, -1); continue;
+    }
+    if (last === ']') {
+      var opensB = (out.match(/\[/g) || []).length, closesB = (out.match(/\]/g) || []).length;
+      if (opensB >= closesB) break;
+      out = out.slice(0, -1); continue;
+    }
+    break;
+  }
+  return out;
+}
+
 function extractDOI(refLine) {
   var patterns = [
     /https?:\/\/(?:dx\.)?doi\.org\/(10\.\d{4,}\/[^\s]+)/i,
@@ -850,7 +875,7 @@ function extractDOI(refLine) {
   ];
   for (var i = 0; i < patterns.length; i++) {
     var m = refLine.match(patterns[i]);
-    if (m) return m[1].replace(/[.,;)\]]+$/, '').trim();
+    if (m) return trimDOITrailingPunctuation(m[1]).trim();
   }
   return null;
 }

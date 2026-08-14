@@ -944,6 +944,23 @@ test('a citation with a non-ASCII author name correctly matches its reference en
   assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi tidak ada di daftar referensi'), false);
 });
 
+console.log('\n=== Regression: extractDOI truncating a DOI that legitimately ends in a parenthesized issue number ===');
+
+test('extractDOI preserves a trailing ")" that has a matching "(" earlier in the DOI itself (e.g. Virtual Economics journal\u2019s "10.34021/ve.2023.06.03(1)") — this DOI would otherwise get silently truncated and then wrongly reported as "not found" when checked against CrossRef', () => {
+  const doi = CE.extractDOI('Titko, J. (2023). Title. Virtual Economics, 6(3), 7\u201319. https://doi.org/10.34021/ve.2023.06.03(1)');
+  assert.strictEqual(doi, '10.34021/ve.2023.06.03(1)');
+});
+
+test('extractDOI still correctly strips a trailing ")" that is NOT part of the DOI (e.g. the DOI sits inside a surrounding citation-style parenthetical with no matching "(" inside the DOI itself)', () => {
+  const doi = CE.extractDOI('See (https://doi.org/10.1234/abcd)');
+  assert.strictEqual(doi, '10.1234/abcd');
+});
+
+test('extractDOI still correctly strips ordinary trailing sentence punctuation (period, comma, semicolon) after a DOI', () => {
+  assert.strictEqual(CE.extractDOI('Smith, J. (2020). Title. https://doi.org/10.1016/j.compag.2022.107590.'), '10.1016/j.compag.2022.107590');
+  assert.strictEqual(CE.extractDOI('doi: 10.1234/abcd, Retrieved 2020'), '10.1234/abcd');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
