@@ -879,6 +879,72 @@ test('a document with NO Introduction heading at all falls back to the old behav
 });
 
 
+console.log('\n=== Regression: /i flag silently making \\p{Lu} (uppercase) match lowercase letters too (JS Unicode-property + case-fold gotcha) ===');
+
+test('a prose phrase like "At a broader international level, Titko et al. (2023)" is no longer flagged as "et al. after two authors" — the lowercase word "level" was only matching due to the /i + \\p{Lu} case-folding bug (regression)', () => {
+  const issues = CE.detectMalformedCitations('AI.\n\nAt a broader international level, Titko et al. (2023) investigated staff.');
+  assert.strictEqual(issues.some((i) => i.type === 'multiple_authors_before_et_al'), false);
+});
+
+test('a genuinely malformed "Word, Word et al." (both capitalized, not a place/discourse word) is still correctly flagged — sanity check that removing /i did not break real detection', () => {
+  const issues = CE.detectMalformedCitations('This is shown by Smith, Jones et al. (2020) in their study.');
+  assert.strictEqual(issues.some((i) => i.type === 'multiple_authors_before_et_al'), true);
+});
+
+console.log('\n=== Regression: \\b (word boundary) failing before non-ASCII letters, breaking narrative citations for internationally-accented author names ===');
+
+test('a narrative citation whose first author name starts with a non-ASCII accented letter ("Özekinci and Eminsoy (2025)") is fully extracted, not truncated to just the second author (regression: \\b does not recognize accented letters as word characters)', () => {
+  const cites = CE.extractAuthorDateCitations('Prior work. Özekinci and Eminsoy (2025) examined academicians\u2019 knowledge and attitudes.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Özekinci and Eminsoy');
+});
+
+console.log('\n=== Regression: a preposition + place name before a citation ("Outside Nigeria, Syed et al.") no longer glued onto the author chain ===');
+
+test('"Outside Nigeria, Syed et al. (2024)" extracts cleanly as just "Syed et al. (2024)" — the leading preposition + country name are stripped, not treated as two extra author surnames', () => {
+  const cites = CE.extractAuthorDateCitations('Tech is available.\n\nOutside Nigeria, Syed et al. (2024) investigated awareness of AI tools in academia.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Syed et al.');
+});
+
+test('a citation preceded by "Outside Nigeria," correctly matches its reference, with no false "not found" error', () => {
+  const r = validate(
+    'Tech is available.\n\nOutside Nigeria, Syed et al. (2024) investigated awareness of AI tools in academia at length.',
+    'Syed, A., Ibrahim, K., & Noor, M. (2024). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => (e.code || '').includes('Outside Nigeria')), false);
+});
+
+console.log('\n=== Comprehensive audit: non-ASCII letters from many different countries/languages, not just the one Turkish case that surfaced the bug ===');
+
+test('narrative citations with author names using non-ASCII letters from a broad range of countries are all fully extracted (not truncated), covering Turkish, Polish, Czech/Slovak, Croatian, Romanian, Vietnamese, Scandinavian, German, Spanish, and French letter systems', () => {
+  const cases = [
+    ['Şahin and İlhan', 'Prior work. Şahin and İlhan (2022) examined this at length in their study.'],
+    ['Łukasik and Żółć', 'Prior work. Łukasik and Żółć (2021) examined this at length in their study.'],
+    ['Černý and Řehák', 'Prior work. Černý and Řehák (2020) examined this at length in their study.'],
+    ['Đurić and Novak', 'Prior work. Đurić and Novak (2023) examined this at length in their study.'],
+    ['Șerban and Țăranu', 'Prior work. Șerban and Țăranu (2019) examined this at length in their study.'],
+    ['Nguyễn and Phạm', 'Prior work. Nguyễn and Phạm (2024) examined this at length in their study.'],
+    ['Åström and Østergaard', 'Prior work. Åström and Østergaard (2022) examined this at length in their study.'],
+    ['Müller and Weiß', 'Prior work. Müller and Weiß (2021) examined this at length in their study.'],
+    ['Muñoz and Peña', 'Prior work. Muñoz and Peña (2020) examined this at length in their study.'],
+    ['Éric and François', 'Prior work. Éric and François (2023) examined this at length in their study.'],
+  ];
+  cases.forEach(([expectedAuthors, text]) => {
+    const cites = CE.extractAuthorDateCitations(text);
+    assert.strictEqual(cites.length, 1, 'gagal untuk: ' + expectedAuthors);
+    assert.strictEqual(cites[0].authors, expectedAuthors, 'gagal untuk: ' + expectedAuthors);
+  });
+});
+
+test('a citation with a non-ASCII author name correctly matches its reference end-to-end (full validate() pass), not just at the extraction level', () => {
+  const r = validate(
+    'Prior work. Şahin and İlhan (2022) examined this at length in their study of the topic.',
+    'Şahin, A., & İlhan, B. (2022). Title. Publisher.');
+  assert.strictEqual(r.errors.some((e) => e.title === 'Referensi tidak disitasi dalam teks'), false);
+  assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi tidak ada di daftar referensi'), false);
+});
+
+console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
   console.log('\nFailures:');

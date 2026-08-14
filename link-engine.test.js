@@ -450,6 +450,34 @@ test('a "How to Cite" box before the Introduction heading is not turned into a h
   assert.ok(!texts.some((t) => t.includes('Shiddiq')));
 });
 
+console.log('\n=== Regression: link-engine.js automatically benefits from shared extraction fixes (accented author names, preposition+place-name prefixes) ===');
+
+test('a narrative citation with an accented author name ("Özekinci and Eminsoy (2025)") links correctly and completely, not truncated to just the second author', () => {
+  var paras = [
+    para(run('Prior work. Özekinci and Eminsoy (2025) examined academicians\u2019 knowledge and attitudes toward AI, at some length.')),
+    para(run('REFERENCES')),
+    para(run('Özekinci, A., & Eminsoy, İ. O. (2025). Title. Publisher.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 1);
+  assert.strictEqual(result.unmatched.length, 0);
+});
+
+test('"Outside Nigeria, Syed et al. (2024)" links correctly to the Syed reference, with the leading preposition+place-name prefix correctly excluded from the link span', () => {
+  var paras = [
+    para(run('Tech is available.') + run(' Outside Nigeria, Syed et al. (2024) investigated awareness of AI tools in academia at length.')),
+    para(run('REFERENCES')),
+    para(run('Syed, A., Ibrahim, K., & Noor, M. (2024). Title. Publisher.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 1);
+  assert.strictEqual(result.unmatched.length, 0);
+  var texts = hyperlinkTexts(xmlDoc);
+  assert.ok(!texts.some((t) => t.includes('Outside Nigeria')));
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

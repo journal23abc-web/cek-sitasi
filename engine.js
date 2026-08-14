@@ -48,7 +48,7 @@ function looksLikePersonalName(str) {
   // Common name-particle(s) + surname, e.g. "Bin Ahmad", "Al Amin", "Van der Berg", "De la Cruz".
   // No institution is named this way, but the bare shape (title-case words, no comma) is
   // otherwise indistinguishable from a short organization name like "Bank Indonesia".
-  if (/^(?:(?:bin|ibn|binti|al|el|da|ten|ter|van|der|den|von|de|la|le|du|dos|das|do)\s+)+[\p{Lu}\p{Lo}][\p{L}'\-]+$/iu.test(s)) return true;
+  if (/^(?:(?:[Bb]in|[Ii]bn|[Bb]inti|[Aa]l|[Ee]l|[Dd]a|[Tt]en|[Tt]er|[Vv]an|[Dd]er|[Dd]en|[Vv]on|[Dd]e|[Ll]a|[Ll]e|[Dd]u|[Dd]os|[Dd]as|[Dd]o)\s+)+[\p{Lu}\p{Lo}][\p{L}'\-]+$/u.test(s)) return true;
   return false;
 }
 
@@ -158,6 +158,22 @@ function citationContext(text, start, end) {
   return text.slice(ctxStart, ctxEnd).trim();
 }
 
+// Common country/region names — catches "Outside Nigeria, Syed et al. (2024)" / "Within
+// Indonesia, Smith et al. (2020)" / "Across Europe, Jones et al. (2019)", where a capitalized
+// PLACE name right after a preposition-like word gets mistaken for part of the author chain
+// (both look identical to a plain capitalized-word regex). Not exhaustive — just the common
+// cases likely to appear in this exact "preposition + place, Author..." shape. Shared between
+// detectMalformedCitations (format checker) and extractAuthorDateCitations (main extraction).
+var PLACE_WORDS = new Set([
+  'nigeria', 'indonesia', 'malaysia', 'singapore', 'thailand', 'vietnam', 'philippines',
+  'india', 'pakistan', 'bangladesh', 'china', 'japan', 'korea', 'africa', 'asia', 'europe',
+  'america', 'australia', 'brazil', 'mexico', 'canada', 'egypt', 'kenya', 'ghana',
+  'ethiopia', 'tanzania', 'uganda', 'zambia', 'zimbabwe', 'morocco', 'algeria', 'sudan',
+  'iran', 'iraq', 'turkey', 'russia', 'germany', 'france', 'italy', 'spain', 'portugal',
+  'britain', 'england', 'scotland', 'ireland', 'netherlands', 'belgium', 'switzerland',
+  'sweden', 'norway', 'denmark', 'finland', 'poland', 'ukraine', 'greece',
+]);
+
 function detectMalformedCitations(text) {
   var issues = [];
 
@@ -165,7 +181,7 @@ function detectMalformedCitations(text) {
   // letter (not whitespace/punctuation/another bracket) immediately before "(", and citation-like
   // content inside (a capitalized word and a plausible year) so this doesn't fire on unrelated
   // parenthetical asides like "function(x)" or footnote markers.
-  var noSpaceRe = /(\S*[A-Za-z])\(([\p{Lu}\p{Lo}][^()]{2,140}?\d{4}[a-z]?[^()]{0,20})\)/gu;
+  var noSpaceRe = /(\S*[\p{L}])\(([\p{Lu}\p{Lo}][^()]{2,140}?\d{4}[a-z]?[^()]{0,20})\)/gu;
   var m;
   while ((m = noSpaceRe.exec(text)) !== null) {
     var precedingWord = m[1].split(/(?<=[.,;:!?])/).pop(); // drop any leading punctuation-terminated fragment, keep the actual word
@@ -267,7 +283,12 @@ function detectMalformedCitations(text) {
     'ultimately', 'subsequently', 'previously', 'recently', 'currently', 'lastly', 'next',
     'again', 'still', 'yet', 'besides', 'likewise', 'regardless', 'nowadays', 'meanwhile',
   ]);
-  var twoThenEtAlRe = /\b([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,\s*([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,?\s*(et\s+al\.?)/giu;
+  // Common country/region names — catches "Outside Nigeria, Syed et al. (2024)" / "Within
+  // Indonesia, Smith et al. (2020)" / "Across Europe, Jones et al. (2019)", where a capitalized
+  // PLACE name right before the comma gets mistaken for a second author's surname (both look
+  // identical to the regex: a capitalized word followed by a comma). Not exhaustive — just the
+  // common cases likely to appear in this exact "preposition + place, Author et al." shape.
+  var twoThenEtAlRe = /(?<![\p{L}\p{N}])([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,\s*([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,?\s*([Ee]t\s+[Aa]l\.?)/gu;
   while ((m = twoThenEtAlRe.exec(text)) !== null) {
     // Skip if the second token is itself an initial (e.g. "Smith, J., et al." is fine — that's
     // just the first author's initial, not a second author being listed).
@@ -276,6 +297,10 @@ function detectMalformedCitations(text) {
     // al. (2020)" is "Moreover" starting the sentence + a correctly-formatted "Taori et al."
     // citation, not two authors named "Moreover" and "Taori".
     if (DISCOURSE_WORDS.has(m[1].toLowerCase())) continue;
+    // Skip if the FIRST token is a common place/country name preceded by a preposition-like
+    // word — "Outside Nigeria, Syed et al. (2024)" is "Outside Nigeria" (a location) + a
+    // correctly-formatted "Syed et al." citation, not two authors named "Nigeria" and "Syed".
+    if (PLACE_WORDS.has(m[1].toLowerCase())) continue;
     var ctx4 = citationContext(text, m.index, m.index + m[0].length);
     issues.push({
       type: 'multiple_authors_before_et_al',
@@ -334,7 +359,7 @@ function detectMalformedCitations(text) {
   // 2020)the study" instead of "(Smith, 2020) the study" (also covers the "Author, (2018)claim"
   // narrative-style, year-only-parenthetical case). Excludes cases where the next character is
   // punctuation (",", ".", ";", etc.), which is normal ("as shown (Smith, 2020), this...").
-  var noSpaceAfterCloseRe = new RegExp('\\(' + citeInnerAlt + '\\)([A-Za-z])', 'gu');
+  var noSpaceAfterCloseRe = new RegExp('\\(' + citeInnerAlt + '\\)([\\p{L}])', 'gu');
   while ((m = noSpaceAfterCloseRe.exec(text)) !== null) {
     var closeIdx = m.index + m[0].length - 1 - m[1].length;
     issues.push({
@@ -370,7 +395,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /(\b(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -395,15 +420,18 @@ function extractAuthorDateCitations(text) {
     // sit right before a short abbreviation/initial (<=3 letters, e.g. "J." or "al.") when a
     // period is involved — a period after a longer word marks the end of a sentence, not a
     // name, so drop everything up through the LAST such boundary.
-    var sentenceBreak = authors.match(/^(?:.*[a-zA-Z]{4,})\.\s+(.+)$/);
+    var sentenceBreak = authors.match(/^(?:.*[\p{L}]{4,})\.\s+(.+)$/u);
     if (sentenceBreak) authors = sentenceBreak[1];
     if (!authors) continue;
-    // Strip a leading discourse/transition word so it isn't glued onto the real author
-    // list, e.g. "However, Riand and Radil (2022)" -> "Riand and Radil (2022)". Without
-    // this, the whole match gets discarded by the skipWords check below and the citation
-    // is lost entirely (shows up as a false "not cited in text" warning instead).
-    var leadMatch = authors.match(/^([A-Za-zÀ-ÿ]+),?\s+/);
-    if (leadMatch && isSkipWord(leadMatch[1])) {
+    // Strip leading discourse/transition word(s) so they aren't glued onto the real author
+    // list, e.g. "However, Riand and Radil (2022)" -> "Riand and Radil (2022)", or "Outside
+    // Nigeria, Syed et al. (2024)" -> "Syed et al. (2024)" (two words to strip here: the
+    // preposition "Outside" AND the place name "Nigeria", hence the loop instead of a single
+    // check). Without this, the whole match gets discarded by the skipWords check below and
+    // the citation is lost entirely (shows up as a false "not cited in text" warning instead).
+    for (var stripGuard = 0; stripGuard < 4; stripGuard++) {
+      var leadMatch = authors.match(/^([\p{L}]+),?\s+/u);
+      if (!leadMatch || !(isSkipWord(leadMatch[1]) || PLACE_WORDS.has(leadMatch[1].toLowerCase()))) break;
       authors = authors.slice(leadMatch[0].length).trim();
     }
     if (!authors) continue;
@@ -529,7 +557,7 @@ function extractAuthorPageCitations(text) {
 }
 
 function buildSkipWordSet() {
-  return new Set(['the','this','that','these','those','according','see','also','however','therefore','furthermore','additionally','although','despite','while','when','where','which','what','how','why','if','then','but','for','with','from','into','after','before','during','between','through','about','above','below','under','over','chapter','table','figure','section','part','page','volume','issue','article','book','report','study','research','data','result','analysis','method','model','system','process','program','project','case','based','related','compared','combined','integrated','developed','proposed','presented','discussed','examined','investigated','observed','found','showed','demonstrated','indicated','suggested','reported','published','available','retrieved','accessed','and','or','not','all','any','both','each','few','many','most','other','some','such','only','own','same','so','than','too','very','just','because','until','against','among','around','along','across','it','its','he','she','they','we','you','is','are','was','were','has','have','had','do','does','did','will','would','could','should','may','must','can','in','on','at','by','to','of','as','be','been','being','per','via','versus','vs','etc','e.g','i.e','cf','al','et',
+  return new Set(['the','this','that','these','those','according','see','also','however','therefore','furthermore','additionally','although','despite','while','when','where','which','what','how','why','if','then','but','for','with','from','into','after','before','during','between','through','about','above','below','under','over','chapter','table','figure','section','part','page','volume','issue','article','book','report','study','research','data','result','analysis','method','model','system','process','program','project','case','based','related','compared','combined','integrated','developed','proposed','presented','discussed','examined','investigated','observed','found','showed','demonstrated','indicated','suggested','reported','published','available','retrieved','accessed','and','or','not','all','any','both','each','few','many','most','other','some','such','only','own','same','so','than','too','very','just','because','until','against','among','around','along','across','outside','within','inside','beyond','throughout','it','its','he','she','they','we','you','is','are','was','were','has','have','had','do','does','did','will','would','could','should','may','must','can','in','on','at','by','to','of','as','be','been','being','per','via','versus','vs','etc','e.g','i.e','cf','al','et',
     'moreover','meanwhile','consequently','hence','thus','similarly','conversely','nonetheless','nevertheless','accordingly','subsequently','specifically','notably','overall','finally','importantly','interestingly','surprisingly','unfortunately','fortunately','clearly','indeed','certainly','likewise','regardless','instead','otherwise','still','yet','besides','elsewhere','first','second','third','next','last','lastly','initially','ultimately','thereafter','therein','herein','conversely',
     'selanjutnya','kemudian','selain','meskipun','walaupun','oleh','karena','sehingga','dengan','pada','dari','dalam','untuk','yang','adalah','merupakan','menurut','berdasarkan','sebagai','turut','serta','bahwa','tidak','sudah','masih','juga','bahkan','hanya','saja',
     'namun','sementara','sedangkan','akibatnya','demikian','singkatnya','secara','tentu','pasti','selain itu','di sisi lain','sebaliknya','pertama','kedua','ketiga','terakhir','akhirnya']);
