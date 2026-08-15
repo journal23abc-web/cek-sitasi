@@ -961,6 +961,110 @@ test('extractDOI still correctly strips ordinary trailing sentence punctuation (
   assert.strictEqual(CE.extractDOI('doi: 10.1234/abcd, Retrieved 2020'), '10.1234/abcd');
 });
 
+console.log('\n=== New: "citation not found" errors within a multi-citation group now name the SPECIFIC missing citation, not the whole vague group ===');
+
+test('when only ONE citation within a multi-citation group is missing from the reference list, the error clearly names that specific citation, not just the whole ambiguous group text', () => {
+  const r = validate(
+    'Beberapa studi (Smith, 2020; Jones, 2021; Brown, 2022) menunjukkan hal ini.',
+    'Smith, J. (2020). Title. Publisher.\nBrown, C. (2022). Title. Publisher.');
+  const errs = r.errors.filter((e) => e.title === 'Sitasi tidak ada di daftar referensi');
+  assert.strictEqual(errs.length, 1);
+  assert.ok(errs[0].description.startsWith('Sitasi "Jones, 2021"'), 'deskripsi harus menyebut "Jones, 2021" secara eksplisit di awal: ' + errs[0].description);
+  assert.ok(errs[0].description.includes('(Smith, 2020; Jones, 2021; Brown, 2022)'), 'deskripsi tetap menyertakan konteks kelompok lengkapnya');
+});
+
+test('when MULTIPLE citations within the same group are missing, each gets its own clearly-named error, not one vague combined error', () => {
+  const r = validate(
+    'Studi (Adams, 2019; Baker, 2020) menunjukkan hal ini.',
+    'Zimmer, X. (2021). Title. Publisher.');
+  const errs = r.errors.filter((e) => e.title === 'Sitasi tidak ada di daftar referensi');
+  assert.strictEqual(errs.length, 2);
+  assert.ok(errs.some((e) => e.description.startsWith('Sitasi "Adams, 2019"')));
+  assert.ok(errs.some((e) => e.description.startsWith('Sitasi "Baker, 2020"')));
+});
+
+test('a single (non-grouped) missing citation does NOT get a redundant "part of a group" note — that phrasing is reserved for genuine multi-citation groups', () => {
+  const r = validate(
+    'Studi (Adams, 2019) menunjukkan hal ini.',
+    'Zimmer, X. (2021). Title. Publisher.');
+  const err = r.errors.find((e) => e.title === 'Sitasi tidak ada di daftar referensi');
+  assert.ok(err);
+  assert.strictEqual(err.description, 'Sitasi "Adams, 2019" tidak memiliki entri cocok di daftar referensi.');
+});
+
+test('the institutional-acronym "not yet introduced in full" suggestion still correctly includes the enclosing parentheses in its correction, unaffected by the citation-group raw-text change above', () => {
+  const r = validate(
+    'Studi menunjukkan bahwa (OECD, 2023) hal ini penting.',
+    'Organisation for Economic Co-operation and Development. (2023). Title. Publisher.');
+  const s = (r.suggestions || []).find((x) => x.title.includes('sebelum diperkenalkan'));
+  assert.ok(s);
+  assert.strictEqual(s.correction, '(Organisation for Economic Co-operation and Development [OECD], 2023)');
+});
+
+console.log('\n=== New: reference metadata completeness checking (per APA7 source-type requirements, excluding DOI which is already covered separately) ===');
+
+test('a fully complete journal-article reference gets no completeness suggestion', () => {
+  const r = validate('Studi (Green, 2020) menunjukkan hal ini.',
+    'Green, B. (2020). Some title here. Journal of Agriculture Science, 12(3), 100-120.');
+  assert.strictEqual(r.suggestions.some((s) => s.title === 'Metadata referensi tampak tidak lengkap'), false);
+});
+
+test('a journal-article reference missing volume/pages gets a clear completeness suggestion naming exactly what is missing', () => {
+  const r = validate('Studi (Green, 2020) menunjukkan hal ini.',
+    'Green, B. (2020). Some title here. Journal of Agriculture Science.');
+  const s = r.suggestions.find((x) => x.title === 'Metadata referensi tampak tidak lengkap');
+  assert.ok(s);
+  assert.ok(s.description.includes('nomor volume'));
+  assert.ok(s.description.includes('halaman atau nomor artikel'));
+});
+
+test('a fully complete book reference (with publisher) gets no completeness suggestion', () => {
+  const r = validate('Studi (Adams, 2019) menunjukkan hal ini.',
+    'Adams, C. (2019). Book Title (2nd ed.). Penguin Random House.');
+  assert.strictEqual(r.suggestions.some((s) => s.title === 'Metadata referensi tampak tidak lengkap'), false);
+});
+
+test('a book reference missing its publisher is correctly flagged — the publisher field must not wrongly capture the title itself when no publisher segment actually exists (regression)', () => {
+  const r = validate('Studi (Adams, 2019) menunjukkan hal ini.',
+    'Adams, C. (2019). Book Title.');
+  const s = r.suggestions.find((x) => x.title === 'Metadata referensi tampak tidak lengkap');
+  assert.ok(s);
+  assert.ok(s.description.includes('nama penerbit'));
+});
+
+test('a website reference with no URL at all is flagged as missing its URL/link', () => {
+  const r = validate('Studi (Smith, 2020) menunjukkan hal ini.',
+    'Smith, J. (2020). Retrieved from some page title.');
+  const s = r.suggestions.find((x) => x.title === 'Metadata referensi tampak tidak lengkap');
+  assert.ok(s);
+  assert.ok(s.description.includes('URL'));
+});
+
+test('a reference whose source type could not be confidently classified ("unknown") is never flagged for missing metadata — not enough basis to say what should be there', () => {
+  const r = validate('Studi (X, 2020) menunjukkan hal ini.', 'X. (2020). Some short fragment');
+  assert.strictEqual(r.suggestions.some((s) => s.title === 'Metadata referensi tampak tidak lengkap'), false);
+});
+
+console.log('\n=== Regression: extractTitle only recognized "." as ending a title, swallowing everything after a "?"/"!" -titled reference\'s publisher/journal into the title itself ===');
+
+test('extractTitle correctly stops at a title ending in "?" (a question-phrased title, valid in APA7), instead of swallowing the following publisher segment into the title', () => {
+  const ref = CE.parseReferenceLine('McCarthy, J. (2007). What is artificial intelligence? Stanford University.', 'apa7');
+  assert.strictEqual(ref.title, 'What is artificial intelligence?');
+  assert.strictEqual(ref.publisher, 'Stanford University');
+});
+
+test('extractTitle correctly stops at a title ending in "!" too', () => {
+  const ref = CE.parseReferenceLine('Doe, A. (2021). Amazing Discovery! University Press.', 'apa7');
+  assert.strictEqual(ref.title, 'Amazing Discovery!');
+});
+
+test('a journal-article reference with a "vol(issue), eArticleID" shape (e.g. "22(4), e250060" — issue number kept but no page range, common in newer online-first journals) is fully recognized, not flagged as missing volume/pages', () => {
+  const ref = CE.parseReferenceLine('Reis, J. F. (2025). Title. BAR \u2013 Brazilian Administration Review, 22(4), e250060.', 'apa7');
+  assert.strictEqual(ref.volume, '22');
+  assert.strictEqual(ref.issue, '4');
+  assert.strictEqual(ref.articleNumber, 'e250060');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

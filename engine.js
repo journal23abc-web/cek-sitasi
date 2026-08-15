@@ -944,8 +944,17 @@ function extractTitle(line, style, authorEndIdx) {
     if (sq) return sq[1].trim();
   }
   var cleaned = after.replace(/^[.\s]+/, '');
-  var firstPeriod = cleaned.indexOf('. ');
-  if (firstPeriod > 0) return cleaned.substring(0, firstPeriod).trim();
+  // Titik BUKAN satu-satunya tanda baca yang sah mengakhiri judul di APA7 — tanda tanya "?" dan
+  // seru "!" juga bisa (mis. "What is artificial intelligence? Stanford University."). Cari
+  // kemunculan PALING AWAL dari salah satu tanda ini yang diikuti spasi, supaya bagian setelah
+  // judul (jurnal/penerbit) tidak ikut tertelan ke dalam judul. Beda dari titik (yang selalu
+  // cuma pemisah, tidak disertakan di judul), "?"/"!" memang bagian bermakna dari judulnya
+  // sendiri sehingga TETAP disertakan pada judul yang dikembalikan.
+  var boundaryMatch = cleaned.match(/([.?!])\s/);
+  if (boundaryMatch) {
+    var cutAt = boundaryMatch[1] === '.' ? boundaryMatch.index : boundaryMatch.index + 1;
+    return cleaned.substring(0, cutAt).trim();
+  }
   return cleaned.split('.')[0].trim();
 }
 
@@ -955,7 +964,7 @@ function extractTitle(line, style, authorEndIdx) {
 // enough to disambiguate. Best-effort: any field it can't confidently find is left null rather
 // than guessed.
 function extractBibliographicFields(raw, title) {
-  var result = { journal: null, issn: null, eissn: null, volume: null, issue: null, pages: null, articleNumber: null };
+  var result = { journal: null, issn: null, eissn: null, volume: null, issue: null, pages: null, articleNumber: null, publisher: null };
   if (!raw) return result;
 
   var issnM = raw.match(/\be-?issn\b\s*[:.]?\s*(\d{4}-\d{3}[\dXx])/i);
@@ -967,10 +976,17 @@ function extractBibliographicFields(raw, title) {
 
   // "12(3), 45-67" — vol(issue), pages
   var volIssuePages = raw.match(/\b(\d{1,4})\s*\(\s*([\w-]+)\s*\)\s*,\s*(\d+)[-–](\d+)/);
+  // "22(4), e250060" — vol(issue), single "e"-prefixed article ID (no page range) — common in
+  // newer online-first journals that keep issue numbers but no longer use page ranges.
+  var volIssueArticleId = !volIssuePages ? raw.match(/\b(\d{1,4})\s*\(\s*([\w-]+)\s*\)\s*,\s*(e\d{3,})\b/i) : null;
   if (volIssuePages) {
     result.volume = volIssuePages[1];
     result.issue = volIssuePages[2];
     result.pages = volIssuePages[3] + '-' + volIssuePages[4];
+  } else if (volIssueArticleId) {
+    result.volume = volIssueArticleId[1];
+    result.issue = volIssueArticleId[2];
+    result.articleNumber = volIssueArticleId[3];
   } else {
     // "vol. 205, no. 3, pp. 45-67" — IEEE-ish
     var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*no\.?\s*(\d+))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
@@ -1005,6 +1021,30 @@ function extractBibliographicFields(raw, title) {
       journalCandidate = journalCandidate.replace(/[.,;:\s]+$/, '').trim();
       if (journalCandidate && journalCandidate.length > 2 && journalCandidate.length < 150) {
         result.journal = journalCandidate;
+      }
+    }
+  }
+
+  // Publisher: best-effort — the final ". Segment." clause of the reference (after stripping any
+  // DOI/URL, which always trails at the very end and would otherwise get mistaken for this),
+  // when it doesn't look like a journal name and carries no digits. Same heuristic
+  // detectSourceType() already uses to help classify something as a book, just formalized here
+  // into an actual extracted value so completeness-checking has something to test against.
+  // Searched only in the text AFTER the title (like journal name above) — otherwise, when a
+  // reference genuinely has NO publisher segment, this would wrongly re-match the title itself
+  // as if it were the publisher (since it's the only ". X." clause left to find).
+  if (title) {
+    var titleIdx2 = raw.indexOf(title);
+    if (titleIdx2 !== -1) {
+      var afterTitleForPub = raw.slice(titleIdx2 + title.length).replace(/^[?!.]?\s*/, '.');
+      var withoutLink = afterTitleForPub.replace(/\s*(?:https?:\/\/\S+|doi:\s*10\.\d{4,}\/\S+)\s*\.?\s*$/i, '');
+      var tailMatch = withoutLink.match(/\.\s*([^.]+)\.\s*$/);
+      if (tailMatch) {
+        var tail = tailMatch[1].trim();
+        var looksLikeJournalName = /\b(journal|jurnal|review|quarterly|annals?|transactions|majalah\s+ilmiah)\b/i.test(tail);
+        if (tail.length > 1 && tail.length < 80 && !/\d/.test(tail) && !looksLikeJournalName) {
+          result.publisher = tail;
+        }
       }
     }
   }
@@ -1044,7 +1084,7 @@ function parseReferenceLine(line, styleId) {
       raw: raw, numLabel: numLabel, authors: parsedAuthors.authors, isInstitutional: parsedAuthors.isInstitutional,
       authorCount: parsedAuthors.authors.length, firstAuthor: parsedAuthors.authors[0] || null,
       year: year, title: title, journal: bibFields.journal, issn: bibFields.issn, eissn: bibFields.eissn,
-      volume: bibFields.volume, issue: bibFields.issue, pages: bibFields.pages, articleNumber: bibFields.articleNumber,
+      volume: bibFields.volume, issue: bibFields.issue, pages: bibFields.pages, articleNumber: bibFields.articleNumber, publisher: bibFields.publisher,
       doi: doi, styleId: styleId, sourceType: detectSourceType(raw),
     };
   }
@@ -1077,7 +1117,7 @@ function parseReferenceLine(line, styleId) {
     raw: raw, authors: parsedAuthors2.authors, isInstitutional: parsedAuthors2.isInstitutional,
     authorCount: parsedAuthors2.authors.length, firstAuthor: parsedAuthors2.authors[0] || null,
     year: year2, title: title2, journal: bibFields2.journal, issn: bibFields2.issn, eissn: bibFields2.eissn,
-    volume: bibFields2.volume, issue: bibFields2.issue, pages: bibFields2.pages, articleNumber: bibFields2.articleNumber,
+    volume: bibFields2.volume, issue: bibFields2.issue, pages: bibFields2.pages, articleNumber: bibFields2.articleNumber, publisher: bibFields2.publisher,
     doi: doi2, styleId: styleId, sourceType: detectSourceType(raw),
   };
 }
@@ -1211,6 +1251,7 @@ MultiFormatValidator.prototype.validate = function() {
 
   this.validateInstitutionalConsistency();
   this.validateReferenceOrdering();
+  this.validateReferenceCompleteness();
   this.detectDuplicateReferences();
   this.detectMixedCitationStyles();
   this.annotateLocations();
@@ -1368,7 +1409,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
             altKey = self.keyFromCitationToken(p.authors.join(' & ')) + '_' + p.year;
             citedKeys.add(altKey);
           }
-          citationDetails.push({ key: key, altKey: altKey, part: p, raw: c.raw, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
+          citationDetails.push({ key: key, altKey: altKey, part: p, raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
         }
       });
     } else {
@@ -1390,7 +1431,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           altKey2 = self.keyFromCitationToken(authors.join(' & ')) + '_' + c.year;
           citedKeys.add(altKey2);
         }
-        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, initial: initialFromCitationToken(authors[0]), position: c.position });
+        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, groupRaw: c.raw, isMultiPart: false, initial: initialFromCitationToken(authors[0]), position: c.position });
         if (authors.length >= style.etAlThreshold && !hasEtAl) {
           self.errors.push({ title: 'Sitasi naratif ' + style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi naratif "' + c.raw + '" menulis ' + authors.length + ' nama.', code: c.raw, correction: authors[0] + ' et al. (' + c.year + ')', severity: 'error' });
         }
@@ -1401,12 +1442,14 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
   // cross-reference
   citationDetails.forEach(function(d) {
     var matchKey = refMap.has(d.key) ? d.key : (d.altKey && refMap.has(d.altKey) ? d.altKey : null);
+    var isPartOfGroup = !!d.isMultiPart;
+    var groupNote = isPartOfGroup ? ' (bagian dari kelompok sitasi "' + d.groupRaw + '")' : '';
     if (!matchKey) {
       var fuzzy = self.fuzzyFind(d.key, refMap);
       if (!fuzzy) {
-        self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '" tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error' });
+        self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '"' + groupNote + ' tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error' });
       } else {
-        self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '" mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'suggestion' });
+        self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '"' + groupNote + ' mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'suggestion' });
       }
     } else {
       var refs = refMap.get(matchKey);
@@ -1484,7 +1527,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     // regardless of which particular year/publication from it is being cited each time.
     var groupKey = groupKeySource.toLowerCase();
     if (!citationsByRef.has(groupKey)) citationsByRef.set(groupKey, []);
-    citationsByRef.get(groupKey).push({ position: d.position, raw: d.raw, acronym: acronymText, fullName: groupKeySource, isFullForm: isFullFormHere });
+    citationsByRef.get(groupKey).push({ position: d.position, raw: d.groupRaw, acronym: acronymText, fullName: groupKeySource, isFullForm: isFullFormHere });
   });
   citationsByRef.forEach(function(mentions) {
     mentions.sort(function(a, b) { return a.position - b.position; });
@@ -1929,6 +1972,76 @@ MultiFormatValidator.prototype.detectMixedCitationStyles = function() {
 // ----- INSTITUTIONAL AUTHOR CONSISTENCY -----
 // Structural/typographical citation format issues — separate from citation<->reference
 // matching. See detectMalformedCitations() for what each issue type means.
+// Per-source-type field requirements, based on what APA7 (and author-date styles generally)
+// expects in a reference entry — deliberately excludes DOI, since that already has its own
+// dedicated CrossRef-backed checking elsewhere. "required" fields missing => flagged; "hasAny"
+// groups mean at least ONE of the listed fields must be present.
+var REFERENCE_COMPLETENESS_RULES = {
+  'journal-article': {
+    required: ['journal', 'volume'],
+    hasAny: [['pages', 'articleNumber']],
+    labels: { journal: 'nama jurnal', volume: 'nomor volume', pages: 'halaman', articleNumber: 'nomor artikel' },
+  },
+  'book': {
+    required: ['publisher'],
+    hasAny: [],
+    labels: { publisher: 'nama penerbit' },
+  },
+  'report': {
+    required: ['publisher'],
+    hasAny: [],
+    labels: { publisher: 'nama penerbit/institusi' },
+  },
+};
+
+// Fields expected on EVERY reference regardless of source type (except 'unknown', where we
+// can't be confident enough about what SHOULD be there to usefully flag anything missing).
+var UNIVERSAL_REQUIRED_FIELDS = ['firstAuthor', 'year', 'title'];
+var UNIVERSAL_FIELD_LABELS = { firstAuthor: 'nama penulis', year: 'tahun terbit', title: 'judul' };
+
+MultiFormatValidator.prototype.validateReferenceCompleteness = function() {
+  var self = this;
+  this.references.forEach(function(r) {
+    if (r.sourceType === 'unknown') return; // tidak yakin jenisnya -> tidak cukup dasar untuk menuduh field tertentu hilang
+    var missing = [];
+
+    UNIVERSAL_REQUIRED_FIELDS.forEach(function(f) {
+      if (!r[f]) missing.push(UNIVERSAL_FIELD_LABELS[f]);
+    });
+
+    // Website: butuh URL sungguhan (bukan DOI) — sinyal paling andal untuk jenis ini.
+    if (r.sourceType === 'website' && !/https?:\/\//i.test(r.raw || '')) {
+      missing.push('URL/tautan sumber');
+    }
+
+    var rule = REFERENCE_COMPLETENESS_RULES[r.sourceType];
+    if (rule) {
+      rule.required.forEach(function(f) {
+        if (!r[f]) missing.push(rule.labels[f]);
+      });
+      rule.hasAny.forEach(function(group) {
+        var anyPresent = group.some(function(f) { return !!r[f]; });
+        if (!anyPresent) missing.push(group.map(function(f) { return rule.labels[f]; }).join(' atau '));
+      });
+    }
+
+    if (missing.length > 0) {
+      self.suggestions.push({
+        title: 'Metadata referensi tampak tidak lengkap',
+        description: 'Referensi "' + (r.firstAuthor || '-') + (r.year ? ' (' + r.year + ')' : '') + '" (terdeteksi sebagai ' + (SOURCE_TYPE_LABELS[r.sourceType] || r.sourceType) + ') tampaknya belum mencantumkan: ' + missing.join(', ') + '. Periksa apakah ini genuinely hilang, atau cuma tidak terbaca sistem karena format penulisannya sedikit berbeda.',
+        code: r.raw.substring(0, 150),
+        severity: 'suggestion',
+      });
+    }
+  });
+};
+
+var SOURCE_TYPE_LABELS = {
+  'journal-article': 'artikel jurnal', 'book': 'buku', 'book-chapter': 'bab buku',
+  'thesis': 'skripsi/tesis/disertasi', 'conference': 'prosiding/konferensi',
+  'website': 'situs web', 'report': 'laporan/working paper',
+};
+
 MultiFormatValidator.prototype.validateCitationFormat = function() {
   var self = this;
   var TITLES = {
