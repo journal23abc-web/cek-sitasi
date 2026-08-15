@@ -27,6 +27,7 @@
     scopusProceedingsFile: document.getElementById('scopusProceedingsFile'),
     scopusLoadStatus: document.getElementById('scopusLoadStatus'),
     scopusCheckBtn: document.getElementById('scopusCheckBtn'),
+    dismissedBanner: document.getElementById('dismissedBanner'),
     results: document.getElementById('results'),
     parseStatusBanner: document.getElementById('parseStatusBanner'),
     sortByPosition: document.getElementById('sortByPosition'),
@@ -63,6 +64,14 @@
   var lastDoiIssues = [];
   var scopusDatabase = null; // dibangun sekali saat file JSON dimuat, dipakai ulang lintas validasi
   var lastScopusResults = [];
+  var dismissedIssueKeys = new Set(); // fingerprint kunci -> diabaikan pengguna, dikosongkan tiap Validasi baru
+
+  // Kunci "sidik jari" untuk satu masalah — dipakai supaya tombol "Abaikan" tetap konsisten
+  // menyembunyikan masalah yang SAMA di semua tempat ia muncul (tab Perlu Diperbaiki/Saran/Semua,
+  // dan laporan PDF), meski render ulang membuat objek JS baru setiap kali.
+  function issueKey(issue) {
+    return (issue.title || '') + '||' + (issue.code || issue.description || '');
+  }
   var lastStyleId = 'apa7';
   var lastConfidence = null;
   var currentYearRange = null; // { from: number, to: number, label: string }
@@ -163,6 +172,7 @@
       lastValidator = validator;
       lastDoiIssues = [];
       lastScopusResults = [];
+      dismissedIssueKeys.clear();
       jrOverrides = {};
 
       els.loading.classList.remove('active');
@@ -246,6 +256,7 @@
     renderDoiList(doiIssues);
     renderScopusList(lastScopusResults);
     renderAllTab(result.errors.concat(result.suggestions));
+    updateDismissedBanner();
   }
 
   function renderParseStatus(result) {
@@ -273,10 +284,12 @@
     var doiTotal = doiIssues.filter(function(d){return d.status!=='no_doi';}).length;
     var totalCitations = countCitations(result.citations);
     var style = STYLES[result.styleId];
+    var visibleErrors = result.errors.filter(function(i) { return !dismissedIssueKeys.has(issueKey(i)); }).length;
+    var visibleSuggestions = result.suggestions.filter(function(i) { return !dismissedIssueKeys.has(issueKey(i)); }).length;
     els.summaryGrid.innerHTML =
       '<div class="sum-card fmt"><div class="n">' + esc(style.name) + '</div><div class="l">Gaya' + (lastConfidence!=null ? ' ('+lastConfidence+'%)' : '') + '</div></div>' +
-      '<div class="sum-card err"><div class="n">' + result.errors.length + '</div><div class="l">Perlu Diperbaiki</div></div>' +
-      '<div class="sum-card sugg"><div class="n">' + result.suggestions.length + '</div><div class="l">Saran</div></div>' +
+      '<div class="sum-card err"><div class="n">' + visibleErrors + '</div><div class="l">Perlu Diperbaiki</div></div>' +
+      '<div class="sum-card sugg"><div class="n">' + visibleSuggestions + '</div><div class="l">Saran</div></div>' +
       '<div class="sum-card ok"><div class="n">' + totalCitations + '</div><div class="l">Sitasi</div></div>' +
       '<div class="sum-card ok"><div class="n">' + result.references.length + '</div><div class="l">Referensi</div></div>' +
       '<div class="sum-card sugg"><div class="n">' + doiValid + '/' + doiTotal + '</div><div class="l">DOI Valid</div></div>';
@@ -350,12 +363,13 @@
   }
 
   function issueSectionHtml(title, issues, sevClass, codeHl) {
-    var html = '<h2>' + esc(title) + ' (' + issues.length + ')</h2>';
-    if (issues.length === 0) {
+    var visibleIssues = issues.filter(function(issue) { return !dismissedIssueKeys.has(issueKey(issue)); });
+    var html = '<h2>' + esc(title) + ' (' + visibleIssues.length + ')</h2>';
+    if (visibleIssues.length === 0) {
       html += '<p class="rp-empty">Tidak ada masalah pada kategori ini.</p>';
       return html;
     }
-    issues.forEach(function(issue, i) {
+    visibleIssues.forEach(function(issue, i) {
       html += '<div class="rp-issue ' + sevClass + '">';
       html += '<div class="t">' + (i + 1) + '. ' + esc(issue.title) + (issue.location ? ' <span class="loc">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</span>' : '') + '</div>';
       html += '<div class="d">' + esc(issue.description) + '</div>';
@@ -782,19 +796,23 @@
 
   function renderIssueList(elId, issues) {
     var el = document.getElementById(elId);
-    if (issues.length === 0) {
-      el.innerHTML = '<div class="no-issues">✅ Tidak ada masalah di kategori ini.</div>';
+    var visible = issues.filter(function(issue) { return !dismissedIssueKeys.has(issueKey(issue)); });
+    if (visible.length === 0) {
+      var hiddenCount = issues.length - visible.length;
+      el.innerHTML = '<div class="no-issues">✅ Tidak ada masalah di kategori ini.' + (hiddenCount > 0 ? ' <span style="color:var(--text-faint);">(' + hiddenCount + ' diabaikan)</span>' : '') + '</div>';
       return;
     }
     var html = '';
-    issues.forEach(function(issue, idx) {
+    visible.forEach(function(issue, idx) {
       var sc = issue.severity || 'error';
       var sl = sc === 'error' ? 'PERLU DIPERBAIKI' : sc === 'warning' ? 'WARNING' : 'SARAN';
+      var key = issueKey(issue);
       html += '<div class="issue-item ' + sc + '">';
       html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(issue.title) + '</span>';
       if (issue.location) {
         html += '<button class="loc-badge" data-loc-source="' + issue.location.source + '" data-loc-line="' + issue.location.line + '" title="Klik untuk lompat ke baris ini">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</button>';
       }
+      html += '<button class="issue-dismiss" data-issue-key="' + escAttr(key) + '" title="Sembunyikan masalah ini dari laporan — untuk kesalahan pengecekan/false positive">✕ Abaikan</button>';
       html += '</div>';
       html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
       if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
@@ -804,6 +822,45 @@
     el.innerHTML = html;
     bindCopyBlocks(el);
     bindLocationBadges(el);
+    bindDismissButtons(el);
+  }
+
+  function bindDismissButtons(container) {
+    container.querySelectorAll('.issue-dismiss').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        dismissedIssueKeys.add(btn.getAttribute('data-issue-key'));
+        refreshAllIssueViews();
+        showToast('Masalah diabaikan dari laporan.');
+      });
+    });
+  }
+
+  // Menggambar ulang SEMUA tampilan yang menampilkan errors/suggestions (tab Perlu Diperbaiki,
+  // Saran, Semua) dan pratinjau laporan PDF — dipanggil setiap kali daftar yang diabaikan
+  // berubah, supaya konsisten di semua tempat sekaligus.
+  function refreshAllIssueViews() {
+    if (!lastResult) return;
+    renderIssueList('list-errors', lastResult.errors);
+    renderIssueList('list-suggestions', lastResult.suggestions);
+    applyFilterAndRender();
+    updateDismissedBanner();
+    renderSummary(lastResult, lastDoiIssues);
+    renderReportPreview();
+  }
+
+  function updateDismissedBanner() {
+    var banner = els.dismissedBanner;
+    if (!banner) return;
+    if (dismissedIssueKeys.size === 0) { banner.style.display = 'none'; return; }
+    banner.style.display = '';
+    banner.innerHTML = '🙈 ' + dismissedIssueKeys.size + ' masalah diabaikan (disembunyikan dari laporan &amp; PDF). <button id="restoreDismissedBtn" class="ghost-link" style="cursor:pointer;">↩️ Tampilkan Semua Lagi</button>';
+    var restoreBtn = document.getElementById('restoreDismissedBtn');
+    if (restoreBtn) restoreBtn.addEventListener('click', function() {
+      dismissedIssueKeys.clear();
+      refreshAllIssueViews();
+      showToast('Semua masalah yang diabaikan ditampilkan kembali.');
+    });
   }
 
   function scrollToLocation(source, line) {

@@ -99,6 +99,10 @@
   .loc-badge{ margin-left:auto; font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; color:var(--cyan); background:rgba(79,227,232,.08); border:1px solid rgba(79,227,232,.3); border-radius:20px; padding:4px 10px; cursor:pointer; transition:all .15s ease; white-space:nowrap; }
   .loc-badge:hover{ background:rgba(79,227,232,.18); border-color:var(--cyan); }
   .loc-badge:focus-visible{ outline:2px solid var(--cyan); outline-offset:2px; }
+  .issue-dismiss{ margin-left:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; color:var(--text-faint); background:var(--input-bg); border:1px solid var(--hairline); border-radius:20px; padding:4px 10px; cursor:pointer; transition:all .15s ease; white-space:nowrap; }
+  .issue-header .issue-dismiss:last-child{ margin-left:auto; }
+  .issue-dismiss:hover{ background:rgba(242,109,109,.12); border-color:var(--red); color:var(--red); }
+  .issue-dismiss:focus-visible{ outline:2px solid var(--red); outline-offset:2px; }
 
   .doi-search-btn{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--violet); background:rgba(139,124,240,.08); border:1px solid rgba(139,124,240,.35); border-radius:7px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
   .doi-search-btn:hover{ background:rgba(139,124,240,.18); }
@@ -463,6 +467,8 @@
       <summary>Data Terdeteksi — Sitasi &amp; Referensi</summary>
       <div class="detected-content" id="detectedContent"></div>
     </details>
+
+    <div id="dismissedBanner" class="status info" style="display:none;margin-bottom:12px;" role="status" aria-live="polite"></div>
 
     <div class="tabs" role="tablist" aria-label="Kategori hasil validasi">
       <button class="tab-btn active" data-tab="errors" role="tab" aria-selected="true" aria-controls="tab-errors" id="tab-btn-errors">🔴 Perlu Diperbaiki</button>
