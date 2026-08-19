@@ -405,7 +405,14 @@
     <div class="panel" id="originalHlPanel" style="display:none;">
       <div class="field-label">Naskah Asli dengan Highlight + Komentar Word</div>
       <p style="font-size:11.5px;color:var(--text-dim);margin-top:-4px;">Format &amp; layout dokumen <b>.docx asli tidak diubah sama sekali</b>. Kalimat/tahun bermasalah diberi highlight warna, DAN ditempeli <b>komentar Word asli</b> (muncul di panel Review › Comments saat dibuka di Word) yang menjelaskan alasan kenapa bagian itu ditandai — jadi tidak perlu menebak-nebak.</p>
-      <div class="row" style="margin-top:10px;">
+      <div class="field-label" style="margin-top:14px;">Kategori yang Disertakan</div>
+      <div class="export-options" id="hlOriginalSections">
+        <label class="export-check"><input type="checkbox" value="errors" checked> Perlu Diperbaiki</label>
+        <label class="export-check"><input type="checkbox" value="suggestions" checked> Saran</label>
+        <label class="export-check"><input type="checkbox" value="year" checked> Masalah Tahun Referensi</label>
+      </div>
+      <p style="font-size:11px;color:var(--text-faint);margin:-6px 0 0;">Masalah yang sudah Anda "✕ Abaikan" di tab hasil validasi juga otomatis tidak ikut di-highlight di sini, sama seperti di laporan PDF.</p>
+      <div class="row" style="margin-top:14px;">
         <button class="primary" id="downloadOriginalBtn">📎 Unduh Naskah Asli ber-Highlight (.docx)</button>
         <span class="status info" id="downloadOriginalStatus" role="status" aria-live="polite"></span>
       </div>

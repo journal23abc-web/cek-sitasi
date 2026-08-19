@@ -1441,8 +1441,17 @@
       .catch(function(err) { console.error('Formatting check failed:', err); return []; });
   }
 
+  function getHlOriginalSections() {
+    var boxes = document.querySelectorAll('#hlOriginalSections input:checked');
+    return Array.prototype.slice.call(boxes).map(function(b) { return b.value; });
+  }
+
   function buildHighlightedOriginalDocx(result, doiIssues, yearRange) {
     var file = state.originalFile;
+    var sections = getHlOriginalSections();
+    var includeErrors = sections.indexOf('errors') !== -1;
+    var includeSuggestions = sections.indexOf('suggestions') !== -1;
+    var includeYear = sections.indexOf('year') !== -1;
     return file.arrayBuffer()
       .then(function(buf) { return JSZip.loadAsync(buf); })
       .then(function(zip) {
@@ -1461,7 +1470,9 @@
 
           var matches = [];
 
-          // 1) Reference year problems (within the selected range only, as requested)
+          // 1) Reference year problems (within the selected range only, as requested) — cuma
+          // kalau kategori "Masalah Tahun Referensi" dicentang.
+          if (includeYear) {
           var cursor = refZoneStart;
           result.references.forEach(function(r) {
             var anchorTerm = (r.raw || r.firstAuthor || '').split(/\s+/).slice(0, 8).join(' ');
@@ -1498,11 +1509,15 @@
               comment: '❔ Tahun untuk referensi ini tidak dapat dideteksi otomatis oleh sistem. Mohon periksa manual apakah masih dalam rentang ' + yearRange.label + '.'
             });
           });
+          }
 
-          // 2) In-text issues (errors/suggestions) with a findable "code" snippet
+          // 2) In-text issues (errors/suggestions) with a findable "code" snippet — cuma
+          // kategori yang dicentang, dan TIDAK menyertakan masalah yang sudah "✕ Abaikan"
+          // (konsisten dengan laporan PDF: sekali diabaikan, hilang dari semua output).
           function collectIssueMatches(issues, color) {
             issues.forEach(function(issue) {
               if (!issue.code) return;
+              if (dismissedIssueKeys.has(issueKey(issue))) return;
               var re = flexiblePattern(issue.code, 'gi');
               if (!re) return;
               var found = findAllMatches(fullText.slice(0, refZoneStart), 0, re, color);
@@ -1511,8 +1526,8 @@
               matches = matches.concat(found);
             });
           }
-          collectIssueMatches(result.errors, 'red');
-          collectIssueMatches(result.suggestions, 'cyan');
+          if (includeErrors) collectIssueMatches(result.errors, 'red');
+          if (includeSuggestions) collectIssueMatches(result.suggestions, 'cyan');
 
           // Sort and drop overlaps (keep the first-encountered match).
           matches.sort(function(a, b) { return a.start - b.start; });
@@ -1556,7 +1571,12 @@
       .then(function(res) {
         els.downloadOriginalBtn.disabled = false;
         if (!res.blob) {
-          els.downloadOriginalStatus.textContent = 'Tidak ditemukan kalimat/tahun yang cocok untuk di-highlight secara otomatis di teks aslinya.';
+          var sections = getHlOriginalSections();
+          if (sections.length === 0) {
+            els.downloadOriginalStatus.textContent = '⚠️ Tidak ada kategori yang dicentang — centang minimal satu kategori di atas dulu.';
+          } else {
+            els.downloadOriginalStatus.textContent = 'Tidak ditemukan kalimat/tahun yang cocok untuk di-highlight secara otomatis di teks aslinya (untuk kategori yang dicentang).';
+          }
           els.downloadOriginalStatus.className = 'status warn';
           return;
         }
@@ -1590,5 +1610,9 @@
       renderResults(result, []);
       runScopusCheckIfReady();
     },
+    buildHighlightedOriginalDocx: buildHighlightedOriginalDocx,
+    getHlOriginalSections: getHlOriginalSections,
+    dismissedIssueKeys: dismissedIssueKeys,
+    state: state,
   };
 })();
