@@ -315,6 +315,26 @@
       var nm = bms[i].getAttribute('w:name');
       if (nm && nm.charAt(0) !== '_') return nm;
     }
+    // Kasus lebih jarang tapi nyata (dijumpai di naskah bersitasi Mendeley/Zotero): bookmark bisa
+    // MELINTASI batas paragraf — bookmarkStart-nya duduk sebagai elemen "mengambang" SEBELUM
+    // paragraf ini (bukan di dalamnya), sementara bookmarkEnd-nya ada DI DALAM paragraf ini. Cek
+    // ini juga dulu apa itu terjadi, lewat bookmarkEnd -> cocokkan w:id-nya ke bookmarkStart di
+    // MANA PUN posisinya di dokumen — supaya tidak dikira "belum ada bookmark" dan bikin bookmark
+    // baru bernama sama persis (nama bookmark WAJIB unik di OOXML; nama duplikat merusak file).
+    var bmEnds = p.getElementsByTagName('w:bookmarkEnd');
+    if (bmEnds.length === 0) return null;
+    var doc = p.ownerDocument || p;
+    var allStarts = doc.getElementsByTagName('w:bookmarkStart');
+    for (var j = 0; j < bmEnds.length; j++) {
+      var endId = bmEnds[j].getAttribute('w:id');
+      if (!endId) continue;
+      for (var k = 0; k < allStarts.length; k++) {
+        if (allStarts[k].getAttribute('w:id') === endId) {
+          var nm2 = allStarts[k].getAttribute('w:name');
+          if (nm2 && nm2.charAt(0) !== '_') return nm2;
+        }
+      }
+    }
     return null;
   }
 
@@ -587,14 +607,25 @@
     if (captions.length === 0) return { linked: 0, captionsFound: 0 };
 
     // Beri tiap caption bookmark unik (dibuat SEKALI per nomor+tipe — kalau ada dua caption
-    // dengan nomor sama, mis. penomoran ulang di draft, yang PERTAMA ditemukan dipakai).
+    // dengan nomor sama, mis. penomoran ulang di draft, yang PERTAMA ditemukan dipakai). Kalau
+    // paragraf caption ini SUDAH punya bookmark (mis. dari proses "Tautkan" sebelumnya yang
+    // pernah dijalankan di naskah yang sama), PAKAI ULANG nama itu alih-alih bikin baru — nama
+    // bookmark WAJIB unik di OOXML; bikin bookmark baru dengan nama sama ("figtbl_tbl_1" lagi)
+    // menghasilkan nama duplikat yang merusak file, persis kelas bug yang sama seperti pada
+    // bookmark sitasi.
     var bookmarkOf = {}; // 'fig_1' -> nama bookmark
     var bmId = bookmarkSeqStart;
     captions.forEach(function (c) {
       var key = c.type + '_' + c.number;
       if (bookmarkOf[key]) return; // nomor duplikat, sudah ada bookmark dari caption pertama
+      var paraEl = bodyParas[c.paraIndex].el;
       var name = 'figtbl_' + key;
-      insertBookmark(xmlDoc, bodyParas[c.paraIndex].el, name, bmId++);
+      var existingName = findExistingBookmarkName(paraEl);
+      if (existingName === name) {
+        bookmarkOf[key] = existingName;
+        return;
+      }
+      insertBookmark(xmlDoc, paraEl, name, bmId++);
       bookmarkOf[key] = name;
     });
 

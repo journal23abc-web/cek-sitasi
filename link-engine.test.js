@@ -418,7 +418,45 @@ test('figure/table linking is OFF by default (no options.linkFiguresTables passe
   assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, 0);
 });
 
-console.log('\n=== Regression: inserting a hyperlink in the middle of a Word field code (Insert Caption / Insert Cross-reference auto-numbering) produces invalid OOXML — Word then reports "unreadable content" and silently strips the broken link on recovery ===');
+console.log('\n=== Regression: bookmark NAME duplication when re-processing an already-linked document — invalid OOXML (bookmark names must be unique), causes Word to fail opening the file entirely ===');
+
+test('a citation bookmark whose bookmarkStart sits OUTSIDE the reference paragraph (as a body-level sibling right before it — a real pattern from Mendeley/Zotero-generated documents) but whose bookmarkEnd is inside it is correctly detected and reused, instead of creating a duplicate-named bookmark', () => {
+  var paras = [
+    para(run('Studies (Smith, 2020) show this clearly in the recent literature overall.')),
+    para(run('REFERENCES')),
+  ];
+  // Simulasikan bookmark "melintasi" 2 paragraf: bookmarkStart sebagai elemen mengambang SEBELUM
+  // paragraf referensi (pola Mendeley), bookmarkEnd DI DALAM paragraf referensi itu sendiri.
+  var refParaXml = '<w:bookmarkStart w:id="0" w:name="Smith2020"/>' + para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.') + '<w:bookmarkEnd w:id="0"/>');
+  var xml = '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    paras.join('') + refParaXml + '</w:body></w:document>';
+  var xmlDoc = new DOMParser().parseFromString(xml, 'application/xml');
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  var bmNames = Array.from(xmlDoc.getElementsByTagName('w:bookmarkStart')).map((b) => b.getAttribute('w:name'));
+  var smithCount = bmNames.filter((n) => n === 'Smith2020').length;
+  assert.strictEqual(smithCount, 1, 'harus tetap cuma SATU bookmark "Smith2020", bukan bikin baru dengan nama sama: ' + JSON.stringify(bmNames));
+});
+
+test('re-running figure/table linking on a document that already has figtbl_ bookmarks from a prior pass reuses the existing bookmarks instead of creating duplicate-named ones', () => {
+  var captionPara = '<w:bookmarkStart w:id="8000" w:name="figtbl_tbl_1"/>' + para(run('Table 1. Reliability and Convergent Validity') + '<w:bookmarkEnd w:id="8000"/>');
+  var paras = [
+    para(run('Table 1 presents the reliability scores for all constructs in the study overall.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser.')),
+  ];
+  var xml = '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+    paras.join('') + captionPara + para(run('REFERENCES')) + para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')) + '</w:body></w:document>';
+  var xmlDoc = new DOMParser().parseFromString(xml, 'application/xml');
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  var bmNames = Array.from(xmlDoc.getElementsByTagName('w:bookmarkStart')).map((b) => b.getAttribute('w:name'));
+  var tbl1Count = bmNames.filter((n) => n === 'figtbl_tbl_1').length;
+  assert.strictEqual(tbl1Count, 1, 'harus tetap cuma SATU bookmark "figtbl_tbl_1", bukan bikin baru dengan nama sama: ' + JSON.stringify(bmNames));
+  assert.strictEqual(result.figuresTablesLinked, 1); // sebutan "Table 1" tetap berhasil ditautkan ke bookmark yang SUDAH ada
+});
+
+
 
 test('a "Table N" mention built from Word\'s native Cross-reference field (fldChar begin/instrText/separate/result/end) is left completely untouched — the field sequence must never be interrupted by a new <w:hyperlink>, even though this means the mention can\'t be linked', () => {
   var fieldRun =
