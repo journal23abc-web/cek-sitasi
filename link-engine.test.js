@@ -418,6 +418,49 @@ test('figure/table linking is OFF by default (no options.linkFiguresTables passe
   assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, 0);
 });
 
+console.log('\n=== Regression: a body sentence starting with "Figure N"/"Table N" (e.g. "Figure 1 shows that...") was wrongly mistaken for the caption itself ===');
+
+test('a prose sentence beginning with "Figure 1 shows that..." is correctly treated as a MENTION to be linked, not mistaken for the caption — the caption is the paragraph starting "Figure 1." (with a period/colon/dash right after the number)', () => {
+  var paras = [
+    para(run('Figure 1 shows that the distribution follows a normal pattern across all respondents.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser to work correctly.')),
+    para(run('Figure 1. Distribution of respondent age across the sample population.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  assert.strictEqual(result.figuresTablesCaptionsFound, 1); // cuma "Figure 1. Distribution..." yang genuinely caption
+  assert.strictEqual(result.figuresTablesLinked, 1); // "Figure 1 shows that..." ditautkan sebagai mention
+  // bookmark harus menempel di paragraf caption ASLI (yang diawali "Figure 1." dengan titik),
+  // BUKAN paragraf kalimat "Figure 1 shows that..." (yang cuma kebetulan diawali kata sama)
+  var bookmarkPara = null;
+  var bmStarts = Array.from(xmlDoc.getElementsByTagName('w:bookmarkStart'));
+  bmStarts.forEach((b) => {
+    if (b.getAttribute('w:name') === 'figtbl_fig_1') bookmarkPara = b.parentNode;
+  });
+  assert.ok(bookmarkPara, 'bookmark figtbl_fig_1 harus ada');
+  assert.ok(bookmarkPara.textContent.indexOf('Distribution of respondent age') !== -1, 'bookmark harus di paragraf caption, isi paragraf: ' + bookmarkPara.textContent);
+});
+
+test('a genuine caption written with a colon instead of a period ("Table 1: Reliability...") is still correctly recognized as a caption', () => {
+  var paras = [
+    para(run('Table 1 shows the reliability scores for each construct in the study overall.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser.')),
+    para(run('Table 1: Reliability and Convergent Validity')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  assert.strictEqual(result.figuresTablesCaptionsFound, 1);
+  assert.strictEqual(result.figuresTablesLinked, 1);
+});
+
 console.log('\n=== Regression: narrative citation with a possessive apostrophe ("Bandura\u2019s (1986)") now correctly links ===');
 
 test('a narrative citation with a curly-quote possessive ("Bandura\u2019s (1986) theory") correctly links to its reference — the possessive grammar suffix must not become part of the matching key', () => {

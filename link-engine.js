@@ -531,7 +531,7 @@
   // TEKSNYA DIAWALI pola "Figure N"/"Table N" (mengabaikan spasi di depan) — paragraf itu diberi
   // bookmark, lalu setiap kemunculan "Figure N"/"Table N" LAIN di badan artikel (bukan caption-nya
   // sendiri) yang merujuk nomor yang sama ditautkan ke bookmark itu.
-  var CAPTION_START_RE = /^\s*(Figure|Fig\.?|Gambar|Table|Tabel)\s*\.?\s*(\d+)\b/i;
+  var CAPTION_START_RE = /^\s*(Figure|Fig\.?|Gambar|Table|Tabel)\s*\.?\s*(\d+)\s*[.:)\-–—]/i;
   var FIGTBL_MENTION_RE = /\b(Figure|Fig\.?|Gambar|Table|Tabel)\s*\.?\s*(\d+)\b/gi;
 
   function figTblType(label) {
