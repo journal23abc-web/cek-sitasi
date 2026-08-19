@@ -14,6 +14,8 @@
     linkColor: document.getElementById('linkColor'),
     narrowToHighlight: document.getElementById('narrowToHighlight'),
     onlyHighlighted: document.getElementById('onlyHighlighted'),
+    linkReferenceUrls: document.getElementById('linkReferenceUrls'),
+    linkFiguresTables: document.getElementById('linkFiguresTables'),
     processBtn: document.getElementById('processBtn'),
     statusMsg: document.getElementById('statusMsg'),
     results: document.getElementById('results'),
@@ -185,11 +187,21 @@
       if (!result.narrowedToHighlight && !result.skippedNotHighlighted) hlNote += 'Ada highlight di naskah, tapi tidak beririsan dengan sitasi manapun';
       hlNote += '</div>';
     }
+    var figTblNote = '';
+    if (els.linkFiguresTables && els.linkFiguresTables.checked) {
+      if (result.figuresTablesCaptionsFound) {
+        figTblNote = '<div class="pb-stats" style="margin-top:4px;">🖼️ ' + result.figuresTablesCaptionsFound + ' caption Figure/Table ditemukan &middot; ' + result.figuresTablesLinked + ' sebutan berhasil ditautkan' +
+          (result.figuresTablesLinked === 0 ? ' — kalau naskah Anda punya sebutan "Figure N"/"Table N" di teks tapi angka ini 0, kemungkinan sebutannya dibuat lewat fitur "Insert Cross-reference" bawaan Word (field kode otomatis), yang sengaja TIDAK disentuh demi keamanan file (mencegah dokumen rusak) — link Cross-reference bawaan Word itu sendiri sudah bisa diklik-lompat, jadi tetap berfungsi' : '') +
+          '</div>';
+      } else {
+        figTblNote = '<div class="pb-stats" style="margin-top:4px;">🖼️ Tidak ditemukan caption "Figure N."/"Table N." di naskah — tidak ada yang bisa ditautkan.</div>';
+      }
+    }
     els.parseBanner.innerHTML =
       '<div class="parse-banner ' + bannerClass + '">' +
       '<div class="pb-title">Gaya sitasi: ' + escHtml(styleLabel) + '</div>' +
       '<div class="pb-stats">' + result.refCount + ' referensi terdeteksi &middot; ' + result.linked + ' sitasi tertaut &middot; ' + result.unmatched.length + ' tidak cocok</div>' +
-      hlNote +
+      hlNote + figTblNote +
       '</div>';
 
     els.summaryGrid.innerHTML =
@@ -197,7 +209,9 @@
       '<div class="sum-card ok"><div class="n">' + result.linked + '</div><div class="l">Tertaut</div></div>' +
       '<div class="sum-card ' + (result.unmatched.length ? 'warn' : 'ok') + '"><div class="n">' + result.unmatched.length + '</div><div class="l">Tidak Cocok</div></div>' +
       '<div class="sum-card fmt"><div class="n">' + escHtml(result.styleName) + '</div><div class="l">Gaya</div></div>' +
-      (result.urlsLinked ? '<div class="sum-card ok"><div class="n">' + result.urlsLinked + '</div><div class="l">URL Referensi Ditautkan</div></div>' : '');
+      (result.urlsLinked ? '<div class="sum-card ok"><div class="n">' + result.urlsLinked + '</div><div class="l">URL Referensi Ditautkan</div></div>' : '') +
+      (els.linkFiguresTables && els.linkFiguresTables.checked ? '<div class="sum-card ok"><div class="n">' + result.figuresTablesLinked + '</div><div class="l">Figure/Table Tertaut</div></div>' : '') +
+      (els.linkFiguresTables && els.linkFiguresTables.checked ? '<div class="sum-card"><div class="n">' + result.figuresTablesCaptionsFound + '</div><div class="l">Caption Figure/Table</div></div>' : '');
 
     var html = '';
     if (result.unmatched.length) {

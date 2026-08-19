@@ -418,7 +418,59 @@ test('figure/table linking is OFF by default (no options.linkFiguresTables passe
   assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, 0);
 });
 
-console.log('\n=== Regression: a body sentence starting with "Figure N"/"Table N" (e.g. "Figure 1 shows that...") was wrongly mistaken for the caption itself ===');
+console.log('\n=== Regression: inserting a hyperlink in the middle of a Word field code (Insert Caption / Insert Cross-reference auto-numbering) produces invalid OOXML — Word then reports "unreadable content" and silently strips the broken link on recovery ===');
+
+test('a "Table N" mention built from Word\'s native Cross-reference field (fldChar begin/instrText/separate/result/end) is left completely untouched — the field sequence must never be interrupted by a new <w:hyperlink>, even though this means the mention can\'t be linked', () => {
+  var fieldRun =
+    '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+    '<w:r><w:instrText xml:space="preserve"> REF _Ref123 \\r \\h </w:instrText></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+    '<w:r><w:t>1</w:t></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  var paras = [
+    para(run('As shown in Table ') + fieldRun + run(', the reliability scores exceed the recommended threshold.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser to work.')),
+    para(run('Table 1. Reliability and Convergent Validity')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title A. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  // Match jatuh di dalam field -> harus dilewati (bukan dipaksa, bukan menghasilkan hyperlink
+  // yang membelah field), sesuai filosofi "lewati & laporkan" yang sama seperti hyperlink lama.
+  assert.strictEqual(result.figuresTablesLinked, 0);
+  // Yang PALING penting: urutan run field code (begin, instrText, separate, hasil, end) HARUS
+  // tetap berurutan tanpa jeda apa pun di antaranya — tidak boleh ada <w:hyperlink> menyelip.
+  var serialized = new XMLSerializer().serializeToString(xmlDoc);
+  var fieldIdx = serialized.indexOf('fldCharType="begin"');
+  var endIdx = serialized.indexOf('fldCharType="end"');
+  var between = serialized.slice(fieldIdx, endIdx);
+  assert.ok(between.indexOf('w:hyperlink') === -1, 'tidak boleh ada <w:hyperlink> di antara fldChar begin dan end: ' + between);
+});
+
+test('a genuine plain-text mention in the SAME paragraph as an unrelated field code is still safely linked — only the field-code portion itself is protected, not the whole paragraph', () => {
+  var fieldRun =
+    '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+    '<w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+    '<w:r><w:t>4</w:t></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  var paras = [
+    para(run('See page ') + fieldRun + run(' for Table 1, which reports reliability scores at length.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser.')),
+    para(run('Table 1. Reliability and Convergent Validity')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title A. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  assert.strictEqual(result.figuresTablesLinked, 1); // "Table 1" (teks polos, di luar field PAGE) tetap tertaut normal
+});
+
 
 test('a prose sentence beginning with "Figure 1 shows that..." is correctly treated as a MENTION to be linked, not mistaken for the caption — the caption is the paragraph starting "Figure 1." (with a period/colon/dash right after the number)', () => {
   var paras = [

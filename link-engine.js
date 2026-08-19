@@ -122,16 +122,34 @@
   // dipecah/disisipi w:hyperlink baru) atau bukan (sudah di dalam wrapper lain; menyisipkan
   // w:hyperlink baru di situ akan jadi hyperlink bersarang yang tidak valid di OOXML, jadi
   // match yang menyentuh run ini akan dilewati & dilaporkan, bukan dipaksakan).
+  // PENTING (kelas bug lain): naskah akademik SANGAT umum memakai fitur Word "Insert Caption"
+  // (penomoran otomatis) dan "Insert Cross-reference" untuk menyebut "Table 1"/"Figure 1" di
+  // teks — ini BUKAN teks polos, tapi FIELD CODE kompleks: serangkaian <w:r> berurutan berisi
+  // fldChar type="begin" -> instrText (mis. " SEQ Table \* ARABIC " / " REF _Ref123 ") ->
+  // fldChar type="separate" -> HASIL CACHE (w:t berisi angka, mis. "1") -> fldChar type="end".
+  // Field ini WAJIB jadi satu rangkaian run yang utuh tanpa jeda — menyisipkan elemen lain
+  // (w:hyperlink) DI TENGAH rangkaian ini menghasilkan OOXML tidak valid yang membuat Word
+  // menampilkan "unreadable content" lalu diam-diam MEMBUANG hyperlink yang rusak saat pemulihan
+  // (persis gejala yang dilaporkan: file "sudah ditautkan" tapi setelah dibuka ternyata tidak).
+  // Setiap run yang berada di DALAM rentang begin..end (termasuk run hasil cache seperti "1"
+  // itu sendiri) ditandai TIDAK BOLEH disisipi/dipecah — match yang menyentuhnya dilewati &
+  // dilaporkan, sama seperti hyperlink/tracked-changes yang sudah ada sebelumnya.
   function getRunInfos(p) {
     var runNodes = p.getElementsByTagName('w:r');
     var text = '', infos = [];
+    var insideField = false;
     for (var i = 0; i < runNodes.length; i++) {
       var r = runNodes[i];
+      var fldCharList = r.getElementsByTagName('w:fldChar');
+      var fldType = fldCharList.length ? fldCharList[0].getAttribute('w:fldCharType') : null;
+      if (fldType === 'begin') insideField = true;
+      var isFieldPart = insideField;
       var wts = r.getElementsByTagName('w:t');
       var t = '';
       for (var j = 0; j < wts.length; j++) t += wts[j].textContent;
-      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t, spliceable: r.parentNode === p });
+      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t, spliceable: (r.parentNode === p) && !isFieldPart });
       text += t;
+      if (fldType === 'end') insideField = false;
     }
     return { text: text, infos: infos };
   }
