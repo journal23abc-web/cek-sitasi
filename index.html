@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Journal Tools — Beranda</title>
+<title>Journal Tools — Workspace</title>
 <script>
 (function(){
   try {
@@ -13,48 +13,75 @@
   } catch (e) {}
 })();
 </script>
-<link rel="stylesheet" href="shared.css?v=2">
+<link rel="stylesheet" href="shared.css?v=3">
 <style>
-  .wrap{ max-width:980px; margin:0 auto; position:relative; z-index:1; }
-  a{ color:var(--cyan); }
-
-  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:34px; }
-  h1{ font-family:var(--font-display); font-weight:700; font-size:28px; margin:0; letter-spacing:-0.01em; }
-  .status-pill{ display:flex; align-items:center; gap:8px; font-family:var(--font-mono); font-size:11px; letter-spacing:0.1em; color:var(--text-dim); border:1px solid var(--hairline); border-radius:20px; padding:6px 12px; background:var(--panel); }
-  .dot{ width:7px; height:7px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px 1px var(--glow-cyan); animation:pulse 2s ease-in-out infinite; }
-  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
-  .ghost-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; cursor:pointer; transition:all .15s ease; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
-  .ghost-link:hover{ border-color:var(--cyan); color:var(--cyan); }
-
-  .intro{ margin-bottom:32px; max-width:640px; }
-  .intro p{ color:var(--text-dim); font-size:13.5px; line-height:1.7; margin:0; }
-
-  .section-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-faint); margin:0 0 14px; display:flex; align-items:center; gap:10px; }
-  .section-label::after{ content:''; flex:1; height:1px; background:var(--hairline); }
-
-  .tool-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:18px; margin-bottom:36px; }
-
-  .tool-card{ position:relative; display:block; text-decoration:none; background:linear-gradient(180deg, var(--panel-raised), var(--panel)); border:1px solid var(--hairline); border-radius:12px; padding:26px; transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
-  .tool-card:hover{ transform:translateY(-3px); border-color:var(--cyan); box-shadow:0 10px 30px rgba(79,227,232,.12); }
-  .tool-card:focus-visible{ outline:2px solid var(--cyan); outline-offset:3px; }
-  .tool-card .tc-icon{ font-size:28px; margin-bottom:14px; display:inline-flex; align-items:center; justify-content:center; width:52px; height:52px; border-radius:12px; background:var(--input-bg); border:1px solid var(--hairline); }
-  .tool-card .tc-title{ font-family:var(--font-display); font-size:18px; font-weight:700; color:var(--text); margin-bottom:6px; }
-  .tool-card .tc-desc{ font-size:12.5px; color:var(--text-dim); line-height:1.65; margin-bottom:16px; }
-  .tool-card .tc-tags{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
-  .tool-card .tc-tag{ font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; color:var(--cyan); background:rgba(79,227,232,.1); border-radius:12px; padding:3px 9px; }
-  .tool-card .tc-cta{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.05em; color:var(--cyan); display:flex; align-items:center; gap:6px; }
-  .tool-card .tc-cta .arrow{ transition:transform .18s ease; }
-  .tool-card:hover .tc-cta .arrow{ transform:translateX(4px); }
-  .tool-card .corner{ position:absolute; width:14px; height:14px; border:1.5px solid var(--cyan); opacity:.5; }
-  .tool-card .corner.tl{ top:-1px; left:-1px; border-right:none; border-bottom:none; border-radius:12px 0 0 0; }
-  .tool-card .corner.br{ bottom:-1px; right:-1px; border-left:none; border-top:none; border-radius:0 0 12px 0; }
-
-  .tool-card.placeholder{ border-style:dashed; opacity:.55; cursor:default; }
-  .tool-card.placeholder:hover{ transform:none; border-color:var(--hairline); box-shadow:none; }
-  .tool-card.placeholder .tc-icon{ background:transparent; }
-
-  footer{ font-size:11px; color:var(--text-faint); text-align:center; margin-top:40px; line-height:1.8; }
-  footer a{ color:var(--text-faint); text-decoration:underline; }
+  .wrap{max-width:1180px;margin:0 auto;position:relative;z-index:1}
+  a{color:var(--cyan)}
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin-bottom:24px}
+  h1{font-family:var(--font-display);font-weight:700;font-size:28px;margin:0;letter-spacing:-.01em}
+  .header-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .status-pill{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:11px;letter-spacing:.1em;color:var(--text-dim);border:1px solid var(--hairline);border-radius:20px;padding:6px 12px;background:var(--panel)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px 1px var(--glow-cyan);animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .ghost-btn{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.04em;color:var(--text-dim);background:var(--input-bg);border:1px solid var(--hairline);border-radius:6px;padding:9px 14px;cursor:pointer;transition:all .15s ease;text-decoration:none;display:inline-flex;align-items:center;gap:7px}
+  .ghost-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+  .intro{max-width:800px;margin-bottom:22px}
+  .intro p{color:var(--text-dim);font-size:13.5px;line-height:1.7;margin:0}
+  .panel{position:relative;background:linear-gradient(180deg,var(--panel-raised),var(--panel));border:1px solid var(--hairline);border-radius:12px;padding:22px;margin-bottom:22px}
+  .panel-title{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+  .panel-title h2{font-family:var(--font-display);font-size:18px;margin:0 0 5px}
+  .panel-title p{font-size:12.5px;line-height:1.6;color:var(--text-dim);margin:0}
+  .step-badge{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--cyan);border:1px solid rgba(79,227,232,.3);background:rgba(79,227,232,.08);border-radius:999px;padding:5px 9px;white-space:nowrap}
+  .workspace-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,.85fr);gap:18px}
+  .field-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin:0 0 8px}
+  #workspaceText{width:100%;min-height:250px;box-sizing:border-box;background:var(--input-bg);border:1px solid var(--hairline);border-radius:8px;padding:14px;color:var(--text);font-family:var(--font-mono);font-size:12.5px;line-height:1.7;resize:vertical;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
+  #workspaceText:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(79,227,232,.12)}
+  #workspaceText::placeholder{color:var(--text-faint)}
+  .text-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .text-stats{font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)}
+  .upload-box{height:100%;display:flex;flex-direction:column}
+  .dropzone{flex:1;min-height:170px;border:1px dashed var(--hairline);border-radius:10px;background:var(--input-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;cursor:pointer;transition:all .15s ease}
+  .dropzone:hover,.dropzone.drag{border-color:var(--cyan);background:rgba(79,227,232,.06)}
+  .dropzone .icon{font-size:30px;margin-bottom:8px}
+  .dropzone .main{font-size:13px;font-weight:600;color:var(--text);margin-bottom:5px}
+  .dropzone .sub{font-family:var(--font-mono);font-size:10px;line-height:1.55;color:var(--text-faint);max-width:280px}
+  .file-chip{display:none;align-items:center;gap:8px;margin-top:10px;border:1px solid var(--hairline);border-radius:8px;background:var(--input-bg);padding:9px 11px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim)}
+  .file-chip.show{display:flex}
+  .file-chip .name{color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+  .file-chip .remove{margin-left:auto;border:0;background:transparent;color:var(--text-faint);cursor:pointer;font-size:14px}
+  .file-chip .remove:hover{color:var(--red)}
+  .privacy-note{font-size:11px;line-height:1.6;color:var(--text-faint);margin:10px 0 0}
+  .section-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint);margin:0 0 12px;display:flex;align-items:center;gap:10px}
+  .section-label::after{content:'';flex:1;height:1px;background:var(--hairline)}
+  .feature-head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+  .source-pref{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:10.5px;color:var(--text-faint)}
+  .source-pref select{font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim);background:var(--input-bg);border:1px solid var(--hairline);border-radius:6px;padding:7px 9px;outline:none}
+  .tool-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+  .tool-btn{position:relative;text-align:left;background:var(--input-bg);border:1px solid var(--hairline);border-radius:10px;padding:16px;cursor:pointer;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;color:var(--text)}
+  .tool-btn:hover{transform:translateY(-2px);border-color:var(--cyan);box-shadow:0 8px 22px rgba(79,227,232,.09)}
+  .tool-btn:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+  .tool-icon{font-size:23px;margin-bottom:10px}
+  .tool-title{font-family:var(--font-display);font-size:14px;font-weight:700;line-height:1.3;margin-bottom:5px}
+  .tool-desc{font-size:11px;line-height:1.5;color:var(--text-dim);min-height:50px}
+  .tool-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+  .tool-tag{font-family:var(--font-mono);font-size:9px;letter-spacing:.05em;border-radius:999px;padding:3px 7px;color:var(--cyan);background:rgba(79,227,232,.08)}
+  .tool-tag.docx{color:var(--violet);background:rgba(145,116,255,.1)}
+  .statusbar{display:none;margin-top:14px;border:1px solid var(--hairline);border-radius:8px;padding:10px 12px;font-family:var(--font-mono);font-size:11px;line-height:1.55;color:var(--text-dim);background:var(--input-bg)}
+  .statusbar.show{display:block}
+  .statusbar.ok{border-color:rgba(55,214,122,.35);color:var(--green)}
+  .statusbar.warn{border-color:rgba(255,184,76,.35);color:var(--amber)}
+  .statusbar.err{border-color:rgba(255,96,114,.35);color:var(--red)}
+  #toolShell{display:none;margin-top:22px}
+  #toolShell.active{display:block}
+  .tool-shell-head{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--hairline);border-radius:10px 10px 0 0;padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.08)}
+  .active-tool{display:flex;align-items:center;gap:10px;min-width:0}
+  .active-tool-name{font-family:var(--font-display);font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .active-source{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.06em;color:var(--cyan);border:1px solid rgba(79,227,232,.25);border-radius:999px;padding:4px 7px}
+  #toolFrame{display:block;width:100%;min-height:900px;border:1px solid var(--hairline);border-top:0;border-radius:0 0 10px 10px;background:var(--void)}
+  footer{font-size:11px;color:var(--text-faint);text-align:center;margin:32px 0 12px;line-height:1.8}
+  @media(max-width:1000px){.tool-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.workspace-grid{grid-template-columns:1fr}}
+  @media(max-width:680px){.wrap{padding:0 2px}.panel{padding:16px}.tool-grid{grid-template-columns:1fr 1fr}.tool-desc{min-height:0}#workspaceText{min-height:220px}.source-pref{width:100%;align-items:flex-start;flex-direction:column}.source-pref select{width:100%}}
+  @media(max-width:440px){.tool-grid{grid-template-columns:1fr}.status-pill{display:none}}
 </style>
 </head>
 <body>
@@ -63,99 +90,430 @@
   <header>
     <div>
       <div class="eyebrow">Sistem Integrasi Kelola Jurnal</div>
-      <h1>Journal Tools</h1>
+      <h1>Journal Tools Workspace</h1>
     </div>
-    <div class="status-pill" style="gap:14px;">
-      <button id="themeToggle" class="ghost-link" style="cursor:pointer;">☀️ Terang</button>
-      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot"></span>ENGINE READY</span>
+    <div class="header-actions">
+      <button id="themeToggle" class="ghost-btn" type="button">☀️ Terang</button>
+      <div class="status-pill"><span class="dot"></span>WORKSPACE READY</div>
     </div>
   </header>
 
   <div class="intro">
-    <p>Kumpulan alat untuk membantu proses editorial jurnal. Pilih alat yang Anda perlukan di bawah — semuanya berjalan langsung di browser Anda sendiri, tanpa server.</p>
+    <p>Masukkan naskah sekali di sini, lalu pilih fitur yang ingin dijalankan. Teks tidak perlu ditempel ulang saat Anda berpindah tool. Jika suatu fitur membutuhkan format Word asli, pasang file <b>.docx</b> sekali dan file yang sama akan dipakai ulang selama halaman workspace ini tetap terbuka.</p>
   </div>
 
-  <div class="section-label">Pilih Tool</div>
-  <div class="tool-grid">
-
-    <a href="validator-copy.html" class="tool-card">
-      <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">✏️</div>
-      <div class="tc-title">Validator Sitasi</div>
-      <div class="tc-desc">Tempel teks artikel dan daftar referensi, atau tempel seluruh naskah sekaligus untuk dipisahkan otomatis. Perlu unggah file .docx? Ada tautan ke Validator Upload di dalam halaman ini.</div>
-      <div class="tc-tags">
-        <span class="tc-tag">Deteksi gaya otomatis</span>
-        <span class="tc-tag">Analitik referensi</span>
-        <span class="tc-tag">Filter &amp; lokasi hasil</span>
+  <section class="panel" aria-labelledby="workspaceTitle">
+    <div class="panel-title">
+      <div>
+        <h2 id="workspaceTitle">Sumber Naskah</h2>
+        <p>Teks adalah sumber utama. DOCX bersifat opsional, tetapi wajib untuk fitur yang harus mempertahankan struktur/format Word.</p>
       </div>
-      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
-    </a>
-
-    <a href="preliminary-check.html" class="tool-card">
-      <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">🔍</div>
-      <div class="tc-title">Preliminary Check</div>
-      <div class="tc-desc">Upload naskah .docx untuk dashboard cek awal ala standar Scopus: jumlah kata judul/abstrak, kelengkapan struktur IMRAD, jumlah &amp; kebaruan referensi, dan checklist preliminary lainnya.</div>
-      <div class="tc-tags">
-        <span class="tc-tag">Dashboard IMRAD</span>
-        <span class="tc-tag">Checklist objektif</span>
-        <span class="tc-tag">Ekspor laporan pilihan</span>
-      </div>
-      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
-    </a>
-
-    <a href="link-upload.html" class="tool-card">
-      <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">🔗</div>
-      <div class="tc-title">Tautkan Sitasi ke Referensi</div>
-      <div class="tc-desc">Upload naskah .docx, sistem otomatis menautkan (hyperlink internal) tiap in-text citation ke entri referensinya — klik sitasi, langsung lompat ke referensi. Format &amp; teks artikel tidak berubah sama sekali.</div>
-      <div class="tc-tags">
-        <span class="tc-tag">Auto-detect gaya</span>
-        <span class="tc-tag">Format 100% terjaga</span>
-        <span class="tc-tag">APA/Harvard/Chicago/IEEE/Vancouver</span>
-      </div>
-      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
-    </a>
-
-    <a href="citation-converter.html" class="tool-card">
-      <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">🔄</div>
-      <div class="tc-title">Konversi Sitasi Antar Gaya</div>
-      <div class="tc-desc">Tempel, unggah .docx, atau isi manual — pilih gaya asal &amp; tujuan (mis. APA7 → IEEE), sitasi in-text (parenthetical maupun naratif) dikonversi otomatis dengan pratinjau berwarna. Hasil bisa disunting manual, lalu diekspor sebagai .docx (format asli dipertahankan) atau .txt.</div>
-      <div class="tc-tags">
-        <span class="tc-tag">APA/Harvard/Chicago/MLA/IEEE/Vancouver</span>
-        <span class="tc-tag">Upload &amp; ekspor .docx</span>
-        <span class="tc-tag">Pratinjau &amp; edit manual</span>
-      </div>
-      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
-    </a>
-
-    <a href="term-consistency.html" class="tool-card">
-      <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">🧩</div>
-      <div class="tc-title">Cek Konsistensi Istilah</div>
-      <div class="tc-desc">Tempel naskah untuk deteksi otomatis: istilah/konsep yang ditulis tidak konsisten (huruf besar-kecil, tanda hubung, singkatan), variabel penelitian yang belum pernah didefinisikan, dan pasangan istilah mirip yang perlu ditinjau manual (tidak pernah digabung otomatis).</div>
-      <div class="tc-tags">
-        <span class="tc-tag">Deteksi definisi &amp; akronim</span>
-        <span class="tc-tag">Klasifikasi variabel</span>
-        <span class="tc-tag">Heuristik, bukan AI semantik</span>
-      </div>
-      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
-    </a>
-
-    <div class="tool-card placeholder" aria-hidden="true">
-      <div class="tc-icon">➕</div>
-      <div class="tc-title">Tool Berikutnya</div>
-      <div class="tc-desc">Tempat untuk tool baru — tinggal tambahkan kartu di sini kalau ada fitur baru nanti.</div>
+      <span class="step-badge">01 · Masukkan sekali</span>
     </div>
 
-  </div>
+    <div class="workspace-grid">
+      <div>
+        <div class="field-label">Tempel artikel / naskah lengkap</div>
+        <textarea id="workspaceText" spellcheck="false" placeholder="Tempel seluruh naskah di sini, idealnya termasuk heading References / Daftar Pustaka supaya Validator dan Converter bisa memisahkannya otomatis..."></textarea>
+        <div class="text-meta">
+          <span class="text-stats" id="textStats">0 kata · 0 karakter</span>
+          <button id="clearTextBtn" class="ghost-btn" type="button">Bersihkan teks</button>
+        </div>
+      </div>
+
+      <div class="upload-box">
+        <div class="field-label">DOCX opsional — unggah sekali untuk fitur berbasis file</div>
+        <div class="dropzone" id="workspaceDropzone" tabindex="0" role="button" aria-label="Pilih file DOCX">
+          <div class="icon">📄</div>
+          <div class="main">Pilih / seret file .docx</div>
+          <div class="sub">Dipakai ulang untuk Preliminary Check, Tautkan Sitasi, Validator Upload, dan Converter berbasis format asli.</div>
+          <input type="file" id="workspaceFile" accept=".docx" hidden>
+        </div>
+        <div class="file-chip" id="workspaceFileChip">
+          <span>📘</span>
+          <span class="name" id="workspaceFileName"></span>
+          <span id="workspaceFileSize"></span>
+          <button class="remove" id="removeFileBtn" type="button" aria-label="Hapus file">✕</button>
+        </div>
+        <p class="privacy-note">File tidak dikirim oleh workspace ini. File hanya disimpan sebagai objek di tab browser yang sedang terbuka; muat ulang/tutup halaman untuk melepasnya dari sesi.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="featureTitle">
+    <div class="feature-head">
+      <div>
+        <div class="section-label" style="margin-bottom:4px">02 · Pilih fitur</div>
+        <div id="featureTitle" style="font-size:12.5px;color:var(--text-dim)">Klik tool; workspace akan meneruskan teks atau DOCX yang sudah tersedia.</div>
+      </div>
+      <label class="source-pref">Prioritas untuk tool yang bisa keduanya:
+        <select id="sourcePreference">
+          <option value="text">Teks dahulu, lalu DOCX</option>
+          <option value="file">DOCX dahulu, lalu teks</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="tool-grid">
+      <button class="tool-btn" type="button" data-feature="validator">
+        <div class="tool-icon">✅</div>
+        <div class="tool-title">Validasi Sitasi</div>
+        <div class="tool-desc">Cek sitasi, referensi, gaya, DOI, dan isu format.</div>
+        <div class="tool-tags"><span class="tool-tag">TEKS</span><span class="tool-tag docx">DOCX</span></div>
+      </button>
+
+      <button class="tool-btn" type="button" data-feature="terms">
+        <div class="tool-icon">🧩</div>
+        <div class="tool-title">Konsistensi Istilah</div>
+        <div class="tool-desc">Cari istilah, singkatan, dan variabel yang tidak konsisten.</div>
+        <div class="tool-tags"><span class="tool-tag">TEKS</span><span class="tool-tag docx">DOCX</span></div>
+      </button>
+
+      <button class="tool-btn" type="button" data-feature="converter">
+        <div class="tool-icon">🔄</div>
+        <div class="tool-title">Konversi Sitasi</div>
+        <div class="tool-desc">Ubah gaya sitasi dan pratinjau hasil konversi.</div>
+        <div class="tool-tags"><span class="tool-tag">TEKS</span><span class="tool-tag docx">DOCX</span></div>
+      </button>
+
+      <button class="tool-btn" type="button" data-feature="preliminary">
+        <div class="tool-icon">🔍</div>
+        <div class="tool-title">Preliminary Check</div>
+        <div class="tool-desc">Analisis struktur, IMRAD, statistik, dan kebaruan referensi.</div>
+        <div class="tool-tags"><span class="tool-tag docx">WAJIB DOCX</span></div>
+      </button>
+
+      <button class="tool-btn" type="button" data-feature="link">
+        <div class="tool-icon">🔗</div>
+        <div class="tool-title">Tautkan Sitasi</div>
+        <div class="tool-desc">Buat hyperlink internal dari in-text citation ke referensi.</div>
+        <div class="tool-tags"><span class="tool-tag docx">WAJIB DOCX</span></div>
+      </button>
+    </div>
+
+    <div id="workspaceStatus" class="statusbar" role="status" aria-live="polite"></div>
+  </section>
+
+  <section id="toolShell" aria-label="Tool aktif">
+    <div class="tool-shell-head">
+      <div class="active-tool">
+        <span id="activeToolIcon">⚙️</span>
+        <span class="active-tool-name" id="activeToolName">Tool</span>
+        <span class="active-source" id="activeSource">SUMBER</span>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="reloadToolBtn" class="ghost-btn" type="button">↻ Muat ulang tool</button>
+        <button id="closeToolBtn" class="ghost-btn" type="button">✕ Tutup hasil</button>
+      </div>
+    </div>
+    <iframe id="toolFrame" title="Journal Tool" src="about:blank"></iframe>
+  </section>
 
   <footer>
-    Semua analisis berjalan di browser Anda — tidak ada naskah yang dikirim ke server, kecuali saat Anda sengaja mengaktifkan pengecekan DOI via CrossRef.
+    Workspace hanya mengatur alur input. Mesin analisis tetap memakai halaman dan JavaScript tool yang sudah ada di repository.
   </footer>
 </div>
-
 <script src="theme.js?v=1"></script>
+<script>
+(function(){
+  'use strict';
+
+  var STORAGE_KEY = 'journalTools.workspaceText.v1';
+  var textEl = document.getElementById('workspaceText');
+  var fileEl = document.getElementById('workspaceFile');
+  var dropzone = document.getElementById('workspaceDropzone');
+  var fileChip = document.getElementById('workspaceFileChip');
+  var fileNameEl = document.getElementById('workspaceFileName');
+  var fileSizeEl = document.getElementById('workspaceFileSize');
+  var removeFileBtn = document.getElementById('removeFileBtn');
+  var clearTextBtn = document.getElementById('clearTextBtn');
+  var textStats = document.getElementById('textStats');
+  var sourcePreference = document.getElementById('sourcePreference');
+  var statusEl = document.getElementById('workspaceStatus');
+  var shell = document.getElementById('toolShell');
+  var frame = document.getElementById('toolFrame');
+  var activeToolName = document.getElementById('activeToolName');
+  var activeToolIcon = document.getElementById('activeToolIcon');
+  var activeSource = document.getElementById('activeSource');
+  var closeToolBtn = document.getElementById('closeToolBtn');
+  var reloadToolBtn = document.getElementById('reloadToolBtn');
+
+  var state = {
+    file: null,
+    activeFeature: null,
+    activeMode: null,
+    resizeObserver: null
+  };
+
+  var FEATURES = {
+    validator: {
+      title: 'Validasi Sitasi', icon: '✅', supportsText: true, supportsFile: true,
+      textPage: 'validator-copy.html', filePage: 'validator-upload.html'
+    },
+    terms: {
+      title: 'Konsistensi Istilah', icon: '🧩', supportsText: true, supportsFile: true,
+      textPage: 'term-consistency.html', filePage: 'term-consistency.html'
+    },
+    converter: {
+      title: 'Konversi Sitasi', icon: '🔄', supportsText: true, supportsFile: true,
+      textPage: 'citation-converter.html', filePage: 'citation-converter.html'
+    },
+    preliminary: {
+      title: 'Preliminary Check', icon: '🔍', supportsText: false, supportsFile: true,
+      filePage: 'preliminary-check.html'
+    },
+    link: {
+      title: 'Tautkan Sitasi ke Referensi', icon: '🔗', supportsText: false, supportsFile: true,
+      filePage: 'link-upload.html'
+    }
+  };
+
+  try {
+    var savedText = sessionStorage.getItem(STORAGE_KEY);
+    if (savedText) textEl.value = savedText;
+  } catch (e) {}
+  updateTextStats();
+
+  textEl.addEventListener('input', function(){
+    updateTextStats();
+    try { sessionStorage.setItem(STORAGE_KEY, textEl.value); } catch (e) {}
+  });
+
+  clearTextBtn.addEventListener('click', function(){
+    textEl.value = '';
+    updateTextStats();
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    showStatus('Teks workspace dibersihkan. File DOCX (jika ada) tetap tersedia.', 'ok');
+  });
+
+  dropzone.addEventListener('click', function(){ fileEl.click(); });
+  dropzone.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileEl.click(); }
+  });
+  dropzone.addEventListener('dragover', function(e){ e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', function(){ dropzone.classList.remove('drag'); });
+  dropzone.addEventListener('drop', function(e){
+    e.preventDefault(); dropzone.classList.remove('drag');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) setWorkspaceFile(e.dataTransfer.files[0]);
+  });
+  fileEl.addEventListener('change', function(){
+    if (fileEl.files && fileEl.files[0]) setWorkspaceFile(fileEl.files[0]);
+  });
+  removeFileBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    state.file = null;
+    fileEl.value = '';
+    fileChip.classList.remove('show');
+    showStatus('File DOCX dilepas dari workspace.', 'ok');
+  });
+
+  document.querySelectorAll('[data-feature]').forEach(function(btn){
+    btn.addEventListener('click', function(){ openFeature(btn.dataset.feature); });
+  });
+
+  closeToolBtn.addEventListener('click', function(){
+    shell.classList.remove('active');
+    frame.src = 'about:blank';
+    state.activeFeature = null;
+    state.activeMode = null;
+    disconnectResizeObserver();
+  });
+
+  reloadToolBtn.addEventListener('click', function(){
+    if (!state.activeFeature) return;
+    openFeature(state.activeFeature, state.activeMode);
+  });
+
+  function updateTextStats(){
+    var text = textEl.value || '';
+    var words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    textStats.textContent = words.toLocaleString('id-ID') + ' kata · ' + text.length.toLocaleString('id-ID') + ' karakter';
+  }
+
+  function setWorkspaceFile(file){
+    var lower = (file.name || '').toLowerCase();
+    if (!lower.endsWith('.docx')) {
+      showStatus('Gunakan file .docx. Format lain tidak dipakai sebagai sumber file workspace.', 'err');
+      fileEl.value = '';
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      showStatus('File lebih dari 25 MB. Gunakan naskah DOCX yang lebih kecil.', 'err');
+      fileEl.value = '';
+      return;
+    }
+    state.file = file;
+    fileNameEl.textContent = file.name;
+    fileSizeEl.textContent = '(' + formatSize(file.size) + ')';
+    fileChip.classList.add('show');
+    showStatus('DOCX siap dipakai ulang oleh fitur berbasis file: ' + file.name, 'ok');
+  }
+
+  function formatSize(bytes){
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function chooseMode(feature, forcedMode){
+    var hasText = !!textEl.value.trim();
+    var hasFile = !!state.file;
+    if (forcedMode && ((forcedMode === 'text' && feature.supportsText && hasText) || (forcedMode === 'file' && feature.supportsFile && hasFile))) return forcedMode;
+
+    if (!feature.supportsText) return hasFile ? 'file' : null;
+    if (!feature.supportsFile) return hasText ? 'text' : null;
+
+    if (sourcePreference.value === 'file') {
+      if (hasFile) return 'file';
+      if (hasText) return 'text';
+    } else {
+      if (hasText) return 'text';
+      if (hasFile) return 'file';
+    }
+    return null;
+  }
+
+  function openFeature(key, forcedMode){
+    var feature = FEATURES[key];
+    if (!feature) return;
+    var mode = chooseMode(feature, forcedMode);
+
+    if (!mode) {
+      if (!feature.supportsText) {
+        showStatus(feature.title + ' membutuhkan file .docx. Pilih file sekali di kotak DOCX di atas, lalu klik fitur ini lagi.', 'warn');
+        dropzone.scrollIntoView({behavior:'smooth', block:'center'});
+        dropzone.focus();
+      } else {
+        showStatus('Belum ada sumber naskah. Tempel teks atau pilih file .docx terlebih dahulu.', 'warn');
+        textEl.focus();
+      }
+      return;
+    }
+
+    state.activeFeature = key;
+    state.activeMode = mode;
+    activeToolName.textContent = feature.title;
+    activeToolIcon.textContent = feature.icon;
+    activeSource.textContent = mode === 'file' ? 'SUMBER · DOCX' : 'SUMBER · TEKS';
+    shell.classList.add('active');
+    showStatus(feature.title + ' dibuka dengan sumber ' + (mode === 'file' ? 'DOCX' : 'teks') + '. Input workspace akan dimasukkan otomatis.', 'ok');
+
+    var page = mode === 'file' ? feature.filePage : feature.textPage;
+    disconnectResizeObserver();
+    frame.onload = function(){ hydrateFrame(key, mode); };
+    frame.src = page;
+    setTimeout(function(){ shell.scrollIntoView({behavior:'smooth', block:'start'}); }, 40);
+  }
+
+  function hydrateFrame(key, mode){
+    if (frame.src === 'about:blank') return;
+    var doc, win;
+    try {
+      doc = frame.contentDocument || frame.contentWindow.document;
+      win = frame.contentWindow;
+    } catch (e) {
+      showStatus('Tool berhasil dibuka, tetapi workspace tidak dapat mengakses isinya. Pastikan semua file dijalankan dari origin/folder yang sama.', 'err');
+      return;
+    }
+    if (!doc || !win) return;
+
+    // Tampilan embedded: hilangkan header navigasi lama agar pengguna tidak merasa masuk ke halaman kedua.
+    try {
+      var style = doc.createElement('style');
+      style.setAttribute('data-workspace-embed', '1');
+      style.textContent = 'header{display:none!important}.watermark{display:none!important}body{padding-top:18px!important}';
+      doc.head.appendChild(style);
+    } catch (e) {}
+
+    if (mode === 'text') hydrateTextTool(doc, win, key);
+    else hydrateFileTool(doc, win);
+
+    setupFrameResize(doc, win);
+  }
+
+  function hydrateTextTool(doc, win, key){
+    var text = textEl.value;
+    var fullDoc = doc.getElementById('fullDocText');
+    var article = doc.getElementById('articleText');
+
+    if (fullDoc) {
+      fullDoc.value = text;
+      dispatchInput(win, fullDoc);
+      // Validator & converter sudah punya pemisah otomatis artikel/referensi.
+      var splitBtn = doc.getElementById('btnAutoSplit');
+      if (splitBtn) {
+        try { splitBtn.click(); } catch (e) {}
+      }
+    } else if (article) {
+      article.value = text;
+      dispatchInput(win, article);
+    } else {
+      showStatus('Tool dibuka, tetapi target input teks tidak ditemukan. Periksa apakah ID textarea di halaman tool berubah.', 'warn');
+      return;
+    }
+
+    if (key === 'terms') {
+      var pasteModeBtn = doc.getElementById('modePasteBtn');
+      if (pasteModeBtn) { try { pasteModeBtn.click(); } catch (e) {} }
+    }
+  }
+
+  function hydrateFileTool(doc, win){
+    var input = doc.getElementById('fileInput');
+    if (!input || !state.file) {
+      showStatus('Tool dibuka, tetapi input file tidak ditemukan atau file workspace sudah tidak tersedia.', 'warn');
+      return;
+    }
+    try {
+      var DT = win.DataTransfer || window.DataTransfer;
+      var dt = new DT();
+      dt.items.add(state.file);
+      input.files = dt.files;
+      input.dispatchEvent(new win.Event('change', {bubbles:true}));
+      showStatus('DOCX workspace diteruskan ke tool aktif. Anda tidak perlu memilih file lagi.', 'ok');
+    } catch (e) {
+      showStatus('Browser tidak mengizinkan pengisian file otomatis pada tool. File tetap aman di workspace; pilih file yang sama secara manual pada tool ini. (' + e.message + ')', 'warn');
+    }
+  }
+
+  function dispatchInput(win, el){
+    try {
+      el.dispatchEvent(new win.Event('input', {bubbles:true}));
+      el.dispatchEvent(new win.Event('change', {bubbles:true}));
+    } catch (e) {}
+  }
+
+  function setupFrameResize(doc, win){
+    disconnectResizeObserver();
+    var resize = function(){
+      try {
+        var h = Math.max(900, doc.documentElement.scrollHeight, doc.body ? doc.body.scrollHeight : 0);
+        frame.style.height = (h + 24) + 'px';
+      } catch (e) {}
+    };
+    resize();
+    try {
+      if (win.ResizeObserver && doc.body) {
+        state.resizeObserver = new win.ResizeObserver(function(){ resize(); });
+        state.resizeObserver.observe(doc.body);
+      }
+    } catch (e) {}
+    setTimeout(resize, 250);
+    setTimeout(resize, 1000);
+  }
+
+  function disconnectResizeObserver(){
+    if (state.resizeObserver) {
+      try { state.resizeObserver.disconnect(); } catch (e) {}
+      state.resizeObserver = null;
+    }
+  }
+
+  function showStatus(message, kind){
+    statusEl.textContent = message;
+    statusEl.className = 'statusbar show ' + (kind || '');
+  }
+})();
+</script>
 </body>
 </html>
