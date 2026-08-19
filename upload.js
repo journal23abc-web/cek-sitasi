@@ -40,10 +40,16 @@
     jrSourceTypeEnabled: document.getElementById('jrSourceTypeEnabled'),
     jrSourceTypeMinPercent: document.getElementById('jrSourceTypeMinPercent'),
     jrSourceTypeType: document.getElementById('jrSourceTypeType'),
-    jrOriginEnabled: document.getElementById('jrOriginEnabled'),
-    jrOriginMinPercent: document.getElementById('jrOriginMinPercent'),
+    jrScopusEnabled: document.getElementById('jrScopusEnabled'),
+    jrScopusMinPercent: document.getElementById('jrScopusMinPercent'),
     jrApplyBtn: document.getElementById('jrApplyBtn'),
     jrResultsPanel: document.getElementById('jrResultsPanel'),
+    scopusSourcesFile: document.getElementById('scopusSourcesFile'),
+    scopusProceedingsFile: document.getElementById('scopusProceedingsFile'),
+    scopusLoadStatus: document.getElementById('scopusLoadStatus'),
+    scopusCheckBtn: document.getElementById('scopusCheckBtn'),
+    dismissedBanner: document.getElementById('dismissedBanner'),
+    toast: document.getElementById('toast'),
   };
 
   var state = {
@@ -53,11 +59,26 @@
     yearRange: CE.YearRange.presetToRange(5),
     lastResult: null,
     lastDoiIssues: [],
+    lastScopusResults: [],
     lastStyleId: null,
     lastConfidence: null,
     lastValidator: null,
     jrOverrides: {}, // { referenceIndex: 'local'|'international' } — resets per new validation run
   };
+
+  var scopusDatabase = null; // dibangun sekali saat file JSON dimuat (otomatis dari repo atau manual), dipakai ulang lintas proses
+  var scopusAutoLoaded = false;
+  var dismissedIssueKeys = new Set(); // fingerprint kunci -> diabaikan pengguna, dikosongkan tiap proses baru
+  var lastAllIssues = [];
+  var activeFilter = 'all';
+
+  // Kunci "sidik jari" untuk satu masalah — dipakai supaya tombol "Abaikan" tetap konsisten
+  // menyembunyikan masalah yang SAMA di semua tempat ia muncul (tab Perlu Diperbaiki/Saran/Semua,
+  // dan laporan PDF), meski render ulang membuat objek JS baru setiap kali. Sama persis dengan
+  // mekanisme di app.js (versi Copy) supaya perilakunya identik.
+  function issueKey(issue) {
+    return (issue.title || '') + '||' + (issue.code || issue.description || '');
+  }
 
   function setStatus(msg, kind) {
     els.statusMsg.textContent = msg || '';
@@ -282,10 +303,14 @@
       state.lastStyleId = styleId;
       state.lastConfidence = confidence;
       state.lastDoiIssues = [];
+      state.lastScopusResults = [];
+      dismissedIssueKeys.clear();
       state.jrOverrides = {};
 
       els.results.classList.add('active');
       renderResults(result, []);
+      runScopusCheckIfReady();
+      updateScopusLoadStatus();
 
       if (state.originalFile) {
         checkDocxReferenceFormatting(styleId).then(function(fmtIssues) {
@@ -374,18 +399,24 @@
     el.innerHTML = html;
   }
 
-  function renderResults(result, doiIssues) {
-    renderParseStatus(result);
+  function renderResultsSummaryOnly(result, doiIssues) {
     var style = STYLES[result.styleId];
     var doiValid = doiIssues.filter(function(d){return d.status==='valid';}).length;
     var doiTotal = doiIssues.filter(function(d){return d.status!=='no_doi';}).length;
+    var visibleErrors = result.errors.filter(function(i) { return !dismissedIssueKeys.has(issueKey(i)); }).length;
+    var visibleSuggestions = result.suggestions.filter(function(i) { return !dismissedIssueKeys.has(issueKey(i)); }).length;
     els.summaryGrid.innerHTML =
       '<div class="sum-card fmt"><div class="n">' + esc(style.name) + '</div><div class="l">Gaya' + (state.lastConfidence!=null ? ' ('+state.lastConfidence+'%)' : '') + '</div></div>' +
-      '<div class="sum-card err"><div class="n">' + result.errors.length + '</div><div class="l">Perlu Diperbaiki</div></div>' +
-      '<div class="sum-card sugg"><div class="n">' + result.suggestions.length + '</div><div class="l">Saran</div></div>' +
+      '<div class="sum-card err"><div class="n">' + visibleErrors + '</div><div class="l">Perlu Diperbaiki</div></div>' +
+      '<div class="sum-card sugg"><div class="n">' + visibleSuggestions + '</div><div class="l">Saran</div></div>' +
       '<div class="sum-card ok"><div class="n">' + countCitations(result.citations) + '</div><div class="l">Sitasi</div></div>' +
       '<div class="sum-card ok"><div class="n">' + result.references.length + '</div><div class="l">Referensi</div></div>' +
       (els.includeDoi.checked ? '<div class="sum-card sugg"><div class="n">' + doiValid + '/' + doiTotal + '</div><div class="l">DOI Valid</div></div>' : '');
+  }
+
+  function renderResults(result, doiIssues) {
+    renderParseStatus(result);
+    renderResultsSummaryOnly(result, doiIssues);
 
     if (result.references.length > 0) {
       var stats = CE.YearRange.compute(result.references, state.yearRange.from, state.yearRange.to);
@@ -403,6 +434,13 @@
     } else {
       els.yearRangeSummary.innerHTML = '';
     }
+
+    renderIssueList('list-errors', result.errors);
+    renderIssueList('list-suggestions', result.suggestions);
+    renderDoiList(doiIssues);
+    renderScopusList(state.lastScopusResults);
+    renderAllTab(result.errors.concat(result.suggestions));
+    updateDismissedBanner();
 
     renderReportPreview(result, doiIssues);
     els.originalHlPanel.style.display = state.originalFile ? '' : 'none';
@@ -532,7 +570,7 @@
       minCount: { enabled: els.jrMinCountEnabled.checked, value: parseInt(els.jrMinCountValue.value, 10) || 0 },
       yearRange: { enabled: els.jrYearRangeEnabled.checked, years: parseInt(els.jrYearRangeYears.value, 10) || 10, minPercent: parseInt(els.jrYearRangeMinPercent.value, 10) || 0 },
       sourceType: { enabled: els.jrSourceTypeEnabled.checked, type: els.jrSourceTypeType.value, minPercent: parseInt(els.jrSourceTypeMinPercent.value, 10) || 0 },
-      origin: { enabled: els.jrOriginEnabled.checked, minInternationalPercent: parseInt(els.jrOriginMinPercent.value, 10) || 0 },
+      scopus: { enabled: els.jrScopusEnabled.checked, minScopusPercent: parseInt(els.jrScopusMinPercent.value, 10) || 0 },
     };
   }
 
@@ -540,7 +578,7 @@
     if (!state.lastResult) return;
     var JR = window.JournalRulesEngine;
     var rules = readJournalRulesConfig();
-    var evalResult = JR.evaluateRules(state.lastResult.references, rules, state.jrOverrides);
+    var evalResult = JR.evaluateRules(state.lastResult.references, rules, state.jrOverrides, state.lastScopusResults);
     var classified = JR.classifyReferencesOrigin(state.lastResult.references, state.jrOverrides);
 
     var html = '';
@@ -558,6 +596,7 @@
     }
 
     html += '<div class="field-label" style="margin-top:18px;">Klasifikasi Asal Referensi (bisa dikoreksi manual)</div>' +
+      '<p style="font-size:11.5px;color:var(--text-faint);margin:-6px 0 10px;">Tabel ini cuma informasi tambahan (tebakan kata kunci) — <b>tidak lagi dipakai untuk aturan wajib</b>. Untuk aturan "harus terindeks Scopus", gunakan panel "Cek Status Scopus" di atas.</p>' +
       '<table class="jr-origin-table"><thead><tr><th>Referensi</th><th>Asal</th><th>Keyakinan</th></tr></thead><tbody>';
     classified.forEach(function(c) {
       var label = (c.ref.firstAuthor || '-') + (c.ref.year ? ' (' + c.ref.year + ')' : '');
@@ -589,6 +628,448 @@
     if (state.lastResult) renderReportPreview(state.lastResult, state.lastDoiIssues);
   });
 
+  // ---------- Toast & clipboard utilities (ported from app.js / validator-copy.html) ----------
+  function showToast(msg) {
+    if (!els.toast) return;
+    els.toast.textContent = '✅ ' + msg;
+    els.toast.classList.add('show');
+    setTimeout(function() { els.toast.classList.remove('show'); }, 2000);
+  }
+
+  function doCopy(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function() { return fallbackCopy(text); });
+    }
+    return fallbackCopy(text);
+  }
+  function fallbackCopy(text) {
+    return new Promise(function(resolve) {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.left = '-9999px';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta); resolve();
+    });
+  }
+
+  function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
+
+  function bindCopyBlocks(container) {
+    container.querySelectorAll('.code-block[data-copy]').forEach(function(block) {
+      block.addEventListener('click', function() {
+        doCopy(block.getAttribute('data-copy')).then(function() { showToast('Disalin ke clipboard.'); });
+      });
+    });
+  }
+
+  // ---------- Daftar masalah interaktif (Perlu Diperbaiki / Saran / Semua) dengan tombol Abaikan ----------
+  // Sebelumnya halaman Upload cuma menampilkan RINGKASAN (jumlah) — tidak ada daftar per-masalah
+  // yang bisa ditelusuri satu-satu seperti di halaman Copy-Paste. Fungsi-fungsi di bawah
+  // menyamakan itu, di-porting persis dari app.js.
+  function renderIssueList(elId, issues) {
+    var el = document.getElementById(elId);
+    if (!el) return;
+    var visible = issues.filter(function(issue) { return !dismissedIssueKeys.has(issueKey(issue)); });
+    if (visible.length === 0) {
+      var hiddenCount = issues.length - visible.length;
+      el.innerHTML = '<div class="no-issues">✅ Tidak ada masalah di kategori ini.' + (hiddenCount > 0 ? ' <span style="color:var(--text-faint);">(' + hiddenCount + ' diabaikan)</span>' : '') + '</div>';
+      return;
+    }
+    var html = '';
+    visible.forEach(function(issue) {
+      var sc = issue.severity || 'error';
+      var sl = sc === 'error' ? 'PERLU DIPERBAIKI' : sc === 'warning' ? 'WARNING' : 'SARAN';
+      var key = issueKey(issue);
+      html += '<div class="issue-item ' + sc + '">';
+      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(issue.title) + '</span>';
+      if (issue.location) {
+        html += '<button class="loc-badge" data-loc-source="' + issue.location.source + '" data-loc-line="' + issue.location.line + '" title="Lihat lokasi ini di naskah asli ber-highlight">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</button>';
+      }
+      html += '<button class="issue-dismiss" data-issue-key="' + escAttr(key) + '" title="Sembunyikan masalah ini dari laporan — untuk kesalahan pengecekan/false positive">✕ Abaikan</button>';
+      html += '</div>';
+      html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
+      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      html += '</div>';
+    });
+    el.innerHTML = html;
+    bindCopyBlocks(el);
+    bindLocationBadges(el);
+    bindDismissButtons(el);
+  }
+
+  function bindDismissButtons(container) {
+    container.querySelectorAll('.issue-dismiss').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        dismissedIssueKeys.add(btn.getAttribute('data-issue-key'));
+        refreshAllIssueViews();
+        showToast('Masalah diabaikan dari laporan.');
+      });
+    });
+  }
+
+  // Menggambar ulang semua tampilan yang menampilkan errors/suggestions (tab Perlu
+  // Diperbaiki/Saran/Semua) dan pratinjau laporan PDF — dipanggil tiap kali daftar yang
+  // diabaikan berubah, supaya konsisten di semua tempat sekaligus.
+  function refreshAllIssueViews() {
+    if (!state.lastResult) return;
+    renderIssueList('list-errors', state.lastResult.errors);
+    renderIssueList('list-suggestions', state.lastResult.suggestions);
+    applyFilterAndRender();
+    updateDismissedBanner();
+    renderResultsSummaryOnly(state.lastResult, state.lastDoiIssues);
+    renderReportPreview(state.lastResult, state.lastDoiIssues);
+  }
+
+  function updateDismissedBanner() {
+    var banner = els.dismissedBanner;
+    if (!banner) return;
+    if (dismissedIssueKeys.size === 0) { banner.style.display = 'none'; return; }
+    banner.style.display = '';
+    banner.innerHTML = '🙈 ' + dismissedIssueKeys.size + ' masalah diabaikan (disembunyikan dari laporan &amp; PDF). <button id="restoreDismissedBtn" class="ghost-link" style="cursor:pointer;">↩️ Tampilkan Semua Lagi</button>';
+    var restoreBtn = document.getElementById('restoreDismissedBtn');
+    if (restoreBtn) restoreBtn.addEventListener('click', function() {
+      dismissedIssueKeys.clear();
+      refreshAllIssueViews();
+      showToast('Semua masalah yang diabaikan ditampilkan kembali.');
+    });
+  }
+
+  // Halaman Upload tidak selalu punya textarea yang terlihat untuk di-scroll (beda dari halaman
+  // Copy-Paste) — kalau mode "manual fix" sedang aktif DAN ada isinya, tetap coba lompat ke
+  // sana; kalau tidak, arahkan ke fitur "Naskah Asli ber-Highlight" yang memang dibuat khusus
+  // untuk menunjukkan lokasi masalah langsung di file .docx (lengkap dengan komentar Word).
+  function scrollToLocation(source, line) {
+    var textarea = source === 'reference' ? els.manualReferences : els.manualArticle;
+    if (textarea && els.manualFix.classList.contains('show') && textarea.value) {
+      var lines = textarea.value.split('\n');
+      var start = 0;
+      for (var i = 0; i < line - 1 && i < lines.length; i++) start += lines[i].length + 1;
+      var lineText = lines[line - 1] || '';
+      textarea.focus();
+      try { textarea.setSelectionRange(start, start + lineText.length); } catch (e) {}
+      var lineHeight = 21;
+      textarea.scrollTop = Math.max(0, (line - 1) * lineHeight - textarea.clientHeight / 2);
+      textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      showToast('Melompat ke baris ' + line);
+      return;
+    }
+    if (els.originalHlPanel && els.originalHlPanel.style.display !== 'none') {
+      els.originalHlPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      showToast('Unduh "Naskah Asli ber-Highlight" di bawah untuk melihat lokasi baris ' + line + ' langsung di file .docx Anda.');
+    } else {
+      showToast('Baris ' + line + ' (' + (source === 'reference' ? 'referensi' : 'artikel') + ') — upload file .docx untuk bisa melihat highlight lokasi persisnya.');
+    }
+  }
+
+  function bindLocationBadges(container) {
+    container.querySelectorAll('.loc-badge').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        scrollToLocation(btn.getAttribute('data-loc-source'), parseInt(btn.getAttribute('data-loc-line'), 10));
+      });
+    });
+  }
+
+  // ---------- Daftar DOI dengan fitur "Cari DOI" ----------
+  function renderDoiList(doiIssues) {
+    var el = document.getElementById('list-doi');
+    if (!el) return;
+    if (doiIssues.length === 0) {
+      el.innerHTML = '<div class="no-issues">🔗 Belum ada data DOI (sedang diproses atau tidak ada referensi).</div>';
+      return;
+    }
+    var html = '';
+    doiIssues.forEach(function(issue, idx) {
+      var sc = issue.severity;
+      var sl = sc === 'error' ? 'FIKTIF' : sc === 'warning' ? (issue.status==='mismatch'?'MISMATCH':'UNVERIFIED') : sc === 'success' ? 'VALID' : 'INFO';
+      var instTag = issue.ref && issue.ref.isInstitutional ? '<span class="type-tag inst">INSTITUSI</span>' : '';
+      html += '<div class="issue-item ' + (sc==='success'?'suggestion':sc) + '">';
+      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span>' + instTag + '<span class="issue-title">' + esc(issue.title) + '</span></div>';
+      html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
+      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      if (issue.metadata) {
+        var m = issue.metadata;
+        html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10.5px;color:var(--text-dim);margin-top:8px;line-height:1.8;">';
+        html += 'Ref Anda — Judul: ' + esc(m.ref.title||'-') + ' | Penulis: ' + esc(m.ref.authors||'-') + ' | Tahun: ' + esc(m.ref.year||'-') + '<br>';
+        html += 'CrossRef — Judul: ' + esc(m.crossref.title||'-') + ' | Penulis: ' + esc(m.crossref.authors||'-') + ' | Tahun: ' + esc(m.crossref.year||'-');
+        html += '</div>';
+      }
+      if ((issue.status === 'no_doi' || issue.status === 'fake') && issue.ref) {
+        if (issue.status === 'fake') html += '<p style="font-size:11px;color:var(--text-dim);margin:6px 0 0;">DOI "' + esc(issue.doi) + '" mungkin salah ketik atau memang tidak ada — coba cari DOI yang benar berdasarkan judul/penulis/tahun:</p>';
+        html += '<button class="doi-search-btn" data-doi-search-idx="' + idx + '" style="margin-top:8px;">🔍 Cari DOI' + (issue.status === 'fake' ? ' yang Benar' : '') + '</button>';
+        html += '<div class="doi-search-results" id="doiSearchResults' + idx + '"></div>';
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html;
+    bindCopyBlocks(el);
+    bindDoiSearchButtons(el, doiIssues);
+  }
+
+  function bindDoiSearchButtons(container, doiIssues) {
+    container.querySelectorAll('.doi-search-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var idx = parseInt(btn.getAttribute('data-doi-search-idx'), 10);
+        var issue = doiIssues[idx];
+        var resultsEl = document.getElementById('doiSearchResults' + idx);
+        btn.disabled = true;
+        btn.textContent = '⏳ Mencari...';
+        CE.DOIChecker.searchByMetadata(issue.ref.title, issue.ref.firstAuthor, issue.ref.year).then(function(res) {
+          btn.disabled = false;
+          btn.textContent = '🔍 Cari DOI Lagi';
+          if (res.status !== 'ok') {
+            resultsEl.innerHTML = '<div class="doi-cand-empty">⚠️ Pencarian gagal (' + (res.message || res.status) + '). Coba lagi atau cari manual di search.crossref.org.</div>';
+            return;
+          }
+          if (res.candidates.length === 0) {
+            resultsEl.innerHTML = '<div class="doi-cand-empty">Tidak ditemukan kandidat DOI yang cocok.</div>';
+            return;
+          }
+          var html = '<div class="doi-cand-hint">Kandidat dari CrossRef — periksa kecocokannya sendiri sebelum dipakai, tidak diisi otomatis:</div>';
+          res.candidates.forEach(function(c) {
+            var confClass = c.score >= 75 ? 'high' : c.score >= 40 ? 'mid' : 'low';
+            html += '<div class="doi-cand ' + confClass + '">';
+            html += '<div class="doi-cand-score">' + c.score + '% cocok</div>';
+            html += '<div class="doi-cand-body">';
+            html += '<div class="doi-cand-title">' + esc(c.title || '(tanpa judul)') + '</div>';
+            html += '<div class="doi-cand-meta">' + esc(c.author || '-') + (c.year ? ' · ' + esc(c.year) : '') + '</div>';
+            if (c.doi) {
+              var doiUrl = 'https://doi.org/' + c.doi;
+              html += '<div class="code-block code-fix" data-copy="' + escAttr(doiUrl) + '">' + esc(doiUrl) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+            }
+            html += '</div></div>';
+          });
+          resultsEl.innerHTML = html;
+          bindCopyBlocks(resultsEl);
+        });
+      });
+    });
+  }
+
+  // ---------- Cek Status Scopus (data loading otomatis/manual + pengecekan otomatis) ----------
+  var SCOPUS_STATUS_LABEL = {
+    SCOPUS: { badge: 'SCOPUS', cls: 'suggestion', icon: '✅' },
+    PROBABLE_SCOPUS: { badge: 'PROBABLE SCOPUS', cls: 'suggestion', icon: '🟢' },
+    SCOPUS_SOURCE_ONLY: { badge: 'SOURCE ONLY', cls: 'warning', icon: '🟡' },
+    UNKNOWN: { badge: 'UNKNOWN', cls: 'info', icon: '⚪' },
+  };
+
+  function renderScopusList(scopusResults) {
+    var el = document.getElementById('list-scopus');
+    if (!el) return;
+    if (!scopusDatabase) {
+      el.innerHTML = '<div class="no-issues">🎓 Data Scopus Source List belum tersedia — taruh <code>scopus_sources.json</code> di repo (termuat otomatis), atau unggah manual di panel "Cek Status Scopus" di atas. Begitu tersedia, pengecekan berjalan otomatis.</div>';
+      return;
+    }
+    if (!scopusResults || scopusResults.length === 0) {
+      el.innerHTML = '<div class="no-issues">🎓 Data sudah tersedia — jalankan proses di atas, pengecekan Scopus akan berjalan otomatis begitu selesai.</div>';
+      return;
+    }
+    var html = '';
+    scopusResults.forEach(function(r) {
+      var meta = SCOPUS_STATUS_LABEL[r.status] || SCOPUS_STATUS_LABEL.UNKNOWN;
+      var ref = r.ref;
+      var label = (ref.firstAuthor || '-') + (ref.year ? ' (' + ref.year + ')' : '');
+      var explain;
+      var discWarningHtml = '';
+      if (r.status === 'SCOPUS') explain = r.method === 'DOI_EXACT' ? 'Dokumen ditemukan persis lewat DOI.' : 'Dokumen ditemukan lewat kecocokan metadata (judul, penulis, jurnal, tahun) yang sangat tinggi (' + Math.round(r.confidence * 100) + '%).';
+      else if (r.status === 'PROBABLE_SCOPUS') explain = 'Metadata cukup mirip (' + Math.round(r.confidence * 100) + '%) dengan salah satu dokumen di database, tapi belum cukup pasti untuk diklaim tertemukan persis.';
+      else if (r.status === 'SCOPUS_SOURCE_ONLY') {
+        explain = 'Jurnal/sumbernya (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') terindeks Scopus, tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat.';
+        if (r.discontinuedWarning) {
+          var related = r.matchedSource && r.matchedSource.relatedTitle;
+          discWarningHtml = '<div class="issue-item warning" style="margin-top:8px;padding:10px 12px;">'
+            + '<b>⚠️ Perhatian: jurnal ini ditandai "Discontinued by Scopus"</b> — beda dari sekadar tidak aktif/ganti nama. Scopus biasanya menghentikan cakupan sebuah jurnal karena masalah kualitas/integritas terbitan, bukan cuma administratif. Cakupan tahun yang tercantum tetap data historis yang sah, tapi ada baiknya diperiksa lebih lanjut kredibilitas jurnal ini untuk tahun tersebut.'
+            + (related ? '<br><span style="color:var(--text-faint);">Nama terkait: ' + esc(related) + '</span>' : '')
+            + '</div>';
+        }
+      }
+      else if (r.method === 'JOURNAL_FOUND_YEAR_NOT_COVERED') explain = 'Jurnalnya ada di Source List Scopus, tetapi tahun ' + esc(ref.year || '-') + ' berada di luar rentang cakupan Scopus untuk jurnal ini (cakupan: ' + esc((r.matchedSource && r.matchedSource.coverage) || '-') + ').';
+      else explain = 'Belum ditemukan bukti yang cukup — bisa jadi referensi ini memang bukan Scopus, atau database yang dimuat belum mencakupnya.';
+      html += '<div class="issue-item ' + meta.cls + '">';
+      html += '<div class="issue-header"><span class="issue-sev">' + meta.icon + ' ' + meta.badge + '</span><span class="issue-title">' + esc(label) + '</span></div>';
+      html += '<div class="issue-desc">' + explain + '</div>';
+      html += '<div class="code-block" style="cursor:default;">' + esc((ref.raw || '').slice(0, 150)) + '</div>';
+      html += discWarningHtml;
+      html += '</div>';
+    });
+    el.innerHTML = html;
+  }
+
+  function updateScopusLoadStatus() {
+    if (!els.scopusLoadStatus) return;
+    if (!scopusDatabase) {
+      els.scopusLoadStatus.textContent = 'Data Scopus tidak ditemukan otomatis di repo (scopus_sources.json). Muat manual di bawah, atau taruh berkasnya sejajar dengan engine.js di GitHub Anda supaya termuat otomatis lain kali.';
+      els.scopusLoadStatus.className = 'status info';
+      els.scopusCheckBtn.disabled = true;
+      return;
+    }
+    var parts = [];
+    if (scopusDatabase.sourceCount) parts.push(scopusDatabase.sourceCount.toLocaleString('id-ID') + ' jurnal/sumber');
+    if (scopusDatabase.proceedingsCount) parts.push(scopusDatabase.proceedingsCount.toLocaleString('id-ID') + ' prosiding');
+    var source = scopusAutoLoaded ? ' (otomatis dari repo)' : ' (dimuat manual)';
+    var statusText = '✅ Data dimuat' + source + ': ' + parts.join(', ') + '.';
+    if (!state.lastResult) statusText += ' Pengecekan Scopus akan berjalan otomatis begitu Anda memproses naskah di atas.';
+    else statusText += ' Referensi sudah dicek otomatis — lihat tab "Scopus".';
+    els.scopusLoadStatus.textContent = statusText;
+    els.scopusLoadStatus.className = 'status success';
+    els.scopusCheckBtn.disabled = !state.lastResult;
+  }
+
+  // Menjalankan cek Scopus otomatis begitu DUA syarat terpenuhi: data sudah dimuat (otomatis
+  // dari repo ATAU upload manual) DAN proses/validasi sudah dijalankan. Tidak perlu klik tombol
+  // apa pun — sama seperti alur cek DOI yang juga otomatis. Dipanggil dari 3 tempat: setelah
+  // proses utama selesai, setelah fetch otomatis dari repo selesai, dan setelah upload manual
+  // selesai — supaya urutan mana pun (data dulu atau proses dulu) tetap berujung ke pengecekan
+  // otomatis.
+  function runScopusCheckIfReady() {
+    if (!scopusDatabase || !state.lastResult) return;
+    state.lastScopusResults = window.ScopusMatcher.checkAllReferences(state.lastResult.references, scopusDatabase);
+    renderScopusList(state.lastScopusResults);
+    renderReportPreview(state.lastResult, state.lastDoiIssues);
+    updateScopusLoadStatus();
+  }
+
+  function readJSONFile(fileInput) {
+    return new Promise(function(resolve, reject) {
+      var file = fileInput.files && fileInput.files[0];
+      if (!file) { resolve(null); return; }
+      var reader = new FileReader();
+      reader.onload = function() {
+        try { resolve(JSON.parse(reader.result)); }
+        catch (e) { reject(new Error('Gagal membaca ' + file.name + ' sebagai JSON: ' + e.message)); }
+      };
+      reader.onerror = function() { reject(new Error('Gagal membaca berkas ' + file.name + '.')); };
+      reader.readAsText(file);
+    });
+  }
+
+  function tryFetchJSON(url) {
+    return fetch(url).then(function(res) {
+      if (!res.ok) return null;
+      return res.json().catch(function() { return null; });
+    }).catch(function() { return null; });
+  }
+
+  function autoLoadScopusData() {
+    if (!els.scopusSourcesFile) return;
+    els.scopusLoadStatus.textContent = '⏳ Mencoba memuat data Scopus dari repo...';
+    els.scopusLoadStatus.className = 'status info';
+    Promise.all([tryFetchJSON('scopus_sources.json'), tryFetchJSON('scopus_proceedings.json')])
+      .then(function(res) {
+        var sources = res[0], proceedings = res[1];
+        if (!sources && !proceedings) { updateScopusLoadStatus(); return; }
+        scopusDatabase = new window.ScopusMatcher.ScopusDatabase();
+        if (sources) scopusDatabase.loadSourceListCompact(sources);
+        if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
+        scopusAutoLoaded = true;
+        updateScopusLoadStatus();
+        runScopusCheckIfReady();
+      });
+  }
+
+  if (els.scopusSourcesFile) {
+    function loadScopusFiles() {
+      els.scopusLoadStatus.textContent = '⏳ Memuat...';
+      els.scopusLoadStatus.className = 'status info';
+      Promise.all([readJSONFile(els.scopusSourcesFile), readJSONFile(els.scopusProceedingsFile)])
+        .then(function(res) {
+          var sources = res[0], proceedings = res[1];
+          if (!sources && !proceedings) { updateScopusLoadStatus(); return; }
+          if (!scopusDatabase) scopusDatabase = new window.ScopusMatcher.ScopusDatabase();
+          if (sources) scopusDatabase.loadSourceListCompact(sources);
+          if (proceedings) scopusDatabase.loadProceedingsCompact(proceedings);
+          scopusAutoLoaded = false;
+          updateScopusLoadStatus();
+          runScopusCheckIfReady();
+        })
+        .catch(function(err) {
+          els.scopusLoadStatus.textContent = '⚠️ ' + err.message;
+          els.scopusLoadStatus.className = 'status err';
+        });
+    }
+    els.scopusSourcesFile.addEventListener('change', loadScopusFiles);
+    els.scopusProceedingsFile.addEventListener('change', loadScopusFiles);
+
+    els.scopusCheckBtn.addEventListener('click', function() {
+      if (!scopusDatabase || !state.lastResult) return;
+      els.scopusCheckBtn.disabled = true;
+      els.scopusCheckBtn.textContent = '⏳ Mengecek ulang...';
+      setTimeout(function() {
+        runScopusCheckIfReady();
+        els.scopusCheckBtn.disabled = false;
+        els.scopusCheckBtn.textContent = '🔄 Cek Ulang Status Scopus';
+        var tabBtn = document.getElementById('tab-btn-scopus');
+        if (tabBtn) tabBtn.click();
+      }, 30);
+    });
+
+    autoLoadScopusData();
+  }
+
+  // ---------- Tab "Semua" (filter + urutkan per posisi) ----------
+  function getIssueCategories(issue) {
+    var t = (issue.title || '').toLowerCase();
+    var cats = [];
+    if (/duplikat/.test(t)) cats.push('duplikat');
+    if (/tahun/.test(t)) cats.push('tahun');
+    if (/format italic|huruf besar/.test(t)) cats.push('format');
+    if (/alfabetis|gaya sitasi tidak konsisten/.test(t)) cats.push('gaya');
+    if (/^referensi|nomor referensi|penomoran referensi/.test(t)) cats.push('referensi');
+    if (/sitasi|et al|pemisah/.test(t)) cats.push('sitasi');
+    if (cats.length === 0) cats.push('lainnya');
+    return cats;
+  }
+
+  function renderAllTab(issues) {
+    lastAllIssues = issues;
+    applyFilterAndRender();
+  }
+
+  function applyFilterAndRender() {
+    var filtered = activeFilter === 'all' ? lastAllIssues.slice() : lastAllIssues.filter(function(i) { return getIssueCategories(i).indexOf(activeFilter) !== -1; });
+    var sortByPosition = document.getElementById('sortByPosition');
+    if (sortByPosition && sortByPosition.checked) {
+      filtered = filtered.slice().sort(function(a, b) {
+        var la = a.location ? a.location.line : Infinity;
+        var lb = b.location ? b.location.line : Infinity;
+        var sa = a.location ? (a.location.source === 'article' ? 0 : 1) : 2;
+        var sb = b.location ? (b.location.source === 'article' ? 0 : 1) : 2;
+        if (sa !== sb) return sa - sb;
+        return la - lb;
+      });
+    }
+    renderIssueList('list-all', filtered);
+  }
+
+  document.querySelectorAll('.filter-chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      document.querySelectorAll('.filter-chip').forEach(function(c) { c.classList.remove('active'); c.setAttribute('aria-pressed', 'false'); });
+      chip.classList.add('active');
+      chip.setAttribute('aria-pressed', 'true');
+      activeFilter = chip.getAttribute('data-filter');
+      applyFilterAndRender();
+    });
+  });
+  var sortByPositionEl = document.getElementById('sortByPosition');
+  if (sortByPositionEl) sortByPositionEl.addEventListener('change', applyFilterAndRender);
+
+  // ---------- Tab switching (generik untuk semua .tab-btn/.tab-content) ----------
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) {
+        b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); b.setAttribute('tabindex', '-1');
+      });
+      btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); btn.setAttribute('tabindex', '0');
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      var target = document.getElementById('tab-' + btn.getAttribute('data-tab'));
+      if (target) target.classList.add('active');
+    });
+  });
+
   // ---------- HTML report preview + print-to-PDF export ----------
   function getSelectedReportSections() {
     var boxes = document.querySelectorAll('#reportSections input:checked');
@@ -607,10 +1088,12 @@
     html += '<div class="rp-meta">Sumber dokumen: ' + esc(state.fileName || '-') + '  |  Dibuat: ' + esc(new Date().toLocaleString('id-ID')) + '</div>';
 
     if (sections.indexOf('summary') !== -1) {
+      var visibleErrorsRp = result.errors.filter(function(i) { return !dismissedIssueKeys.has(issueKey(i)); }).length;
+      var visibleSuggestionsRp = result.suggestions.filter(function(i) { return !dismissedIssueKeys.has(issueKey(i)); }).length;
       html += '<h2>Ringkasan</h2><table>';
       html += row('Total sitasi terdeteksi', countCitations(result.citations));
       html += row('Total referensi terdeteksi', result.references.length);
-      html += row('Perlu Diperbaiki / Saran', result.errors.length + ' / ' + result.suggestions.length);
+      html += row('Perlu Diperbaiki / Saran', visibleErrorsRp + ' / ' + visibleSuggestionsRp);
       html += row('Rentang tahun diperiksa', state.yearRange.label);
       html += row('Dalam rentang / Di luar rentang / Tahun tak diketahui', stats.inRange.length + ' / ' + stats.outRange.length + ' / ' + stats.unknown.length);
       html += row('Persentase dalam rentang (dari yang bertahun jelas)', stats.pctOfKnown + '%');
@@ -654,9 +1137,22 @@
       html += '</ul>';
     }
 
+    if (sections.indexOf('scopus') !== -1 && state.lastScopusResults && state.lastScopusResults.length > 0) {
+      html += '<h2>Status Scopus</h2>';
+      html += '<p class="rp-meta">Dicocokkan terhadap Scopus Source List yang dimuat secara lokal — lihat catatan metodologi di bawah.</p><ul>';
+      var scopusClsMap = { SCOPUS: 'hl-green', PROBABLE_SCOPUS: 'hl-green', SCOPUS_SOURCE_ONLY: 'hl-yellow', UNKNOWN: null };
+      state.lastScopusResults.forEach(function(r) {
+        var label = (r.ref.firstAuthor || '-') + (r.ref.year ? ' (' + r.ref.year + ')' : '');
+        var cls = scopusClsMap[r.status];
+        html += '<li>' + (cls ? '<mark class="' + cls + '">[' + esc(r.status.replace(/_/g, ' ')) + ']</mark>' : '[' + esc(r.status) + ']') + ' <b>' + esc(label) + '</b></li>';
+      });
+      html += '</ul>';
+      html += '<p class="rp-meta"><i>Catatan: "SOURCE ONLY" berarti jurnalnya terindeks Scopus tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat — bukan berarti pasti tidak Scopus. "UNKNOWN" berarti belum ditemukan bukti yang cukup, bukan konfirmasi non-Scopus.</i></p>';
+    }
+
     if (sections.indexOf('journalrules') !== -1 && window.JournalRulesEngine) {
       var jrConfig = readJournalRulesConfig();
-      var jrEval = window.JournalRulesEngine.evaluateRules(result.references, jrConfig, state.jrOverrides);
+      var jrEval = window.JournalRulesEngine.evaluateRules(result.references, jrConfig, state.jrOverrides, state.lastScopusResults);
       if (jrEval.totalRules > 0) {
         html += '<h2>Aturan Jurnal Custom</h2>';
         html += '<p class="rp-meta">' + (jrEval.overallPass ? '✅' : '⚠️') + ' ' + jrEval.passCount + ' dari ' + jrEval.totalRules + ' aturan terpenuhi</p><ul>';
@@ -683,12 +1179,13 @@
   }
 
   function issueSection(title, issues, sevClass, codeHl) {
-    var html = '<h2>' + esc(title) + ' (' + issues.length + ')</h2>';
-    if (issues.length === 0) {
+    var visibleIssues = issues.filter(function(issue) { return !dismissedIssueKeys.has(issueKey(issue)); });
+    var html = '<h2>' + esc(title) + ' (' + visibleIssues.length + ')</h2>';
+    if (visibleIssues.length === 0) {
       html += '<p class="rp-empty">Tidak ada masalah pada kategori ini.</p>';
       return html;
     }
-    issues.forEach(function(issue, i) {
+    visibleIssues.forEach(function(issue, i) {
       html += '<div class="rp-issue ' + sevClass + '">';
       html += '<div class="t">' + (i + 1) + '. ' + esc(issue.title) + (issue.location ? ' <span class="loc">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</span>' : '') + '</div>';
       html += '<div class="d">' + esc(issue.description) + '</div>';
@@ -1086,9 +1583,12 @@
       state.lastStyleId = styleId;
       state.lastConfidence = confidence;
       state.lastDoiIssues = [];
+      state.lastScopusResults = [];
+      dismissedIssueKeys.clear();
       state.jrOverrides = {};
       els.results.classList.add('active');
       renderResults(result, []);
+      runScopusCheckIfReady();
     },
   };
 })();

@@ -132,6 +132,63 @@
   details.collapsible[open] summary::before{ content:'▼ '; }
   .collapsible-content{ padding:0 16px 14px; }
 
+  .tabs{ display:flex; gap:4px; background:var(--panel); border:1px solid var(--hairline); border-radius:10px; padding:4px; margin-bottom:16px; flex-wrap:wrap; }
+  .tab-btn{ flex:1; min-width:90px; padding:9px 8px; background:transparent; border:none; color:var(--text-dim); font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; cursor:pointer; border-radius:6px; transition:all .15s ease; }
+  .tab-btn.active{ background:var(--panel-raised); color:var(--text); }
+  .tab-btn:hover:not(.active){ color:var(--text); }
+  .tab-content{ display:none; } .tab-content.active{ display:block; }
+
+  .issue-list{ display:flex; flex-direction:column; gap:10px; }
+  .issue-item{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px 16px; border-left:3px solid; }
+  .issue-item.error{ border-left-color:var(--red); }
+  .issue-item.warning{ border-left-color:var(--amber); }
+  .issue-item.suggestion{ border-left-color:var(--cyan); }
+  .issue-header{ display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; }
+  .loc-badge{ margin-left:auto; font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; color:var(--cyan); background:rgba(79,227,232,.08); border:1px solid rgba(79,227,232,.3); border-radius:20px; padding:4px 10px; cursor:pointer; transition:all .15s ease; white-space:nowrap; }
+  .loc-badge:hover{ background:rgba(79,227,232,.18); border-color:var(--cyan); }
+  .loc-badge:focus-visible{ outline:2px solid var(--cyan); outline-offset:2px; }
+  .issue-dismiss{ margin-left:8px; font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; color:var(--text-faint); background:var(--input-bg); border:1px solid var(--hairline); border-radius:20px; padding:4px 10px; cursor:pointer; transition:all .15s ease; white-space:nowrap; }
+  .issue-header .issue-dismiss:last-child{ margin-left:auto; }
+  .issue-dismiss:hover{ background:rgba(242,109,109,.12); border-color:var(--red); color:var(--red); }
+  .issue-dismiss:focus-visible{ outline:2px solid var(--red); outline-offset:2px; }
+
+  .doi-search-btn{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--violet); background:rgba(139,124,240,.08); border:1px solid rgba(139,124,240,.35); border-radius:7px; padding:7px 14px; cursor:pointer; transition:all .15s ease; }
+  .doi-search-btn:hover{ background:rgba(139,124,240,.18); }
+  .doi-search-btn:disabled{ opacity:.6; cursor:wait; }
+  .doi-search-results{ margin-top:10px; }
+  .doi-cand-hint{ font-size:10.5px; color:var(--text-faint); margin-bottom:8px; }
+  .doi-cand-empty{ font-size:11.5px; color:var(--text-dim); font-style:italic; }
+  .doi-cand{ display:flex; gap:12px; align-items:flex-start; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .doi-cand-score{ font-family:var(--font-mono); font-size:12px; font-weight:700; flex-shrink:0; width:64px; text-align:center; padding:4px 0; border-radius:6px; }
+  .doi-cand.high .doi-cand-score{ background:rgba(62,217,143,.15); color:var(--green); }
+  .doi-cand.mid .doi-cand-score{ background:rgba(242,184,75,.15); color:var(--amber); }
+  .doi-cand.low .doi-cand-score{ background:rgba(242,109,109,.12); color:var(--red); }
+  .doi-cand-body{ flex:1; min-width:0; }
+  .doi-cand-title{ font-size:12px; color:var(--text); margin-bottom:2px; }
+  .doi-cand-meta{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); margin-bottom:6px; }
+
+  .filter-bar{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--hairline); }
+  .filter-chip{ font-family:var(--font-mono); font-size:11px; letter-spacing:.03em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:20px; padding:6px 13px; cursor:pointer; transition:all .15s ease; }
+  .filter-chip:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .filter-chip.active{ background:linear-gradient(135deg, var(--cyan), var(--violet)); border-color:transparent; color:var(--void); font-weight:600; }
+  .filter-sep{ width:1px; height:16px; background:var(--hairline); margin:0 2px; }
+  .filter-sort{ display:flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11px; color:var(--text-dim); cursor:pointer; }
+  .filter-sort input{ accent-color:var(--cyan); }
+  .issue-sev{ font-family:var(--font-mono); font-size:9.5px; font-weight:700; text-transform:uppercase; padding:2px 7px; border-radius:4px; letter-spacing:.04em; }
+  .issue-item.error .issue-sev{ background:rgba(242,109,109,.15); color:var(--red); }
+  .issue-item.warning .issue-sev{ background:rgba(242,184,75,.15); color:var(--amber); }
+  .issue-item.suggestion .issue-sev{ background:rgba(79,227,232,.15); color:var(--cyan); }
+  .issue-title{ font-weight:600; font-size:13.5px; }
+  .issue-desc{ font-size:12.5px; color:var(--text-dim); margin-bottom:8px; }
+  .code-block{ font-family:var(--font-mono); font-size:11.5px; padding:8px 34px 8px 10px; border-radius:6px; margin-top:6px; word-break:break-word; position:relative; cursor:pointer; }
+  .code-block:hover{ filter:brightness(1.15); }
+  .code-issue{ background:var(--input-bg); border:1px solid var(--hairline); color:var(--violet); }
+  .code-fix{ background:rgba(62,217,143,.08); border:1px solid rgba(62,217,143,.25); color:var(--green); }
+  .copy-inline{ position:absolute; top:6px; right:6px; background:var(--panel-raised); border:1px solid var(--hairline); color:var(--text-dim); width:24px; height:24px; border-radius:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:10px; }
+  .no-issues{ text-align:center; padding:36px; color:var(--text-dim); font-family:var(--font-mono); font-size:12.5px; }
+  .toast{ position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--panel-raised); border:1px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:var(--font-mono); font-size:12px; z-index:1000; transition:transform .3s ease; }
+  .toast.show{ transform:translateX(-50%) translateY(0); }
+
   .an-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:20px; }
   .an-stat{ background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:12px 14px; }
   .an-stat .v{ font-family:var(--font-display); font-size:22px; font-weight:700; color:var(--text); line-height:1.2; }
@@ -243,8 +300,9 @@
     </div>
 
     <div class="checkbox-row">
-      <input type="checkbox" id="includeDoi">
-      <label for="includeDoi">Sertakan pengecekan DOI via CrossRef (butuh koneksi internet, proses sedikit lebih lama)</label>
+      <input type="checkbox" id="includeDoi" checked style="display:none;">
+      <label for="includeDoi" style="display:none;">Sertakan pengecekan DOI via CrossRef</label>
+      <span style="font-size:11.5px;color:var(--text-dim);">🔗 Validasi DOI via CrossRef berjalan otomatis setelah proses selesai (butuh koneksi internet).</span>
     </div>
 
     <div class="row" style="margin-top:24px;">
@@ -265,6 +323,29 @@
     <div class="privacy-note">🔒 File Anda tidak pernah dikirim ke server — parsing (.docx via Mammoth.js) dan seluruh analisis sitasi berjalan langsung di browser Anda. Pratinjau &amp; PDF juga dibuat di sisi klien menggunakan fitur cetak bawaan browser (tanpa library tambahan yang berat). Maksimum ukuran file 25MB; untuk naskah besar, proses analisis dijalankan di background (Web Worker) supaya tab browser tidak macet.<br><br>✅ Khusus untuk file <b>.docx</b>: sistem otomatis mengecek format <i>italic</i> (nama jurnal/judul buku) dan huruf besar-kecil judul (sentence case vs Title Case) — dibaca <b>langsung dari format asli file Word</b>, bukan dari copy-paste, jadi hasilnya akurat. Muncul di tab "Saran" setelah proses selesai.</div>
   </div>
 
+  <details class="collapsible" id="scopusPanel">
+    <summary>🎓 Cek Status Scopus <span style="color:var(--text-faint);font-weight:400;">(opsional — butuh data Scopus Source List)</span></summary>
+    <div class="collapsible-content">
+      <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:0 0 14px;">
+        Cocokkan referensi Anda terhadap daftar sumber Scopus resmi (Elsevier), <b>diproses sepenuhnya di browser Anda</b> — berkasnya tidak diunggah ke mana pun.
+        Kalau <code>scopus_sources.json</code> (dan opsional <code>scopus_proceedings.json</code>) sudah ditaruh sejajar dengan <code>engine.js</code> di repo GitHub Anda, keduanya <b>termuat otomatis</b> tiap halaman dibuka — tidak perlu upload manual. Kalau belum ada di repo, unggah manual lewat kolom di bawah sebagai alternatif.
+        Setelah data tersedia (otomatis atau manual), <b>pengecekan referensi juga berjalan otomatis</b> begitu Anda menjalankan proses di atas — tidak perlu klik tombol apa pun, hasilnya langsung muncul di tab "Scopus" &amp; laporan PDF.
+      </p>
+      <div class="row" style="gap:16px;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <label for="scopusSourcesFile" style="display:block;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:6px;">scopus_sources.json <span style="color:var(--text-faint);">(cadangan manual)</span></label>
+          <input type="file" id="scopusSourcesFile" accept=".json">
+        </div>
+        <div>
+          <label for="scopusProceedingsFile" style="display:block;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:6px;">scopus_proceedings.json <span style="color:var(--text-faint);">(opsional)</span></label>
+          <input type="file" id="scopusProceedingsFile" accept=".json">
+        </div>
+      </div>
+      <div id="scopusLoadStatus" class="status info" role="status" aria-live="polite"></div>
+      <button class="primary" id="scopusCheckBtn" style="margin-top:12px;" disabled>🔄 Cek Ulang Status Scopus <span style="font-weight:400;opacity:.8;">(opsional — pengecekan pertama sudah otomatis)</span></button>
+    </div>
+  </details>
+
   <div class="results" id="results">
     <div class="panel">
       <div class="field-label">Ringkasan Hasil</div>
@@ -282,9 +363,38 @@
         <label class="export-check"><input type="checkbox" value="errors" checked> Perlu Diperbaiki</label>
         <label class="export-check"><input type="checkbox" value="suggestions" checked> Saran</label>
         <label class="export-check"><input type="checkbox" value="doi" checked> Validasi DOI</label>
+        <label class="export-check"><input type="checkbox" value="scopus" checked> Status Scopus</label>
         <label class="export-check"><input type="checkbox" value="journalrules" checked> Aturan Jurnal Custom</label>
       </div>
       <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>. Pratinjau di bawah berubah langsung sesuai bagian yang Anda centang — itulah yang akan tercetak/tersimpan.</div>
+    </div>
+
+    <div id="dismissedBanner" class="status info" style="display:none;margin-bottom:12px;" role="status" aria-live="polite"></div>
+
+    <div class="tabs" role="tablist" aria-label="Kategori hasil validasi">
+      <button class="tab-btn active" data-tab="errors" role="tab" aria-selected="true" aria-controls="tab-errors" id="tab-btn-errors">🔴 Perlu Diperbaiki</button>
+      <button class="tab-btn" data-tab="suggestions" role="tab" aria-selected="false" aria-controls="tab-suggestions" id="tab-btn-suggestions" tabindex="-1">🔵 Saran</button>
+      <button class="tab-btn" data-tab="doi" role="tab" aria-selected="false" aria-controls="tab-doi" id="tab-btn-doi" tabindex="-1">🔗 DOI</button>
+      <button class="tab-btn" data-tab="scopus" role="tab" aria-selected="false" aria-controls="tab-scopus" id="tab-btn-scopus" tabindex="-1">🎓 Scopus</button>
+      <button class="tab-btn" data-tab="all" role="tab" aria-selected="false" aria-controls="tab-all" id="tab-btn-all" tabindex="-1">📋 Semua</button>
+    </div>
+    <div class="tab-content active" id="tab-errors" role="tabpanel" aria-labelledby="tab-btn-errors"><div class="issue-list" id="list-errors" aria-live="polite"></div></div>
+    <div class="tab-content" id="tab-suggestions" role="tabpanel" aria-labelledby="tab-btn-suggestions"><div class="issue-list" id="list-suggestions" aria-live="polite"></div></div>
+    <div class="tab-content" id="tab-doi" role="tabpanel" aria-labelledby="tab-btn-doi"><div class="issue-list" id="list-doi" aria-live="polite"></div></div>
+    <div class="tab-content" id="tab-scopus" role="tabpanel" aria-labelledby="tab-btn-scopus"><div class="issue-list" id="list-scopus" aria-live="polite"></div></div>
+    <div class="tab-content" id="tab-all" role="tabpanel" aria-labelledby="tab-btn-all">
+      <div class="filter-bar" id="filterBar" role="group" aria-label="Filter kategori masalah">
+        <button class="filter-chip active" data-filter="all" aria-pressed="true">Semua</button>
+        <button class="filter-chip" data-filter="sitasi" aria-pressed="false">Sitasi</button>
+        <button class="filter-chip" data-filter="referensi" aria-pressed="false">Referensi</button>
+        <button class="filter-chip" data-filter="format" aria-pressed="false">Format</button>
+        <button class="filter-chip" data-filter="tahun" aria-pressed="false">Tahun</button>
+        <button class="filter-chip" data-filter="duplikat" aria-pressed="false">Duplikat</button>
+        <button class="filter-chip" data-filter="gaya" aria-pressed="false">Gaya/Urutan</button>
+        <span class="filter-sep"></span>
+        <label class="filter-sort"><input type="checkbox" id="sortByPosition"> Urutkan per posisi di dokumen</label>
+      </div>
+      <div class="issue-list" id="list-all" aria-live="polite"></div>
     </div>
 
     <details class="collapsible" id="citationMapDetails" open>
@@ -337,8 +447,8 @@
         </div>
 
         <div class="jr-rule">
-          <label class="jr-toggle"><input type="checkbox" id="jrOriginEnabled"> Minimal persentase internasional</label>
-          <input type="number" id="jrOriginMinPercent" class="jr-num" value="50" min="0" max="100"><span class="jr-txt">% referensi internasional (non-Indonesia)</span>
+          <label class="jr-toggle"><input type="checkbox" id="jrScopusEnabled"> Minimal persentase terindeks Scopus</label>
+          <input type="number" id="jrScopusMinPercent" class="jr-num" value="100" min="0" max="100"><span class="jr-txt">% referensi terindeks Scopus — jalankan "Cek Status Scopus" di panel Scopus dulu sebelum menerapkan aturan ini</span>
         </div>
 
         <button class="jr-apply" id="jrApplyBtn">⚖️ Terapkan Aturan</button>
@@ -356,13 +466,16 @@
   </div>
 </div>
 
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
 <script src="engine.js?v=13"></script>
 <script src="journal-rules-engine.js?v=1"></script>
+<script src="scopus-engine.js?v=1"></script>
 <script src="shared-file.js?v=1"></script>
-<script src="upload.js?v=14"></script>
+<script src="upload.js?v=15"></script>
 </body>
 </html>
 
