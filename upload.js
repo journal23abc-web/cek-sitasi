@@ -86,6 +86,16 @@
     setStatus('', 'info');
   });
 
+  // ---------- Auto-muat berkas dari Beranda (kalau sudah pernah upload di sana) ----------
+  // Bagian dari alur "upload sekali, pakai di semua tool" — kalau pengguna datang dari
+  // halaman Beranda (atau pernah upload sebelumnya, belum kedaluwarsa 24 jam), langsung pakai
+  // berkas itu di sini tanpa perlu upload ulang manual.
+  if (window.SharedFile) {
+    window.SharedFile.load().then(function (result) {
+      if (result && result.file) handleFile(result.file);
+    });
+  }
+
   function formatSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';

@@ -31,27 +31,49 @@
 
   .section-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--text-faint); margin:0 0 14px; display:flex; align-items:center; gap:10px; }
   .section-label::after{ content:''; flex:1; height:1px; background:var(--hairline); }
+  .section-label .step-badge{ display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:var(--cyan); color:var(--void); font-weight:700; font-size:10px; flex-shrink:0; }
+
+  /* ---------- Bagian upload bersama (langkah 1) ---------- */
+  .upload-hub{ margin-bottom:36px; }
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:12px; padding:30px 24px; text-align:center; cursor:pointer; transition:all .15s ease; background:linear-gradient(180deg, var(--panel-raised), var(--panel)); }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .dz-icon{ font-size:30px; margin-bottom:10px; }
+  .dropzone .dz-text{ font-family:var(--font-display); font-weight:700; font-size:14.5px; color:var(--text); margin-bottom:6px; }
+  .dropzone .dz-hint{ font-size:12px; color:var(--text-dim); line-height:1.6; max-width:440px; margin:0 auto; }
+  .file-status{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:14px; padding:14px 16px; border-radius:10px; background:var(--panel-raised); border:1px solid var(--hairline); }
+  .file-status.ready{ border-color:rgba(62,217,143,.4); background:rgba(62,217,143,.06); }
+  .file-status .fs-icon{ font-size:18px; flex-shrink:0; }
+  .file-status .fs-body{ flex:1; min-width:200px; }
+  .file-status .fs-name{ font-family:var(--font-mono); font-size:12.5px; color:var(--text); word-break:break-all; }
+  .file-status .fs-meta{ font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .file-status .fs-clear{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); background:none; border:1px solid var(--hairline); border-radius:6px; padding:6px 10px; cursor:pointer; white-space:nowrap; }
+  .file-status .fs-clear:hover{ border-color:var(--red); color:var(--red); }
 
   .tool-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:18px; margin-bottom:36px; }
 
   .tool-card{ position:relative; display:block; text-decoration:none; background:linear-gradient(180deg, var(--panel-raised), var(--panel)); border:1px solid var(--hairline); border-radius:12px; padding:26px; transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
   .tool-card:hover{ transform:translateY(-3px); border-color:var(--cyan); box-shadow:0 10px 30px rgba(79,227,232,.12); }
   .tool-card:focus-visible{ outline:2px solid var(--cyan); outline-offset:3px; }
+  .tool-card.file-ready{ border-color:rgba(62,217,143,.5); }
   .tool-card .tc-icon{ font-size:28px; margin-bottom:14px; display:inline-flex; align-items:center; justify-content:center; width:52px; height:52px; border-radius:12px; background:var(--input-bg); border:1px solid var(--hairline); }
   .tool-card .tc-title{ font-family:var(--font-display); font-size:18px; font-weight:700; color:var(--text); margin-bottom:6px; }
   .tool-card .tc-desc{ font-size:12.5px; color:var(--text-dim); line-height:1.65; margin-bottom:16px; }
   .tool-card .tc-tags{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
   .tool-card .tc-tag{ font-family:var(--font-mono); font-size:10px; letter-spacing:.03em; color:var(--cyan); background:rgba(79,227,232,.1); border-radius:12px; padding:3px 9px; }
   .tool-card .tc-cta{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.05em; color:var(--cyan); display:flex; align-items:center; gap:6px; }
+  .tool-card.file-ready .tc-cta{ color:var(--green); font-weight:600; }
   .tool-card .tc-cta .arrow{ transition:transform .18s ease; }
   .tool-card:hover .tc-cta .arrow{ transform:translateX(4px); }
   .tool-card .corner{ position:absolute; width:14px; height:14px; border:1.5px solid var(--cyan); opacity:.5; }
   .tool-card .corner.tl{ top:-1px; left:-1px; border-right:none; border-bottom:none; border-radius:12px 0 0 0; }
   .tool-card .corner.br{ bottom:-1px; right:-1px; border-left:none; border-top:none; border-radius:0 0 12px 0; }
+  .tool-card .tc-upload-badge{ position:absolute; top:14px; right:14px; font-family:var(--font-mono); font-size:9px; letter-spacing:.05em; color:var(--text-faint); background:var(--input-bg); border:1px solid var(--hairline); border-radius:10px; padding:3px 8px; }
 
   .tool-card.placeholder{ border-style:dashed; opacity:.55; cursor:default; }
   .tool-card.placeholder:hover{ transform:none; border-color:var(--hairline); box-shadow:none; }
   .tool-card.placeholder .tc-icon{ background:transparent; }
+
+  .paste-note{ font-size:12px; color:var(--text-faint); line-height:1.6; margin:-6px 0 36px; }
 
   footer{ font-size:11px; color:var(--text-faint); text-align:center; margin-top:40px; line-height:1.8; }
   footer a{ color:var(--text-faint); text-decoration:underline; }
@@ -72,30 +94,29 @@
   </header>
 
   <div class="intro">
-    <p>Kumpulan alat untuk membantu proses editorial jurnal. Pilih alat yang Anda perlukan di bawah — semuanya berjalan langsung di browser Anda sendiri, tanpa server.</p>
+    <p>Kumpulan alat untuk membantu proses editorial jurnal — semuanya berjalan langsung di browser Anda sendiri, tanpa server. Upload naskah sekali di bawah, lalu pilih tool apa pun yang Anda perlukan tanpa perlu upload ulang tiap ganti fitur.</p>
   </div>
 
-  <div class="section-label">Pilih Tool</div>
+  <div class="section-label"><span class="step-badge">1</span>Upload Naskah (sekali saja, dipakai di semua tool di bawah)</div>
+  <div class="upload-hub">
+    <div class="dropzone" id="hubDropzone" tabindex="0" role="button" aria-label="Upload naskah .docx">
+      <div class="dz-icon">📄</div>
+      <div class="dz-text">Seret file .docx ke sini, atau klik untuk memilih</div>
+      <div class="dz-hint">Berkas disimpan sementara di browser Anda (tidak diunggah ke server) — begitu ter-upload, tinggal klik tool mana pun di bawah dan langsung terpakai, tidak perlu upload ulang.</div>
+      <input type="file" id="hubFileInput" accept=".docx" hidden>
+    </div>
+    <div id="hubFileStatus" class="file-status" style="display:none;"></div>
+  </div>
+
+  <div class="section-label"><span class="step-badge">2</span>Pilih Tool</div>
   <div class="tool-grid">
 
-    <a href="validator-copy.html" class="tool-card">
+    <a href="preliminary-check.html" class="tool-card" data-upload-tool="preliminary-check.html">
       <span class="corner tl"></span><span class="corner br"></span>
-      <div class="tc-icon">✏️</div>
-      <div class="tc-title">Validator Sitasi</div>
-      <div class="tc-desc">Tempel teks artikel dan daftar referensi, atau tempel seluruh naskah sekaligus untuk dipisahkan otomatis. Perlu unggah file .docx? Ada tautan ke Validator Upload di dalam halaman ini.</div>
-      <div class="tc-tags">
-        <span class="tc-tag">Deteksi gaya otomatis</span>
-        <span class="tc-tag">Analitik referensi</span>
-        <span class="tc-tag">Filter &amp; lokasi hasil</span>
-      </div>
-      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
-    </a>
-
-    <a href="preliminary-check.html" class="tool-card">
-      <span class="corner tl"></span><span class="corner br"></span>
+      <span class="tc-upload-badge">📤 Upload</span>
       <div class="tc-icon">🔍</div>
       <div class="tc-title">Preliminary Check</div>
-      <div class="tc-desc">Upload naskah .docx untuk dashboard cek awal ala standar Scopus: jumlah kata judul/abstrak, kelengkapan struktur IMRAD, jumlah &amp; kebaruan referensi, dan checklist preliminary lainnya.</div>
+      <div class="tc-desc">Dashboard cek awal ala standar Scopus: jumlah kata judul/abstrak, kelengkapan struktur IMRAD, jumlah &amp; kebaruan referensi, dan checklist preliminary lainnya.</div>
       <div class="tc-tags">
         <span class="tc-tag">Dashboard IMRAD</span>
         <span class="tc-tag">Checklist objektif</span>
@@ -104,11 +125,26 @@
       <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
     </a>
 
-    <a href="link-upload.html" class="tool-card">
+    <a href="validator-upload.html" class="tool-card" data-upload-tool="validator-upload.html">
       <span class="corner tl"></span><span class="corner br"></span>
+      <span class="tc-upload-badge">📤 Upload</span>
+      <div class="tc-icon">✅</div>
+      <div class="tc-title">Validasi Sitasi &amp; Ekspor Laporan</div>
+      <div class="tc-desc">Cek kecocokan sitasi ↔ referensi, format penulisan, urutan alfabetis, dan lainnya langsung dari file .docx asli — hasil bisa diekspor sebagai laporan PDF.</div>
+      <div class="tc-tags">
+        <span class="tc-tag">Deteksi gaya otomatis</span>
+        <span class="tc-tag">Analitik referensi</span>
+        <span class="tc-tag">Ekspor PDF</span>
+      </div>
+      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
+    </a>
+
+    <a href="link-upload.html" class="tool-card" data-upload-tool="link-upload.html">
+      <span class="corner tl"></span><span class="corner br"></span>
+      <span class="tc-upload-badge">📤 Upload</span>
       <div class="tc-icon">🔗</div>
       <div class="tc-title">Tautkan Sitasi ke Referensi</div>
-      <div class="tc-desc">Upload naskah .docx, sistem otomatis menautkan (hyperlink internal) tiap in-text citation ke entri referensinya — klik sitasi, langsung lompat ke referensi. Format &amp; teks artikel tidak berubah sama sekali.</div>
+      <div class="tc-desc">Sistem otomatis menautkan (hyperlink internal) tiap in-text citation ke entri referensinya — klik sitasi, langsung lompat ke referensi. Format &amp; teks artikel tidak berubah sama sekali.</div>
       <div class="tc-tags">
         <span class="tc-tag">Auto-detect gaya</span>
         <span class="tc-tag">Format 100% terjaga</span>
@@ -117,11 +153,12 @@
       <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
     </a>
 
-    <a href="citation-converter.html" class="tool-card">
+    <a href="citation-converter.html" class="tool-card" data-upload-tool="citation-converter.html">
       <span class="corner tl"></span><span class="corner br"></span>
+      <span class="tc-upload-badge">📤 Upload</span>
       <div class="tc-icon">🔄</div>
       <div class="tc-title">Konversi Sitasi Antar Gaya</div>
-      <div class="tc-desc">Tempel, unggah .docx, atau isi manual — pilih gaya asal &amp; tujuan (mis. APA7 → IEEE), sitasi in-text (parenthetical maupun naratif) dikonversi otomatis dengan pratinjau berwarna. Hasil bisa disunting manual, lalu diekspor sebagai .docx (format asli dipertahankan) atau .txt.</div>
+      <div class="tc-desc">Pilih gaya asal &amp; tujuan (mis. APA7 → IEEE), sitasi in-text (parenthetical maupun naratif) dikonversi otomatis dengan pratinjau berwarna. Hasil bisa disunting manual, lalu diekspor sebagai .docx atau .txt.</div>
       <div class="tc-tags">
         <span class="tc-tag">APA/Harvard/Chicago/MLA/IEEE/Vancouver</span>
         <span class="tc-tag">Upload &amp; ekspor .docx</span>
@@ -130,11 +167,12 @@
       <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
     </a>
 
-    <a href="term-consistency.html" class="tool-card">
+    <a href="term-consistency.html" class="tool-card" data-upload-tool="term-consistency.html">
       <span class="corner tl"></span><span class="corner br"></span>
+      <span class="tc-upload-badge">📤 Upload</span>
       <div class="tc-icon">🧩</div>
       <div class="tc-title">Cek Konsistensi Istilah</div>
-      <div class="tc-desc">Tempel naskah untuk deteksi otomatis: istilah/konsep yang ditulis tidak konsisten (huruf besar-kecil, tanda hubung, singkatan), variabel penelitian yang belum pernah didefinisikan, dan pasangan istilah mirip yang perlu ditinjau manual (tidak pernah digabung otomatis).</div>
+      <div class="tc-desc">Deteksi otomatis: istilah/konsep yang ditulis tidak konsisten (huruf besar-kecil, tanda hubung, singkatan), variabel penelitian yang belum pernah didefinisikan, dan pasangan istilah mirip yang perlu ditinjau manual.</div>
       <div class="tc-tags">
         <span class="tc-tag">Deteksi definisi &amp; akronim</span>
         <span class="tc-tag">Klasifikasi variabel</span>
@@ -151,11 +189,104 @@
 
   </div>
 
+  <div class="section-label">Tidak mau upload file?</div>
+  <div class="tool-grid" style="margin-bottom:8px;">
+    <a href="validator-copy.html" class="tool-card">
+      <span class="corner tl"></span><span class="corner br"></span>
+      <div class="tc-icon">✏️</div>
+      <div class="tc-title">Validator Sitasi (Tempel Teks)</div>
+      <div class="tc-desc">Tempel teks artikel dan daftar referensi langsung, atau tempel seluruh naskah sekaligus untuk dipisahkan otomatis — tanpa perlu upload file .docx sama sekali.</div>
+      <div class="tc-tags">
+        <span class="tc-tag">Tempel &amp; validasi instan</span>
+        <span class="tc-tag">Tidak perlu upload</span>
+      </div>
+      <div class="tc-cta">Buka tool <span class="arrow">→</span></div>
+    </a>
+  </div>
+  <p class="paste-note">Alat di atas cuma butuh teks tempelan (copy-paste), jadi tidak ikut memakai berkas yang Anda upload di langkah 1 — cocok kalau Anda cuma punya teksnya saja, bukan file .docx-nya.</p>
+
   <footer>
-    Semua analisis berjalan di browser Anda — tidak ada naskah yang dikirim ke server, kecuali saat Anda sengaja mengaktifkan pengecekan DOI via CrossRef.
+    Semua analisis berjalan di browser Anda — tidak ada naskah yang dikirim ke server, kecuali saat Anda sengaja mengaktifkan pengecekan DOI via CrossRef. Berkas yang diupload di langkah 1 disimpan sementara di penyimpanan lokal browser (IndexedDB) dan otomatis kedaluwarsa setelah 24 jam.
   </footer>
 </div>
 
 <script src="theme.js?v=1"></script>
+<script src="shared-file.js?v=1"></script>
+<script>
+(function () {
+  var dropzone = document.getElementById('hubDropzone');
+  var fileInput = document.getElementById('hubFileInput');
+  var statusEl = document.getElementById('hubFileStatus');
+  var toolCards = document.querySelectorAll('[data-upload-tool]');
+
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function markToolCardsReady(ready) {
+    toolCards.forEach(function (card) {
+      card.classList.toggle('file-ready', ready);
+      var cta = card.querySelector('.tc-cta');
+      if (cta) cta.innerHTML = ready ? '▶ Pakai file ini <span class="arrow">→</span>' : 'Buka tool <span class="arrow">→</span>';
+    });
+  }
+
+  function showFileStatus(name, size) {
+    statusEl.style.display = '';
+    statusEl.classList.add('ready');
+    statusEl.innerHTML =
+      '<span class="fs-icon">✅</span>' +
+      '<div class="fs-body"><div class="fs-name">' + name.replace(/</g, '&lt;') + '</div>' +
+      '<div class="fs-meta">' + formatSize(size) + ' — siap dipakai di tool mana pun di bawah, klik salah satu untuk mulai.</div></div>' +
+      '<button class="fs-clear" id="hubClearFile">✕ Hapus &amp; upload ulang</button>';
+    document.getElementById('hubClearFile').addEventListener('click', function (e) {
+      e.stopPropagation();
+      window.SharedFile.clear().then(function () {
+        statusEl.style.display = 'none';
+        statusEl.classList.remove('ready');
+        fileInput.value = '';
+        markToolCardsReady(false);
+      });
+    });
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    if (!/\.docx$/i.test(file.name)) {
+      alert('Mohon upload file .docx (bukan .doc/.pdf/format lain).');
+      return;
+    }
+    window.SharedFile.save(file, 'Beranda').then(function () {
+      showFileStatus(file.name, file.size);
+      markToolCardsReady(true);
+    });
+  }
+
+  dropzone.addEventListener('click', function () { fileInput.click(); });
+  dropzone.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+  dropzone.addEventListener('dragover', function (e) { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', function () { dropzone.classList.remove('drag'); });
+  dropzone.addEventListener('drop', function (e) {
+    e.preventDefault(); dropzone.classList.remove('drag');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', function () {
+    if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  // Kalau sebelumnya sudah pernah upload (belum kedaluwarsa), langsung tampilkan statusnya
+  // begitu halaman Beranda dibuka lagi — tidak perlu upload ulang.
+  if (window.SharedFile) {
+    window.SharedFile.load().then(function (result) {
+      if (result && result.file) {
+        showFileStatus(result.name, result.file.size);
+        markToolCardsReady(true);
+      }
+    });
+  }
+})();
+</script>
 </body>
 </html>

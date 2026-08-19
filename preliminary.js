@@ -53,6 +53,13 @@
     setStatus('', 'info');
   });
 
+  // ---------- Auto-muat berkas dari Beranda (kalau sudah pernah upload di sana) ----------
+  if (window.SharedFile) {
+    window.SharedFile.load().then(function (result) {
+      if (result && result.file) handleFile(result.file);
+    });
+  }
+
   function handleFile(file) {
     var name = file.name.toLowerCase();
     if (!name.endsWith('.docx')) { setStatus('⚠️ Hanya file .docx yang didukung.', 'err'); return; }

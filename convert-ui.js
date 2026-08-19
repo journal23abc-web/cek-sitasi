@@ -276,6 +276,17 @@
     els.btnExportDocxOriginal.disabled = true;
   });
 
+  // ---------- Auto-muat berkas dari Beranda (kalau sudah pernah upload di sana) ----------
+  if (window.SharedFile) {
+    window.SharedFile.load().then(function (result) {
+      if (result && result.file) {
+        var uploadTabBtn = document.getElementById('tab-btn-upload');
+        if (uploadTabBtn) uploadTabBtn.click(); // pindah dari mode "Tempel" (default) ke "Upload"
+        handleFile(result.file);
+      }
+    });
+  }
+
   function formatSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';

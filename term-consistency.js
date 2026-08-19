@@ -72,6 +72,13 @@
     els.fileChip.classList.remove('show');
   });
 
+  // ---------- Auto-muat berkas dari Beranda (kalau sudah pernah upload di sana) ----------
+  if (window.SharedFile) {
+    window.SharedFile.load().then(function (result) {
+      if (result && result.file) selectFile(result.file);
+    });
+  }
+
   function selectFile(f) {
     if (!/\.docx$/i.test(f.name)) {
       setStatus('⚠️ Mohon pilih file .docx', 'warn');
