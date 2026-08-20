@@ -404,6 +404,46 @@ test('a mentioned figure/table with no matching caption is left as plain text â€
   assert.strictEqual(result.figuresTablesLinked, 0);
 });
 
+console.log('\n=== Regression: options.linkColor was never wired into figure/table linking â€” the option existed and worked for citations, but figure/table hyperlinks always ignored it (hardcoded null) ===');
+
+test('options.linkColor is correctly applied to a plain-text "Figure N"/"Table N" mention that gets linked', () => {
+  var paras = [
+    para(run('Sebagaimana ditunjukkan pada Figure 1, hasil penelitian menunjukkan tren positif dan jelas.')),
+    para(run('Figure 1. Grafik tren penjualan.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true, linkColor: '0000FF' });
+  assert.strictEqual(result.figuresTablesLinked, 1);
+  var serialized = new XMLSerializer().serializeToString(xmlDoc);
+  assert.ok(serialized.includes('w:color w:val="0000FF"'), 'warna harus muncul di hyperlink Figure/Table, bukan cuma di sitasi');
+});
+
+test('options.linkColor is applied to the visible result run of a field-code figure/table mention too (e.g. the "1" inside a Word Cross-reference field), not just plain-text mentions', () => {
+  var fieldRun =
+    '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+    '<w:r><w:instrText xml:space="preserve"> REF _Ref123 \\r \\h </w:instrText></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+    '<w:r><w:t>1</w:t></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  var paras = [
+    para(run('As shown in Table ') + fieldRun + run(', the reliability scores exceed the recommended threshold.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser to work.')),
+    para(run('Table 1. Reliability and Convergent Validity')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title A. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true, linkColor: 'FF0000' });
+  assert.strictEqual(result.figuresTablesLinked, 1);
+  var serialized = new XMLSerializer().serializeToString(xmlDoc);
+  assert.ok(serialized.includes('w:color w:val="FF0000"'), 'warna harus muncul walau sebutannya dibuat lewat field code Word');
+});
+
 test('figure/table linking is OFF by default (no options.linkFiguresTables passed)', () => {
   var paras = [
     para(run('Lihat Figure 1 untuk detail.')),

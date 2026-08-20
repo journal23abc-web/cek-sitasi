@@ -259,6 +259,10 @@
       if (inf.fieldGroupId != null) {
         // Bagian dari field yang sudah terverifikasi tercakup penuh -> pindahkan run ASLI-nya
         // apa adanya (sekali per run; grup field bisa terdiri atas beberapa run berurutan).
+        // Warna TETAP diterapkan seperti run biasa — run fldChar/instrText tidak py teks
+        // terlihat jadi ini tidak berefek apa-apa untuknya, tapi run HASIL CACHE field (mis.
+        // angka "1" yang terlihat) memang perlu diwarnai sama seperti teks tautan lainnya.
+        applyColorToRun(xmlDoc, inf.run, colorHex);
         movedNodes.push(inf.run);
         return;
       }
@@ -652,7 +656,7 @@
   // Menautkan setiap kemunculan "Figure N"/"Table N" LAIN (bukan caption-nya sendiri) ke bookmark
   // caption yang sesuai. Butuh bodyParas + articleText (posisi absolut) dari linkDocx supaya bisa
   // memetakan balik posisi match ke paragraf & offset lokalnya masing-masing.
-  function linkFigureTableReferences(xmlDoc, bodyParas, articleText, bookmarkSeqStart) {
+  function linkFigureTableReferences(xmlDoc, bodyParas, articleText, bookmarkSeqStart, colorHex) {
     var captions = findFigureTableCaptions(bodyParas);
     if (captions.length === 0) return { linked: 0, captionsFound: 0 };
 
@@ -719,7 +723,7 @@
       var pIdx = parseInt(pIdxStr, 10);
       var p = bodyParas[pIdx].el;
       matchesByPara[pIdxStr].slice().reverse().forEach(function (mt) {
-        if (wrapWithHyperlink(xmlDoc, p, mt.start, mt.end, mt.bookmarkName, null)) linked++;
+        if (wrapWithHyperlink(xmlDoc, p, mt.start, mt.end, mt.bookmarkName, colorHex)) linked++;
       });
     });
 
@@ -1001,7 +1005,7 @@
     // NONAKTIF — beda dari dua fitur di atas, ini cuma jalan kalau eksplisit diminta.
     var figTblResult = { linked: 0, captionsFound: 0 };
     if (options.linkFiguresTables) {
-      figTblResult = linkFigureTableReferences(xmlDoc, bodyParas, articleText, 8000);
+      figTblResult = linkFigureTableReferences(xmlDoc, bodyParas, articleText, 8000, linkColor);
     }
 
     return {
