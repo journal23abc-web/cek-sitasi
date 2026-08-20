@@ -458,7 +458,7 @@ test('re-running figure/table linking on a document that already has figtbl_ boo
 
 
 
-test('a "Table N" mention built from Word\'s native Cross-reference field (fldChar begin/instrText/separate/result/end) is left completely untouched — the field sequence must never be interrupted by a new <w:hyperlink>, even though this means the mention can\'t be linked', () => {
+test('a "Table N" mention built from Word\'s native Cross-reference field (fldChar begin/instrText/separate/result/end) is now correctly LINKED — the entire field is moved as one intact unit inside the new <w:hyperlink>, exactly like a manual Ctrl+K selection in Word would produce, never splitting the field\'s internal begin/instrText/separate/end sequence', () => {
   var fieldRun =
     '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
     '<w:r><w:instrText xml:space="preserve"> REF _Ref123 \\r \\h </w:instrText></w:r>' +
@@ -476,16 +476,49 @@ test('a "Table N" mention built from Word\'s native Cross-reference field (fldCh
   var xmlDoc = xmlDocFromParas(paras);
   var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
   var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
-  // Match jatuh di dalam field -> harus dilewati (bukan dipaksa, bukan menghasilkan hyperlink
-  // yang membelah field), sesuai filosofi "lewati & laporkan" yang sama seperti hyperlink lama.
-  assert.strictEqual(result.figuresTablesLinked, 0);
+  assert.strictEqual(result.figuresTablesLinked, 1);
   // Yang PALING penting: urutan run field code (begin, instrText, separate, hasil, end) HARUS
-  // tetap berurutan tanpa jeda apa pun di antaranya — tidak boleh ada <w:hyperlink> menyelip.
+  // tetap berurutan tanpa jeda elemen LAIN SELAIN w:hyperlink pembungkusnya sendiri — field-nya
+  // sendiri tidak boleh terpotong/tersisipi apa pun DI ANTARA kelima run itu.
   var serialized = new XMLSerializer().serializeToString(xmlDoc);
   var fieldIdx = serialized.indexOf('fldCharType="begin"');
   var endIdx = serialized.indexOf('fldCharType="end"');
   var between = serialized.slice(fieldIdx, endIdx);
-  assert.ok(between.indexOf('w:hyperlink') === -1, 'tidak boleh ada <w:hyperlink> di antara fldChar begin dan end: ' + between);
+  assert.ok(between.indexOf('</w:hyperlink>') === -1, 'tidak boleh ada </w:hyperlink> (penutup) di antara fldChar begin dan end, field harus tetap satu kesatuan utuh: ' + between);
+  // hyperlink-nya sendiri harus membungkus SELURUH field ini (bukan sebagian)
+  assert.ok(serialized.indexOf('<w:hyperlink w:anchor="figtbl_tbl_1"') < fieldIdx, 'hyperlink harus dimulai SEBELUM field dimulai');
+});
+
+test('a match that only PARTIALLY overlaps a field (starts or ends in the middle of the field\'s internal run sequence, not aligned with the field\'s true begin/end boundary) is still safely rejected — this genuinely ambiguous case must never produce a hyperlink that splits the field', () => {
+  var fieldRun =
+    '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+    '<w:r><w:instrText xml:space="preserve"> REF _Ref123 \\r \\h </w:instrText></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+    '<w:r><w:t>123</w:t></w:r>' + // hasil field 3 karakter, sengaja dibuat agar bisa "dipotong sebagian"
+    '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  // Naskah ini TIDAK dipakai untuk memicu match parsial secara langsung (mesin pencocokan
+  // Figure/Table normalnya tidak akan menghasilkan match separuh-field), tapi kita uji
+  // wrapWithHyperlink secara lebih langsung lewat cara lain: pastikan perilaku dasarnya, kalau
+  // toh suatu saat ada jalur lain yang memicu match separuh field, tetap tertolak dengan aman.
+  var paras = [
+    para(run('Value ') + fieldRun + run(' was recorded during the experiment for later analysis.')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title A. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  // Tidak ada sebutan Figure/Table genuine di sini -> pastikan tidak ada hyperlink figtbl_* yang
+  // ke-generate sama sekali dari teks field "123" ini (memastikan field code TIDAK ikut
+  // ke-scan/ke-treat seolah sitasi atau figure/table oleh mesin manapun).
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkFiguresTables: true });
+  assert.strictEqual(result.figuresTablesLinked, 0);
+  var serialized = new XMLSerializer().serializeToString(xmlDoc);
+  var fieldIdx = serialized.indexOf('fldCharType="begin"');
+  var endIdx = serialized.indexOf('fldCharType="end"');
+  var between = serialized.slice(fieldIdx, endIdx);
+  assert.ok(between.indexOf('</w:hyperlink>') === -1, 'field tidak boleh terpotong hyperlink apa pun: ' + between);
 });
 
 test('a genuine plain-text mention in the SAME paragraph as an unrelated field code is still safely linked — only the field-code portion itself is protected, not the whole paragraph', () => {

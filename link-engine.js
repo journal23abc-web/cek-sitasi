@@ -138,18 +138,20 @@
     var runNodes = p.getElementsByTagName('w:r');
     var text = '', infos = [];
     var insideField = false;
+    var fieldGroupId = null;
+    var nextFieldGroupId = 0;
     for (var i = 0; i < runNodes.length; i++) {
       var r = runNodes[i];
       var fldCharList = r.getElementsByTagName('w:fldChar');
       var fldType = fldCharList.length ? fldCharList[0].getAttribute('w:fldCharType') : null;
-      if (fldType === 'begin') insideField = true;
+      if (fldType === 'begin') { insideField = true; fieldGroupId = nextFieldGroupId++; }
       var isFieldPart = insideField;
       var wts = r.getElementsByTagName('w:t');
       var t = '';
       for (var j = 0; j < wts.length; j++) t += wts[j].textContent;
-      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t, spliceable: (r.parentNode === p) && !isFieldPart });
+      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t, spliceable: (r.parentNode === p) && !isFieldPart, fieldGroupId: isFieldPart ? fieldGroupId : null });
       text += t;
-      if (fldType === 'end') insideField = false;
+      if (fldType === 'end') { insideField = false; fieldGroupId = null; }
     }
     return { text: text, infos: infos };
   }
@@ -195,24 +197,71 @@
     uEl.setAttributeNS(W_NS, 'w:val', 'single');
   }
 
+  // Kalau match [s,e) menyentuh run yang bagian dari field code (fldChar begin..end), field itu
+  // HANYA boleh diikutsertakan kalau SELURUH rentangnya tercakup penuh oleh [s,e) — field yang
+  // cuma tersentuh SEBAGIAN (match dimulai/berakhir DI TENGAH field) tetap ditolak demi
+  // keamanan, karena artinya batas match memang tidak sejalan dengan struktur field-nya.
+  function fieldGroupsFullyContained(infos, overlapping, s, e) {
+    var touchedGroups = {};
+    overlapping.forEach(function (inf) { if (inf.fieldGroupId != null) touchedGroups[inf.fieldGroupId] = true; });
+    return Object.keys(touchedGroups).every(function (gid) {
+      var groupRuns = infos.filter(function (inf) { return inf.fieldGroupId != null && String(inf.fieldGroupId) === gid; });
+      var gs = Math.min.apply(null, groupRuns.map(function (r) { return r.start; }));
+      var ge = Math.max.apply(null, groupRuns.map(function (r) { return r.end; }));
+      return gs >= s && ge <= e;
+    });
+  }
+
   // Membungkus rentang [s,e) teks paragraf dengan <w:hyperlink w:anchor="...">, memecah
   // hanya run yang tersentuh dan menjaga rPr asli tiap run — run lain tidak disentuh sama sekali.
   // colorHex (opsional) diterapkan HANYA ke run yang masuk hyperlink, bukan ke potongan
   // before/after di luar hyperlink — supaya cuma teks sitasinya yang berubah warna.
+  //
+  // Kalau match menyentuh field code Word (mis. cross-reference "Table [REF]" bawaan Word) DAN
+  // field itu tercakup PENUH oleh match (bukan kepotong sebagian) — run ASLI field itu (fldChar
+  // begin/instrText/separate/hasil/end) dipindah UTUH sebagai satu kesatuan ke dalam hyperlink,
+  // TIDAK direkonstruksi ulang lewat createRun (itu akan menghancurkan struktur field/instrText-
+  // nya). Hyperlink boleh membungkus field yang utuh (sama seperti Ctrl+K manual di Word pada
+  // teks yang mengandung field) — yang TIDAK boleh cuma memotong/menyisip DI TENGAH field-nya.
   function wrapWithHyperlink(xmlDoc, p, s, e, anchorName, colorHex) {
     var info = getRunInfos(p);
     var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
     if (overlapping.length === 0) return false;
-    // Jangan pernah menyisipkan w:hyperlink baru bersarang di dalam wrapper yang sudah ada
-    // (hyperlink lama, tracked-change, dst.) — itu OOXML tidak valid. Lewati saja match ini.
-    if (overlapping.some(function (inf) { return !inf.spliceable; })) return false;
+    // Perluas ke SEMUA run milik field group yang tersentuh — termasuk run zero-width (mis.
+    // fldChar end) yang posisinya PERSIS di ujung match, yang lolos dari deteksi overlap ketat
+    // di atas (start===end pas di batas e, gagal `< e`). Field WAJIB dipindah/diikutsertakan
+    // SEBAGAI SATU KESATUAN utuh — kalau run terakhirnya (fldChar end) ketinggalan, field jadi
+    // "belum ditutup" dan dokumennya tidak valid.
+    var touchedGroups = {};
+    overlapping.forEach(function (inf) { if (inf.fieldGroupId != null) touchedGroups[inf.fieldGroupId] = true; });
+    if (Object.keys(touchedGroups).length > 0) {
+      var expanded = info.infos.filter(function (inf) {
+        return inf.fieldGroupId != null && touchedGroups[inf.fieldGroupId] && overlapping.indexOf(inf) === -1;
+      });
+      if (expanded.length) {
+        overlapping = info.infos.filter(function (inf) {
+          return overlapping.indexOf(inf) !== -1 || (inf.fieldGroupId != null && touchedGroups[inf.fieldGroupId]);
+        });
+      }
+    }
+    // Run non-field yang bukan anak langsung <p> (mis. sudah di dalam hyperlink/tracked-change
+    // lain) tetap ditolak seperti biasa — cuma run field yang dapat pengecualian di atas.
+    if (overlapping.some(function (inf) { return inf.fieldGroupId == null && !inf.spliceable; })) return false;
+    if (!fieldGroupsFullyContained(info.infos, overlapping, s, e)) return false;
 
     var hl = xmlDoc.createElementNS(W_NS, 'w:hyperlink');
     hl.setAttributeNS(W_NS, 'w:anchor', anchorName);
     hl.setAttributeNS(W_NS, 'w:history', '1');
 
-    var beforeRun = null, afterRun = null, matchRuns = [];
+    var beforeRun = null, afterRun = null, movedNodes = [];
+    var handledGroups = {};
     overlapping.forEach(function (inf, idx) {
+      if (inf.fieldGroupId != null) {
+        // Bagian dari field yang sudah terverifikasi tercakup penuh -> pindahkan run ASLI-nya
+        // apa adanya (sekali per run; grup field bisa terdiri atas beberapa run berurutan).
+        movedNodes.push(inf.run);
+        return;
+      }
       var rPrList = inf.run.getElementsByTagName('w:rPr');
       var rPr = rPrList.length ? rPrList[0] : null;
       var localS = Math.max(s, inf.start) - inf.start;
@@ -224,17 +273,18 @@
       if (matchText) {
         var mRun = createRun(xmlDoc, rPr, matchText);
         applyColorToRun(xmlDoc, mRun, colorHex);
-        matchRuns.push(mRun);
+        movedNodes.push(mRun);
       }
       if (idx === overlapping.length - 1 && afterText) afterRun = createRun(xmlDoc, rPr, afterText);
     });
-    matchRuns.forEach(function (r) { hl.appendChild(r); });
+    movedNodes.forEach(function (r) { hl.appendChild(r); }); // appendChild otomatis "memindahkan" node yang masih terpasang di parent lama
 
     var insertBefore = overlapping[0].run;
-    if (beforeRun) p.insertBefore(beforeRun, insertBefore);
-    p.insertBefore(hl, insertBefore);
-    if (afterRun) p.insertBefore(afterRun, insertBefore);
-    overlapping.forEach(function (inf) { p.removeChild(inf.run); });
+    var parent = insertBefore.parentNode;
+    if (beforeRun) parent.insertBefore(beforeRun, insertBefore);
+    parent.insertBefore(hl, insertBefore);
+    if (afterRun) parent.insertBefore(afterRun, insertBefore);
+    overlapping.forEach(function (inf) { if (inf.run.parentNode === parent) parent.removeChild(inf.run); });
     return true;
   }
 
