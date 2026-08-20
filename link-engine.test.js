@@ -458,7 +458,39 @@ test('figure/table linking is OFF by default (no options.linkFiguresTables passe
   assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, 0);
 });
 
-console.log('\n=== Regression: bookmark NAME duplication when re-processing an already-linked document — invalid OOXML (bookmark names must be unique), causes Word to fail opening the file entirely ===');
+console.log('\n=== Regression: a citation whose visible text is the CACHED RESULT of a field (e.g. Mendeley\'s ADDIN CSL_CITATION — very common: fldChar begin -> instrText (huge JSON metadata) -> fldChar separate -> visible "(Author, Year)" -> fldChar end) was universally rejected as "unsupported run structure", even though the match never touches the field\'s structural markers at all ===');
+
+test('a citation entirely contained within a field\'s cached-result run (not touching fldChar/instrText markers at all) links normally, exactly like plain text — this is the single most common real-world citation pattern (Mendeley/EndNote keeping citations "live" via fields) and was completely broken before this fix', () => {
+  var fieldRun =
+    '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
+    '<w:r><w:instrText xml:space="preserve">ADDIN CSL_CITATION {"citationItems":[{"id":"x"}]}</w:instrText></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="separate"/></w:r>' +
+    '<w:r><w:t>(Hair et al., 2019)</w:t></w:r>' +
+    '<w:r><w:fldChar w:fldCharType="end"/></w:r>';
+  var paras = [
+    para(run('This is supported by ') + fieldRun + run(' regarding the PLS-SEM methodology used throughout.')),
+    para(run('REFERENCES')),
+    para(run('Hair, J. F., Ringle, C. M. (2019). When to use and how to report the results of PLS-SEM. Journal, 31(1), 2-24.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc, linkColor: '0000FF' });
+  assert.strictEqual(result.linked, 1);
+  assert.strictEqual(result.unmatched.length, 0);
+  // Field-nya sendiri (begin..end) HARUS tetap utuh tanpa terpotong hyperlink apa pun —
+  // hyperlink cuma boleh membungkus SEBAGIAN teks hasil cache-nya, tidak menyentuh markernya.
+  var serialized = new XMLSerializer().serializeToString(xmlDoc);
+  var beginIdx = serialized.indexOf('fldCharType="begin"');
+  var endIdx = serialized.indexOf('fldCharType="end"');
+  var between = serialized.slice(beginIdx, endIdx);
+  var hlOpenCount = (between.match(/<w:hyperlink/g) || []).length;
+  var hlCloseCount = (between.match(/<\/w:hyperlink>/g) || []).length;
+  assert.strictEqual(hlOpenCount, hlCloseCount, 'setiap <w:hyperlink> yang dibuka di antara begin..end harus tertutup DI DALAM rentang yang sama juga (field tidak boleh "menelan" separuh hyperlink)');
+  assert.ok(serialized.includes('w:color w:val="0000FF"'));
+});
+
+
+
 
 test('a citation bookmark whose bookmarkStart sits OUTSIDE the reference paragraph (as a body-level sibling right before it — a real pattern from Mendeley/Zotero-generated documents) but whose bookmarkEnd is inside it is correctly detected and reused, instead of creating a duplicate-named bookmark', () => {
   var paras = [

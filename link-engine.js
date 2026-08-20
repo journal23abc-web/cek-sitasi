@@ -138,20 +138,32 @@
     var runNodes = p.getElementsByTagName('w:r');
     var text = '', infos = [];
     var insideField = false;
+    var pastSeparate = false; // sudah lewat fldChar separate -> run w:t berikutnya adalah HASIL CACHE (teks biasa, aman displit), bukan bagian struktural field
     var fieldGroupId = null;
     var nextFieldGroupId = 0;
     for (var i = 0; i < runNodes.length; i++) {
       var r = runNodes[i];
       var fldCharList = r.getElementsByTagName('w:fldChar');
       var fldType = fldCharList.length ? fldCharList[0].getAttribute('w:fldCharType') : null;
-      if (fldType === 'begin') { insideField = true; fieldGroupId = nextFieldGroupId++; }
-      var isFieldPart = insideField;
+      var isInstrText = r.getElementsByTagName('w:instrText').length > 0;
+      if (fldType === 'begin') { insideField = true; pastSeparate = false; fieldGroupId = nextFieldGroupId++; }
+      // Penanda struktural (fldChar itu sendiri, ATAU instrText, ATAU masih di dalam field
+      // sebelum lewat "separate") -> TIDAK boleh dipecah/disisipi, itu bisa merusak field.
+      // Run w:t BIASA yang kebetulan ada di antara "separate" dan "end" (hasil cache field,
+      // mis. teks sitasi yang terlihat) BUKAN penanda struktural -> aman displit seperti biasa.
+      var isStructuralMarker = fldType != null || isInstrText || (insideField && !pastSeparate);
       var wts = r.getElementsByTagName('w:t');
       var t = '';
       for (var j = 0; j < wts.length; j++) t += wts[j].textContent;
-      infos.push({ run: r, start: text.length, end: text.length + t.length, text: t, spliceable: (r.parentNode === p) && !isFieldPart, fieldGroupId: isFieldPart ? fieldGroupId : null });
+      infos.push({
+        run: r, start: text.length, end: text.length + t.length, text: t,
+        spliceable: (r.parentNode === p) && !isStructuralMarker,
+        fieldGroupId: insideField ? fieldGroupId : null,
+        isStructuralMarker: isStructuralMarker,
+      });
       text += t;
-      if (fldType === 'end') { insideField = false; fieldGroupId = null; }
+      if (fldType === 'separate') pastSeparate = true;
+      if (fldType === 'end') { insideField = false; pastSeparate = false; fieldGroupId = null; }
     }
     return { text: text, infos: infos };
   }
@@ -197,13 +209,13 @@
     uEl.setAttributeNS(W_NS, 'w:val', 'single');
   }
 
-  // Kalau match [s,e) menyentuh run yang bagian dari field code (fldChar begin..end), field itu
-  // HANYA boleh diikutsertakan kalau SELURUH rentangnya tercakup penuh oleh [s,e) — field yang
-  // cuma tersentuh SEBAGIAN (match dimulai/berakhir DI TENGAH field) tetap ditolak demi
-  // keamanan, karena artinya batas match memang tidak sejalan dengan struktur field-nya.
+  // Kalau match [s,e) menyentuh PENANDA STRUKTURAL field (fldChar/instrText, bukan sekadar teks
+  // hasil cache-nya yang terlihat), penanda itu HANYA boleh diikutsertakan kalau SELURUH
+  // rentang field-nya tercakup penuh oleh [s,e) — field yang cuma tersentuh SEBAGIAN tetap
+  // ditolak demi keamanan, karena batas match tidak sejalan dengan struktur field-nya.
   function fieldGroupsFullyContained(infos, overlapping, s, e) {
     var touchedGroups = {};
-    overlapping.forEach(function (inf) { if (inf.fieldGroupId != null) touchedGroups[inf.fieldGroupId] = true; });
+    overlapping.forEach(function (inf) { if (inf.fieldGroupId != null && inf.isStructuralMarker) touchedGroups[inf.fieldGroupId] = true; });
     return Object.keys(touchedGroups).every(function (gid) {
       var groupRuns = infos.filter(function (inf) { return inf.fieldGroupId != null && String(inf.fieldGroupId) === gid; });
       var gs = Math.min.apply(null, groupRuns.map(function (r) { return r.start; }));
@@ -227,45 +239,50 @@
     var info = getRunInfos(p);
     var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
     if (overlapping.length === 0) return false;
-    // Perluas ke SEMUA run milik field group yang tersentuh — termasuk run zero-width (mis.
-    // fldChar end) yang posisinya PERSIS di ujung match, yang lolos dari deteksi overlap ketat
-    // di atas (start===end pas di batas e, gagal `< e`). Field WAJIB dipindah/diikutsertakan
-    // SEBAGAI SATU KESATUAN utuh — kalau run terakhirnya (fldChar end) ketinggalan, field jadi
-    // "belum ditutup" dan dokumennya tidak valid.
-    var touchedGroups = {};
-    overlapping.forEach(function (inf) { if (inf.fieldGroupId != null) touchedGroups[inf.fieldGroupId] = true; });
-    if (Object.keys(touchedGroups).length > 0) {
-      var expanded = info.infos.filter(function (inf) {
-        return inf.fieldGroupId != null && touchedGroups[inf.fieldGroupId] && overlapping.indexOf(inf) === -1;
+    // Perluasan & verifikasi HANYA diperlukan kalau match menyentuh PENANDA STRUKTURAL field
+    // (fldChar/instrText) — match yang cuma menyentuh teks hasil cache field (mis. teks sitasi
+    // yang terlihat dari field ADDIN CSL_CITATION Mendeley) sama sekali TIDAK perlu ini, karena
+    // teks hasil cache aman dipecah seperti run biasa mana pun (bukan bagian field yang rawan).
+    var verifiedGroups = {};
+    var touchedMarkerGroups = {};
+    overlapping.forEach(function (inf) { if (inf.fieldGroupId != null && inf.isStructuralMarker) touchedMarkerGroups[inf.fieldGroupId] = true; });
+    if (Object.keys(touchedMarkerGroups).length > 0) {
+      // Perluas ke SEMUA run milik grup yang tersentuh — termasuk run zero-width (mis. fldChar
+      // end) yang posisinya PERSIS di ujung match, yang lolos dari deteksi overlap ketat di
+      // atas (start===end pas di batas e, gagal `< e`). Field WAJIB diikutsertakan SEBAGAI SATU
+      // KESATUAN utuh — kalau run terakhirnya (fldChar end) ketinggalan, field jadi "belum
+      // ditutup" dan dokumennya tidak valid.
+      overlapping = info.infos.filter(function (inf) {
+        return (inf.end > s && inf.start < e) || (inf.fieldGroupId != null && touchedMarkerGroups[inf.fieldGroupId]);
       });
-      if (expanded.length) {
-        overlapping = info.infos.filter(function (inf) {
-          return overlapping.indexOf(inf) !== -1 || (inf.fieldGroupId != null && touchedGroups[inf.fieldGroupId]);
-        });
-      }
+      if (!fieldGroupsFullyContained(info.infos, overlapping, s, e)) return false;
+      verifiedGroups = touchedMarkerGroups;
     }
-    // Run non-field yang bukan anak langsung <p> (mis. sudah di dalam hyperlink/tracked-change
-    // lain) tetap ditolak seperti biasa — cuma run field yang dapat pengecualian di atas.
-    if (overlapping.some(function (inf) { return inf.fieldGroupId == null && !inf.spliceable; })) return false;
-    if (!fieldGroupsFullyContained(info.infos, overlapping, s, e)) return false;
+    // Run yang TIDAK spliceable ditolak, KECUALI penanda struktural dari grup yang baru saja
+    // terverifikasi aman tercakup penuh di atas.
+    if (overlapping.some(function (inf) {
+      if (inf.spliceable) return false;
+      if (inf.fieldGroupId != null && verifiedGroups[inf.fieldGroupId]) return false;
+      return true;
+    })) return false;
 
     var hl = xmlDoc.createElementNS(W_NS, 'w:hyperlink');
     hl.setAttributeNS(W_NS, 'w:anchor', anchorName);
     hl.setAttributeNS(W_NS, 'w:history', '1');
 
     var beforeRun = null, afterRun = null, movedNodes = [];
-    var handledGroups = {};
     overlapping.forEach(function (inf, idx) {
-      if (inf.fieldGroupId != null) {
-        // Bagian dari field yang sudah terverifikasi tercakup penuh -> pindahkan run ASLI-nya
-        // apa adanya (sekali per run; grup field bisa terdiri atas beberapa run berurutan).
-        // Warna TETAP diterapkan seperti run biasa — run fldChar/instrText tidak py teks
-        // terlihat jadi ini tidak berefek apa-apa untuknya, tapi run HASIL CACHE field (mis.
-        // angka "1" yang terlihat) memang perlu diwarnai sama seperti teks tautan lainnya.
+      if (inf.fieldGroupId != null && verifiedGroups[inf.fieldGroupId] && inf.isStructuralMarker) {
+        // Penanda struktural dari grup terverifikasi -> pindahkan run ASLI-nya apa adanya
+        // (zero-width, tidak punya teks untuk dipecah before/after). Warna tetap diterapkan —
+        // tidak berefek apa-apa untuk run tanpa teks terlihat, tapi aman & konsisten.
         applyColorToRun(xmlDoc, inf.run, colorHex);
         movedNodes.push(inf.run);
         return;
       }
+      // Run spliceable NORMAL — baik teks biasa mana pun MAUPUN teks hasil cache field (yang
+      // ada di antara fldChar separate dan end) — diproses sama persis: pecah jadi
+      // before/match/after berdasarkan rPr aslinya.
       var rPrList = inf.run.getElementsByTagName('w:rPr');
       var rPr = rPrList.length ? rPrList[0] : null;
       var localS = Math.max(s, inf.start) - inf.start;
