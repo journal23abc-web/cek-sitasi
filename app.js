@@ -65,6 +65,7 @@
   var scopusDatabase = null; // dibangun sekali saat file JSON dimuat, dipakai ulang lintas validasi
   var lastScopusResults = [];
   var dismissedIssueKeys = new Set(); // fingerprint kunci -> diabaikan pengguna, dikosongkan tiap Validasi baru
+  var currentLang = 'id'; // 'id' atau 'en' — cuma memengaruhi TAMPILAN (judul/deskripsi/koreksi), bukan logika deteksi
 
   // Kunci "sidik jari" untuk satu masalah — dipakai supaya tombol "Abaikan" tetap konsisten
   // menyembunyikan masalah yang SAMA di semua tempat ia muncul (tab Perlu Diperbaiki/Saran/Semua,
@@ -799,24 +800,33 @@
     var visible = issues.filter(function(issue) { return !dismissedIssueKeys.has(issueKey(issue)); });
     if (visible.length === 0) {
       var hiddenCount = issues.length - visible.length;
-      el.innerHTML = '<div class="no-issues">✅ Tidak ada masalah di kategori ini.' + (hiddenCount > 0 ? ' <span style="color:var(--text-faint);">(' + hiddenCount + ' diabaikan)</span>' : '') + '</div>';
+      var emptyMsg = currentLang === 'en' ? '✅ No issues in this category.' : '✅ Tidak ada masalah di kategori ini.';
+      var hiddenMsg = currentLang === 'en' ? ' (' + hiddenCount + ' ignored)' : ' (' + hiddenCount + ' diabaikan)';
+      el.innerHTML = '<div class="no-issues">' + emptyMsg + (hiddenCount > 0 ? ' <span style="color:var(--text-faint);">' + hiddenMsg + '</span>' : '') + '</div>';
       return;
     }
     var html = '';
     visible.forEach(function(issue, idx) {
-      var sc = issue.severity || 'error';
-      var sl = sc === 'error' ? 'PERLU DIPERBAIKI' : sc === 'warning' ? 'WARNING' : 'SARAN';
-      var key = issueKey(issue);
+      var key = issueKey(issue); // fingerprint dari teks ASLI (Indonesia), stabil lintas bahasa
+      var displayIssue = (currentLang === 'en' && window.I18nTranslate) ? window.I18nTranslate.translateIssue(issue, 'en') : issue;
+      var sc = displayIssue.severity || 'error';
+      var sl = sc === 'error' ? (currentLang === 'en' ? 'NEEDS FIXING' : 'PERLU DIPERBAIKI') : sc === 'warning' ? 'WARNING' : (currentLang === 'en' ? 'SUGGESTION' : 'SARAN');
       html += '<div class="issue-item ' + sc + '">';
-      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(issue.title) + '</span>';
-      if (issue.location) {
-        html += '<button class="loc-badge" data-loc-source="' + issue.location.source + '" data-loc-line="' + issue.location.line + '" title="Klik untuk lompat ke baris ini">📍 Baris ' + issue.location.line + ' (' + (issue.location.source === 'reference' ? 'referensi' : 'artikel') + ')</button>';
+      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span><span class="issue-title">' + esc(displayIssue.title) + '</span>';
+      if (displayIssue.location) {
+        var locLabel = currentLang === 'en' ? 'Click to jump to this line' : 'Klik untuk lompat ke baris ini';
+        var srcLabel = currentLang === 'en' ? (displayIssue.location.source === 'reference' ? 'reference' : 'article') : (displayIssue.location.source === 'reference' ? 'referensi' : 'artikel');
+        var lineWord = currentLang === 'en' ? 'Line' : 'Baris';
+        html += '<button class="loc-badge" data-loc-source="' + displayIssue.location.source + '" data-loc-line="' + displayIssue.location.line + '" title="' + locLabel + '">📍 ' + lineWord + ' ' + displayIssue.location.line + ' (' + srcLabel + ')</button>';
       }
-      html += '<button class="issue-dismiss" data-issue-key="' + escAttr(key) + '" title="Sembunyikan masalah ini dari laporan — untuk kesalahan pengecekan/false positive">✕ Abaikan</button>';
+      var dismissLabel = currentLang === 'en' ? 'Hide this issue from the report — for checker mistakes/false positives' : 'Sembunyikan masalah ini dari laporan — untuk kesalahan pengecekan/false positive';
+      var dismissText = currentLang === 'en' ? '✕ Ignore' : '✕ Abaikan';
+      html += '<button class="issue-dismiss" data-issue-key="' + escAttr(key) + '" title="' + dismissLabel + '">' + dismissText + '</button>';
       html += '</div>';
-      html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
-      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
-      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      html += '<div class="issue-desc">' + esc(displayIssue.description) + '</div>';
+      var copyLabel = currentLang === 'en' ? 'Copy to clipboard' : 'Salin ke clipboard';
+      if (displayIssue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(displayIssue.code) + '">' + esc(displayIssue.code) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
+      if (displayIssue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(displayIssue.correction) + '">✓ ' + esc(displayIssue.correction) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
       html += '</div>';
     });
     el.innerHTML = html;
@@ -895,29 +905,42 @@
   function renderDoiList(doiIssues) {
     var el = document.getElementById('list-doi');
     if (doiIssues.length === 0) {
-      el.innerHTML = '<div class="no-issues">🔗 Belum ada data DOI (sedang diproses atau tidak ada referensi).</div>';
+      var emptyMsg = currentLang === 'en' ? '🔗 No DOI data yet (still processing, or no references).' : '🔗 Belum ada data DOI (sedang diproses atau tidak ada referensi).';
+      el.innerHTML = '<div class="no-issues">' + emptyMsg + '</div>';
       return;
     }
     var html = '';
     doiIssues.forEach(function(issue, idx) {
-      var sc = issue.severity;
-      var sl = sc === 'error' ? 'FIKTIF' : sc === 'warning' ? (issue.status==='mismatch'?'MISMATCH':'UNVERIFIED') : sc === 'success' ? 'VALID' : 'INFO';
-      var instTag = issue.ref && issue.ref.isInstitutional ? '<span class="type-tag inst">INSTITUSI</span>' : '';
+      var displayIssue = (currentLang === 'en' && window.I18nTranslate) ? window.I18nTranslate.translateIssue(issue, 'en') : issue;
+      var sc = displayIssue.severity;
+      var sl = sc === 'error' ? (currentLang === 'en' ? 'FABRICATED' : 'FIKTIF') : sc === 'warning' ? (issue.status==='mismatch'?'MISMATCH':(currentLang === 'en' ? 'UNVERIFIED' : 'UNVERIFIED')) : sc === 'success' ? 'VALID' : 'INFO';
+      var instTag = issue.ref && issue.ref.isInstitutional ? '<span class="type-tag inst">' + (currentLang === 'en' ? 'INSTITUTION' : 'INSTITUSI') + '</span>' : '';
       html += '<div class="issue-item ' + (sc==='success'?'suggestion':sc) + '">';
-      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span>' + instTag + '<span class="issue-title">' + esc(issue.title) + '</span></div>';
-      html += '<div class="issue-desc">' + esc(issue.description) + '</div>';
-      if (issue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(issue.code) + '">' + esc(issue.code) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
-      if (issue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(issue.correction) + '">✓ ' + esc(issue.correction) + '<button class="copy-inline" aria-label="Salin ke clipboard">📋</button></div>';
+      html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span>' + instTag + '<span class="issue-title">' + esc(displayIssue.title) + '</span></div>';
+      html += '<div class="issue-desc">' + esc(displayIssue.description) + '</div>';
+      var copyLabel = currentLang === 'en' ? 'Copy to clipboard' : 'Salin ke clipboard';
+      if (displayIssue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(displayIssue.code) + '">' + esc(displayIssue.code) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
+      if (displayIssue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(displayIssue.correction) + '">✓ ' + esc(displayIssue.correction) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
       if (issue.metadata) {
         var m = issue.metadata;
+        var refLabel = currentLang === 'en' ? 'Your ref' : 'Ref Anda';
+        var titleLabel = currentLang === 'en' ? 'Title' : 'Judul';
+        var authorLabel = currentLang === 'en' ? 'Author' : 'Penulis';
+        var yearLabel = currentLang === 'en' ? 'Year' : 'Tahun';
         html += '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10.5px;color:var(--text-dim);margin-top:8px;line-height:1.8;">';
-        html += 'Ref Anda — Judul: ' + esc(m.ref.title||'-') + ' | Penulis: ' + esc(m.ref.authors||'-') + ' | Tahun: ' + esc(m.ref.year||'-') + '<br>';
-        html += 'CrossRef — Judul: ' + esc(m.crossref.title||'-') + ' | Penulis: ' + esc(m.crossref.authors||'-') + ' | Tahun: ' + esc(m.crossref.year||'-');
+        html += refLabel + ' — ' + titleLabel + ': ' + esc(m.ref.title||'-') + ' | ' + authorLabel + ': ' + esc(m.ref.authors||'-') + ' | ' + yearLabel + ': ' + esc(m.ref.year||'-') + '<br>';
+        html += 'CrossRef — ' + titleLabel + ': ' + esc(m.crossref.title||'-') + ' | ' + authorLabel + ': ' + esc(m.crossref.authors||'-') + ' | ' + yearLabel + ': ' + esc(m.crossref.year||'-');
         html += '</div>';
       }
       if ((issue.status === 'no_doi' || issue.status === 'fake') && issue.ref) {
-        if (issue.status === 'fake') html += '<p style="font-size:11px;color:var(--text-dim);margin:6px 0 0;">DOI "' + esc(issue.doi) + '" mungkin salah ketik atau memang tidak ada — coba cari DOI yang benar berdasarkan judul/penulis/tahun:</p>';
-        html += '<button class="doi-search-btn" data-doi-search-idx="' + idx + '" style="margin-top:8px;">🔍 Cari DOI' + (issue.status === 'fake' ? ' yang Benar' : '') + '</button>';
+        if (issue.status === 'fake') {
+          var fakeNote = currentLang === 'en'
+            ? 'DOI "' + esc(issue.doi) + '" may be a typo or genuinely missing — try finding the correct DOI based on title/author/year:'
+            : 'DOI "' + esc(issue.doi) + '" mungkin salah ketik atau memang tidak ada — coba cari DOI yang benar berdasarkan judul/penulis/tahun:';
+          html += '<p style="font-size:11px;color:var(--text-dim);margin:6px 0 0;">' + fakeNote + '</p>';
+        }
+        var searchLabel = currentLang === 'en' ? '🔍 Find' + (issue.status === 'fake' ? ' Correct DOI' : ' DOI') : '🔍 Cari DOI' + (issue.status === 'fake' ? ' yang Benar' : '');
+        html += '<button class="doi-search-btn" data-doi-search-idx="' + idx + '" style="margin-top:8px;">' + searchLabel + '</button>';
         html += '<div class="doi-search-results" id="doiSearchResults' + idx + '"></div>';
       }
       html += '</div>';
@@ -978,36 +1001,61 @@
     var el = document.getElementById('list-scopus');
     if (!el) return;
     if (!scopusDatabase) {
-      el.innerHTML = '<div class="no-issues">🎓 Data Scopus Source List belum tersedia — taruh <code>scopus_sources.json</code> di repo (termuat otomatis), atau unggah manual di panel "Cek Status Scopus" di atas. Begitu tersedia, pengecekan berjalan otomatis.</div>';
+      var noDbMsg = currentLang === 'en'
+        ? '🎓 Scopus Source List data not available yet — place <code>scopus_sources.json</code> in the repo (loads automatically), or upload it manually in the "Check Scopus Status" panel above. Once available, checking runs automatically.'
+        : '🎓 Data Scopus Source List belum tersedia — taruh <code>scopus_sources.json</code> di repo (termuat otomatis), atau unggah manual di panel "Cek Status Scopus" di atas. Begitu tersedia, pengecekan berjalan otomatis.';
+      el.innerHTML = '<div class="no-issues">' + noDbMsg + '</div>';
       return;
     }
     if (!scopusResults || scopusResults.length === 0) {
-      el.innerHTML = '<div class="no-issues">🎓 Data sudah tersedia — jalankan Validasi Sitasi di atas, pengecekan Scopus akan berjalan otomatis begitu selesai.</div>';
+      var noResultsMsg = currentLang === 'en'
+        ? '🎓 Data is ready — run Citation Validation above, Scopus checking will run automatically once it finishes.'
+        : '🎓 Data sudah tersedia — jalankan Validasi Sitasi di atas, pengecekan Scopus akan berjalan otomatis begitu selesai.';
+      el.innerHTML = '<div class="no-issues">' + noResultsMsg + '</div>';
       return;
     }
+    var SCOPUS_BADGE_EN = { SCOPUS: 'SCOPUS', PROBABLE_SCOPUS: 'PROBABLE SCOPUS', SCOPUS_SOURCE_ONLY: 'SOURCE ONLY', UNKNOWN: 'UNKNOWN' };
     var html = '';
     scopusResults.forEach(function(r) {
       var meta = SCOPUS_STATUS_LABEL[r.status] || SCOPUS_STATUS_LABEL.UNKNOWN;
+      var badgeText = currentLang === 'en' ? (SCOPUS_BADGE_EN[r.status] || r.status) : meta.badge;
       var ref = r.ref;
       var label = (ref.firstAuthor || '-') + (ref.year ? ' (' + ref.year + ')' : '');
       var explain;
       var discWarningHtml = '';
-      if (r.status === 'SCOPUS') explain = r.method === 'DOI_EXACT' ? 'Dokumen ditemukan persis lewat DOI.' : 'Dokumen ditemukan lewat kecocokan metadata (judul, penulis, jurnal, tahun) yang sangat tinggi (' + Math.round(r.confidence * 100) + '%).';
-      else if (r.status === 'PROBABLE_SCOPUS') explain = 'Metadata cukup mirip (' + Math.round(r.confidence * 100) + '%) dengan salah satu dokumen di database, tapi belum cukup pasti untuk diklaim tertemukan persis.';
-      else if (r.status === 'SCOPUS_SOURCE_ONLY') {
-        explain = 'Jurnal/sumbernya (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') terindeks Scopus, tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat.';
-        if (r.discontinuedWarning) {
-          var related = r.matchedSource && r.matchedSource.relatedTitle;
-          discWarningHtml = '<div class="issue-item warning" style="margin-top:8px;padding:10px 12px;">'
-            + '<b>⚠️ Perhatian: jurnal ini ditandai "Discontinued by Scopus"</b> — beda dari sekadar tidak aktif/ganti nama. Scopus biasanya menghentikan cakupan sebuah jurnal karena masalah kualitas/integritas terbitan, bukan cuma administratif. Cakupan tahun yang tercantum tetap data historis yang sah, tapi ada baiknya diperiksa lebih lanjut kredibilitas jurnal ini untuk tahun tersebut.'
-            + (related ? '<br><span style="color:var(--text-faint);">Nama terkait: ' + esc(related) + '</span>' : '')
-            + '</div>';
+      if (currentLang === 'en') {
+        if (r.status === 'SCOPUS') explain = r.method === 'DOI_EXACT' ? 'Document found via an exact DOI match.' : 'Document found via a very high metadata match (title, author, journal, year) — ' + Math.round(r.confidence * 100) + '%.';
+        else if (r.status === 'PROBABLE_SCOPUS') explain = 'Metadata is fairly similar (' + Math.round(r.confidence * 100) + '%) to one document in the database, but not confident enough to claim an exact match.';
+        else if (r.status === 'SCOPUS_SOURCE_ONLY') {
+          explain = 'The journal/source (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') is indexed in Scopus, but this specific document has not been verified in the loaded database.';
+          if (r.discontinuedWarning) {
+            var related2 = r.matchedSource && r.matchedSource.relatedTitle;
+            discWarningHtml = '<div class="issue-item warning" style="margin-top:8px;padding:10px 12px;">'
+              + '<b>⚠️ Note: this journal is flagged "Discontinued by Scopus"</b> — different from simply being inactive/renamed. Scopus usually discontinues coverage of a journal due to quality/integrity concerns with the publication, not just administrative reasons. The listed coverage years remain legitimate historical data, but it\u2019s worth further checking this journal\u2019s credibility for that year.'
+              + (related2 ? '<br><span style="color:var(--text-faint);">Related name: ' + esc(related2) + '</span>' : '')
+              + '</div>';
+          }
         }
+        else if (r.method === 'JOURNAL_FOUND_YEAR_NOT_COVERED') explain = 'The journal is in the Scopus Source List, but the year ' + esc(ref.year || '-') + ' falls outside this journal\u2019s Scopus coverage range (coverage: ' + esc((r.matchedSource && r.matchedSource.coverage) || '-') + ').';
+        else explain = 'Not enough evidence found yet — this reference may genuinely not be in Scopus, or the loaded database simply doesn\u2019t cover it.';
+      } else {
+        if (r.status === 'SCOPUS') explain = r.method === 'DOI_EXACT' ? 'Dokumen ditemukan persis lewat DOI.' : 'Dokumen ditemukan lewat kecocokan metadata (judul, penulis, jurnal, tahun) yang sangat tinggi (' + Math.round(r.confidence * 100) + '%).';
+        else if (r.status === 'PROBABLE_SCOPUS') explain = 'Metadata cukup mirip (' + Math.round(r.confidence * 100) + '%) dengan salah satu dokumen di database, tapi belum cukup pasti untuk diklaim tertemukan persis.';
+        else if (r.status === 'SCOPUS_SOURCE_ONLY') {
+          explain = 'Jurnal/sumbernya (' + esc((r.matchedSource && r.matchedSource.title) || ref.journal || '-') + ') terindeks Scopus, tetapi dokumen spesifik ini belum terverifikasi ada di database yang dimuat.';
+          if (r.discontinuedWarning) {
+            var related = r.matchedSource && r.matchedSource.relatedTitle;
+            discWarningHtml = '<div class="issue-item warning" style="margin-top:8px;padding:10px 12px;">'
+              + '<b>⚠️ Perhatian: jurnal ini ditandai "Discontinued by Scopus"</b> — beda dari sekadar tidak aktif/ganti nama. Scopus biasanya menghentikan cakupan sebuah jurnal karena masalah kualitas/integritas terbitan, bukan cuma administratif. Cakupan tahun yang tercantum tetap data historis yang sah, tapi ada baiknya diperiksa lebih lanjut kredibilitas jurnal ini untuk tahun tersebut.'
+              + (related ? '<br><span style="color:var(--text-faint);">Nama terkait: ' + esc(related) + '</span>' : '')
+              + '</div>';
+          }
+        }
+        else if (r.method === 'JOURNAL_FOUND_YEAR_NOT_COVERED') explain = 'Jurnalnya ada di Source List Scopus, tetapi tahun ' + esc(ref.year || '-') + ' berada di luar rentang cakupan Scopus untuk jurnal ini (cakupan: ' + esc((r.matchedSource && r.matchedSource.coverage) || '-') + ').';
+        else explain = 'Belum ditemukan bukti yang cukup — bisa jadi referensi ini memang bukan Scopus, atau database yang dimuat belum mencakupnya.';
       }
-      else if (r.method === 'JOURNAL_FOUND_YEAR_NOT_COVERED') explain = 'Jurnalnya ada di Source List Scopus, tetapi tahun ' + esc(ref.year || '-') + ' berada di luar rentang cakupan Scopus untuk jurnal ini (cakupan: ' + esc((r.matchedSource && r.matchedSource.coverage) || '-') + ').';
-      else explain = 'Belum ditemukan bukti yang cukup — bisa jadi referensi ini memang bukan Scopus, atau database yang dimuat belum mencakupnya.';
       html += '<div class="issue-item ' + meta.cls + '">';
-      html += '<div class="issue-header"><span class="issue-sev">' + meta.icon + ' ' + meta.badge + '</span><span class="issue-title">' + esc(label) + '</span></div>';
+      html += '<div class="issue-header"><span class="issue-sev">' + meta.icon + ' ' + badgeText + '</span><span class="issue-title">' + esc(label) + '</span></div>';
       html += '<div class="issue-desc">' + explain + '</div>';
       html += '<div class="code-block" style="cursor:default;">' + esc((ref.raw || '').slice(0, 150)) + '</div>';
       html += discWarningHtml;
@@ -1135,6 +1183,18 @@
     });
 
     autoLoadScopusData();
+  }
+
+  // ---------- Toggle bahasa (Indonesia/English) ----------
+  var langToggleBtn = document.getElementById('langToggle');
+  if (langToggleBtn) {
+    langToggleBtn.addEventListener('click', function() {
+      currentLang = currentLang === 'id' ? 'en' : 'id';
+      langToggleBtn.textContent = currentLang === 'id' ? '🌐 EN' : '🌐 ID';
+      refreshAllIssueViews();
+      renderDoiList(lastDoiIssues);
+      renderScopusList(lastScopusResults);
+    });
   }
 
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
