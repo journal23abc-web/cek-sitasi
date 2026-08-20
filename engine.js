@@ -488,6 +488,16 @@ function parseParentheticalAuthorDate(content) {
   return parts;
 }
 
+var LEADING_PARTICLE_RE = /^(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+/i;
+
+function looksLikePlausibleAuthorStart(authorPart) {
+  var stripped = authorPart.replace(LEADING_PARTICLE_RE, '');
+  // Wajib diawali HURUF (bukan angka, bukan tanda baca) — menyaring teks prosa biasa yang
+  // kebetulan diikuti tahun berkoma, mis. "(28 July 2026)" (diawali angka "28") atau "(through
+  // July 2026, ...)" (diawali kata sambung huruf kecil "through", bukan nama).
+  return /^[\p{Lu}\p{Lo}]/u.test(stripped);
+}
+
 function parseSingleAuthorDate(text) {
   text = text.trim();
   if (!text) return null;
@@ -497,6 +507,7 @@ function parseSingleAuthorDate(text) {
   var tail = yearMatch[2] ? yearMatch[2].trim() : null;
   var authorPart = text.substring(0, yearMatch.index).replace(/,\s*$/, '').trim();
   if (!authorPart) return null;
+  if (!looksLikePlausibleAuthorStart(authorPart)) return null;
 
   // Detect a grouped multi-year citation for the SAME author, e.g. "APA, 2023a, 2023b"
   // or "Smith, 2019, 2021" — several works by one author cited together — instead of
@@ -979,6 +990,11 @@ function extractBibliographicFields(raw, title) {
   // "22(4), e250060" — vol(issue), single "e"-prefixed article ID (no page range) — common in
   // newer online-first journals that keep issue numbers but no longer use page ranges.
   var volIssueArticleId = !volIssuePages ? raw.match(/\b(\d{1,4})\s*\(\s*([\w-]+)\s*\)\s*,\s*(e\d{3,})\b/i) : null;
+  // "10(6), Article 100820" / "34, Article 101885" / "11, Article e00126" — explicit word
+  // "Article" followed by the article number (with or without its own "e" prefix), with or
+  // without an issue number in parens. Very common APA7 article-number citation style, distinct
+  // from the bare "eNNNNNN" pattern above (no literal word "Article" there).
+  var volIssueArticleWord = (!volIssuePages && !volIssueArticleId) ? raw.match(/\b(\d{1,4})\s*(?:\(\s*([\w-]+)\s*\))?\s*,\s*Article\s+([A-Za-z]?\d+)\b/i) : null;
   if (volIssuePages) {
     result.volume = volIssuePages[1];
     result.issue = volIssuePages[2];
@@ -987,6 +1003,10 @@ function extractBibliographicFields(raw, title) {
     result.volume = volIssueArticleId[1];
     result.issue = volIssueArticleId[2];
     result.articleNumber = volIssueArticleId[3];
+  } else if (volIssueArticleWord) {
+    result.volume = volIssueArticleWord[1];
+    result.issue = volIssueArticleWord[2] || null;
+    result.articleNumber = volIssueArticleWord[3];
   } else {
     // "vol. 205, no. 3, pp. 45-67" — IEEE-ish
     var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*no\.?\s*(\d+))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
