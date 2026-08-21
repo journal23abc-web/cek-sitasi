@@ -732,6 +732,30 @@ test('a reference DOI URL ending in a parenthesized issue number (e.g. Virtual E
   assert.strictEqual(rel.getAttribute('Target'), 'https://doi.org/10.34021/ve.2023.06.03(1)');
 });
 
+console.log('\n=== Regression: a short table cell/label reading exactly "References" earlier in the document (e.g. a bibliometric corpus-statistics table showing a citation-count stat) was wrongly picked as the bibliography heading, truncating the whole article body and mis-parsing hundreds of unrelated paragraphs/table rows as bibliography entries ===');
+
+test('when a short "References" line appears early (a corpus-statistics table cell/label, not followed by anything reference-list-like), the LAST "References" heading — the genuine bibliography, near the real end of the document with substantial content after it — is correctly used instead', () => {
+  var paras = [
+    para(run('Annual Growth Rate (%)')),
+    para(run('22.02')),
+    para(run('References')), // label tabel statistik korpus, BUKAN heading bibliografi asli
+    para(run('94,688')),
+    para(run('Document Contents')),
+    para(run('INTRODUCTION')),
+    para(run('Some article body text discussing Smith (2020) and the topic in sufficient detail for the parser to work correctly, spanning many sentences.')),
+    para(run('More discussion involving Jones (2021) and further analysis of the literature in this specific research area overall.')),
+    para(run('References')), // heading bibliografi ASLI
+    para(run('Smith, J. (2020). Title A. Journal, 1(1), 1-10.')),
+    para(run('Jones, K. (2021). Title B. Journal, 2(2), 5-15.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.refCount, 2, 'harus baca TEPAT 2 referensi asli, bukan mencoba mem-parse baris tabel statistik sebagai referensi juga');
+  assert.strictEqual(result.linked, 2, 'kedua sitasi asli (Smith, Jones) di badan artikel harus tertaut — sebelumnya badan artikel yang terpotong terlalu awal membuat sitasi ini tidak pernah dicari sama sekali');
+  assert.strictEqual(result.refParseFailed.length, 0, 'tidak boleh ada entri refParseFailed sampah dari baris tabel statistik ("94,688", "Document Contents", dst.)');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

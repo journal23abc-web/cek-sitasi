@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bandingkan Revisi — Cek Sitasi</title>
+<script>
+(function(){
+  try {
+    var saved = localStorage.getItem('citationValidatorTheme');
+    var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="shared.css?v=3">
+<style>
+  .wrap{ max-width:900px; margin:0 auto; position:relative; z-index:1; }
+  a{ color:var(--cyan); }
+  header{ display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:26px; }
+  h1{ font-family:var(--font-display); font-weight:700; font-size:26px; margin:0; letter-spacing:-0.01em; }
+  .back-link{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.06em; color:var(--text-dim); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:9px 16px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all .15s ease; }
+  .back-link:hover{ border-color:var(--cyan); color:var(--cyan); }
+
+  .panel{ background:var(--panel); border:1px solid var(--hairline); border-radius:12px; padding:26px; margin-bottom:20px; }
+  .field-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
+  .step-num{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--cyan); color:var(--void); font-family:var(--font-mono); font-size:11px; font-weight:700; margin-right:8px; flex-shrink:0; }
+
+  .compare-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:640px){ .compare-grid{ grid-template-columns:1fr; } }
+  .compare-slot .slot-label{ font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; color:var(--text-dim); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
+  .compare-slot.before .slot-label{ color:var(--red); }
+  .compare-slot.after .slot-label{ color:var(--green); }
+
+  .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:24px 16px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone .icon{ font-size:26px; margin-bottom:8px; }
+  .dropzone .main{ font-size:12.5px; color:var(--text); margin-bottom:4px; }
+  .dropzone .sub{ font-family:var(--font-mono); font-size:10px; color:var(--text-faint); }
+  .file-chip{ display:none; align-items:center; gap:10px; margin-top:10px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:9px 12px; font-family:var(--font-mono); font-size:11.5px; }
+  .file-chip.show{ display:flex; }
+  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
+  .file-chip .x:hover{ color:var(--red); }
+
+  button.primary{ font-family:var(--font-mono); font-size:12.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--void); background:linear-gradient(135deg, var(--cyan), var(--violet)); border:none; border-radius:6px; padding:13px 26px; cursor:pointer; transition:box-shadow .2s ease, transform .1s ease; }
+  button.primary:hover{ box-shadow:0 0 22px rgba(79,227,232,.35); }
+  button.primary:active{ transform:translateY(1px); }
+  button.primary:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+
+  .status{ font-family:var(--font-mono); font-size:11.5px; margin-top:12px; line-height:1.7; }
+  .status.info{ color:var(--text-dim); } .status.ok{ color:var(--green); } .status.err{ color:var(--red); } .status.warn{ color:var(--amber); }
+
+  .spinner{ width:16px; height:16px; border:2px solid var(--hairline); border-top-color:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; display:inline-block; vertical-align:-3px; margin-right:6px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .results{ display:none; }
+  .results.active{ display:block; }
+  .summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:10px; margin-bottom:18px; }
+  .sum-card{ background:var(--panel); border:1px solid var(--hairline); border-radius:8px; padding:14px; text-align:center; }
+  .sum-card .n{ font-family:var(--font-display); font-size:22px; font-weight:700; }
+  .sum-card .l{ font-family:var(--font-mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:2px; }
+  .sum-card.add .n{ color:var(--green); } .sum-card.del .n{ color:var(--red); } .sum-card.mod .n{ color:var(--amber); } .sum-card.same .n{ color:var(--text-dim); }
+
+  .diff-legend{ display:flex; gap:16px; flex-wrap:wrap; font-family:var(--font-mono); font-size:11px; color:var(--text-dim); margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid var(--hairline); }
+  .diff-legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .diff-legend .dot{ width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .diff-legend .dot.add{ background:var(--green); } .diff-legend .dot.del{ background:var(--red); } .diff-legend .dot.mod{ background:var(--amber); }
+
+  .disclaimer{ font-size:11px; color:var(--text-faint); margin-top:10px; line-height:1.6; }
+  .toast{ position:fixed; bottom:26px; left:50%; transform:translateX(-50%) translateY(100px); background:var(--panel-raised); border:1px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:var(--font-mono); font-size:12px; z-index:1000; transition:transform .3s ease; }
+  .toast.show{ transform:translateX(-50%) translateY(0); }
+
+  /* Gaya khusus diff (di dalam .report-page — perlu override warna terang, sama seperti sitasi
+     bermasalah di laporan validasi, karena .report-page selalu putih untuk kesiapan cetak) */
+  .report-page .diff-para{ margin-bottom:10px; }
+  .report-page .diff-para.del{ background:#ffecec; border-left:3px solid #C43A50; padding:8px 10px; text-decoration:line-through; color:#7a0000; border-radius:0 4px 4px 0; }
+  .report-page .diff-para.add{ background:#e6f9ee; border-left:3px solid #157A52; padding:8px 10px; color:#0a5c26; border-radius:0 4px 4px 0; }
+  .report-page .diff-para.mod{ background:#fffaf0; border-left:3px solid #966006; padding:8px 10px; border-radius:0 4px 4px 0; }
+  .report-page .diff-para del{ background:#ffc9c9; color:#7a0000; text-decoration:line-through; padding:0 2px; border-radius:2px; }
+  .report-page .diff-para ins{ background:#c8f7d6; color:#0a5c26; text-decoration:none; padding:0 2px; border-radius:2px; }
+  .report-page .diff-tag{ font-family:var(--font-mono); font-size:9px; text-transform:uppercase; letter-spacing:.06em; font-weight:700; margin-right:8px; }
+  .report-page .diff-para.del .diff-tag{ color:#C43A50; }
+  .report-page .diff-para.add .diff-tag{ color:#157A52; }
+  .report-page .diff-para.mod .diff-tag{ color:#966006; }
+</style>
+</head>
+<body>
+<div class="grid-bg" aria-hidden="true"></div>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="eyebrow">Bandingkan Naskah</div>
+      <h1>Bandingkan Revisi Naskah</h1>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
+      <a href="index.html" class="back-link">🏠 Beranda</a>
+    </div>
+  </header>
+
+  <div class="panel">
+    <div class="field-label"><span class="step-num">1</span>Unggah Kedua Versi Naskah</div>
+    <p style="font-size:12px;color:var(--text-dim);line-height:1.7;margin:0 0 16px;">
+      Bandingkan versi <b>sebelum</b> dan <b>sesudah</b> revisi — sistem menandai paragraf yang ditambah, dihapus, dan diedit (lengkap dengan perubahan per-kata di dalamnya), mirip fitur "Compare" di Word. Diproses sepenuhnya di browser Anda, tidak diunggah ke mana pun.
+    </p>
+    <div class="compare-grid">
+      <div class="compare-slot before">
+        <div class="slot-label">🔴 Versi Sebelum Revisi</div>
+        <div class="dropzone" id="dropzoneBefore" tabindex="0" role="button" aria-label="Unggah file versi sebelum revisi">
+          <div class="icon">📄</div>
+          <div class="main">Seret file .docx atau klik untuk pilih</div>
+          <div class="sub">.DOCX SAJA · MAKS 25MB</div>
+        </div>
+        <input type="file" id="fileInputBefore" accept=".docx" style="display:none;">
+        <div class="file-chip" id="fileChipBefore">
+          <span>📄</span><span id="fileNameBefore"></span><span id="fileSizeBefore" style="color:var(--text-faint);"></span>
+          <span class="x" id="fileRemoveBefore" title="Hapus">✕</span>
+        </div>
+      </div>
+      <div class="compare-slot after">
+        <div class="slot-label">🟢 Versi Sesudah Revisi</div>
+        <div class="dropzone" id="dropzoneAfter" tabindex="0" role="button" aria-label="Unggah file versi sesudah revisi">
+          <div class="icon">📄</div>
+          <div class="main">Seret file .docx atau klik untuk pilih</div>
+          <div class="sub">.DOCX SAJA · MAKS 25MB</div>
+        </div>
+        <input type="file" id="fileInputAfter" accept=".docx" style="display:none;">
+        <div class="file-chip" id="fileChipAfter">
+          <span>📄</span><span id="fileNameAfter"></span><span id="fileSizeAfter" style="color:var(--text-faint);"></span>
+          <span class="x" id="fileRemoveAfter" title="Hapus">✕</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:22px;">
+      <button class="primary" id="compareBtn" disabled>⚖️ Bandingkan Kedua Versi</button>
+      <span class="status info" id="statusMsg" role="status" aria-live="polite"></span>
+    </div>
+    <div class="disclaimer">🔒 Kedua file diproses langsung di browser Anda — tidak pernah dikirim ke server mana pun.</div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="panel">
+      <div class="field-label">Ringkasan Perubahan</div>
+      <div class="summary-grid" id="summaryGrid"></div>
+
+      <div class="row" style="margin-top:6px;">
+        <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
+        <span class="status info" id="downloadStatus" role="status" aria-live="polite"></span>
+      </div>
+      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>.</div>
+    </div>
+
+    <div class="panel">
+      <div class="field-label">Pratinjau Perbandingan</div>
+      <div class="diff-legend">
+        <span><span class="dot del"></span>Dihapus (cuma ada di versi sebelum)</span>
+        <span><span class="dot add"></span>Ditambah (cuma ada di versi sesudah)</span>
+        <span><span class="dot mod"></span>Diedit (kata yang berubah ditandai inline)</span>
+      </div>
+      <div class="preview-shell">
+        <div class="preview-toolbar"><span>👁️ Pratinjau Perbandingan</span></div>
+        <div class="report-page" id="diffPreview"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<script src="theme.js?v=1"></script>
+<script src="compare-engine.js?v=1"></script>
+<script src="compare.js?v=1"></script>
+</body>
+</html>

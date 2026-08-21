@@ -95,20 +95,36 @@
   }
 
   function findHeadingIndex(paras) {
+    var candidates = [];
     for (var i = 0; i < paras.length; i++) {
       var t = paras[i].text.trim();
       if (t.length > 0 && t.length <= 60) {
         var stripped = t.replace(/^[\dIVXLC]+[.)]\s*/i, '').replace(/[:.\s]+$/, '');
         var words = stripped.split(/\s+/).filter(Boolean);
-        if (HEADING_RE.test(stripped) && words.length <= 4) return i;
+        var isExactMatch = HEADING_RE.test(stripped) && words.length <= 4;
         // Same typo tolerance as the paste-text validator (CE.isFuzzyHeadingWord) — a single-
         // word heading like "Refernces"/"Bibliograpy" is still recognized. DOCX-sourced
         // headings are less prone to copy-paste typos than pasted PDF text, but a document
         // that genuinely has a misspelled heading shouldn't silently fail to link at all.
-        if (words.length === 1 && CE.isFuzzyHeadingWord && CE.isFuzzyHeadingWord(stripped)) return i;
+        var isTypoMatch = !isExactMatch && words.length === 1 && CE.isFuzzyHeadingWord && CE.isFuzzyHeadingWord(stripped);
+        if (isExactMatch || isTypoMatch) candidates.push(i);
       }
     }
-    return -1;
+    if (candidates.length === 0) return -1;
+    // Prefer the LAST matching heading that is followed by substantial content — guards
+    // against picking a spurious SHORT "References"-looking line elsewhere in the document
+    // that is NOT the real bibliography heading. A very common real-world case: bibliometric/
+    // corpus-statistics tables (common in review papers analyzing citation data) often have a
+    // table row/cell literally labeled just "References" showing a stat like the total
+    // citation count across the studied corpus — that reads exactly like a heading by the
+    // short-line-with-the-word-"references" check above, but it's the WRONG one; the genuine
+    // bibliography heading, near the actual end of the document, is what should be used.
+    for (var c = candidates.length - 1; c >= 0; c--) {
+      var afterText = paras.slice(candidates[c] + 1).map(function (p) { return p.text; }).join('\n').trim();
+      if (afterText.length >= 30) return candidates[c];
+    }
+    // Nothing had substantial trailing content (unusual) — fall back to the last candidate.
+    return candidates[candidates.length - 1];
   }
 
   // ---------- run-splitting yang aman-format (pola sama seperti upload.js) ----------
