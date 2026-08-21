@@ -1065,6 +1065,55 @@ test('a journal-article reference with a "vol(issue), eArticleID" shape (e.g. "2
   assert.strictEqual(ref.articleNumber, 'e250060');
 });
 
+console.log('\n=== Regression: an unrelated, unclosed "(" earlier in the sentence (e.g. a structural aside like "Cluster 3 (n = 5; ...") silently made ALL subsequent narrative citations in that sentence invisible ===');
+
+test('narrative citations sitting inside an unrelated structural parenthetical aside ("Cluster 3 (n = 5; ..., including Author (Year), Author (Year), and Author (Year))") are all correctly extracted, not silently dropped because of an unrelated unclosed "(" earlier in the sentence', () => {
+  const text = 'Cluster 3 (n = 5; entrepreneurship and strategy foundations, including Nambisan (2017), Barney (1991), and Shane and Venkataraman (2000)); and Cluster 4 (n = 3; other theory, including something else here).';
+  const cites = CE.extractAuthorDateCitations(text);
+  const raws = cites.map((c) => c.raw);
+  assert.ok(raws.includes('Nambisan (2017)'));
+  assert.ok(raws.includes('Barney (1991)'));
+  assert.ok(raws.includes('Shane and Venkataraman (2000)'));
+});
+
+test('a genuine parenthetical multi-citation group ("(Smith, 2020; Jones, 2021)") is still correctly de-duplicated as ONE group, not double-counted as separate narrative citations too — the fix above must not break the original de-duplication intent', () => {
+  const cites = CE.extractAuthorDateCitations('Studi (Smith, 2020; Jones, 2021) menunjukkan hal ini secara meyakinkan dalam konteks luas.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].type, 'parenthetical');
+});
+
+test('a citation immediately following an UNRELATED reference-list-style numbered aside earlier in the same sentence is still found (broader sanity check for the same class of bug)', () => {
+  const cites = CE.extractAuthorDateCitations('As noted in item (a) of the checklist, Smith (2020) recommends this approach for the study.');
+  assert.ok(cites.some((c) => c.raw === 'Smith (2020)'));
+});
+
+console.log('\n=== Regression: a long common noun phrase joined by ordinary English "and" to a possessive citation got wrongly glued into one fake compound author ===');
+
+test('"Technology Acceptance Model and Ajzen\'s (1991)" is correctly split into two separate narrative citations, not merged into one fake author "Technology Acceptance Model and Ajzen\'s"', () => {
+  const text = "technology-adoption theory, including Davis's (1989) Technology Acceptance Model and Ajzen's (1991) Theory of Planned Behavior).";
+  const cites = CE.extractAuthorDateCitations(text);
+  const raws = cites.map((c) => c.raw);
+  assert.ok(raws.includes("Davis's (1989)"));
+  assert.ok(raws.includes("Ajzen's (1991)"), 'harus ada "Ajzen\'s (1991)" terpisah, bukan tergabung dengan frasa sebelumnya: ' + JSON.stringify(raws));
+});
+
+test('a genuine short two-author possessive citation ("Smith and Jones\'s (2020)") is NOT incorrectly truncated by the fix above — only long (3+ word) noun-phrase prefixes trigger the split', () => {
+  const cites = CE.extractAuthorDateCitations("This supports Smith and Jones's (2020) argument on this topic overall in the field.");
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, "Smith and Jones's");
+});
+
+test('these two bugs combined no longer produce false "reference not cited in text" errors for citations that were genuinely present but previously invisible to the extractor', () => {
+  const article = 'Cluster 3 (n = 5; foundations, including Nambisan (2017), Barney (1991), and Shane and Venkataraman (2000)); Cluster 4 includes Davis\'s (1989) Technology Acceptance Model and Ajzen\'s (1991) Theory of Planned Behavior).';
+  const refs = 'Nambisan, S. (2017). Digital entrepreneurship. Journal, 41(6), 1029-1055.\n' +
+    'Barney, J. B. (1991). Firm resources. Journal of Management, 17(1), 99-120.\n' +
+    'Shane, S., & Venkataraman, S. (2000). The promise of entrepreneurship. AMR, 25(1), 217-226.\n' +
+    'Davis, F. D. (1989). Perceived usefulness. MIS Quarterly, 13(3), 319-340.\n' +
+    'Ajzen, I. (1991). The theory of planned behavior. OBHDP, 50(2), 179-211.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

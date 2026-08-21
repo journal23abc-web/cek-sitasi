@@ -436,9 +436,30 @@ function extractAuthorDateCitations(text) {
     }
     if (!authors) continue;
     if (!authors || authors.split(/\s+/).length > 8) continue;
-    var before = text.substring(0, m.index);
-    var openP = (before.match(/\(/g) || []).length, closeP = (before.match(/\)/g) || []).length;
-    if (openP > closeP) continue;
+    // Rantai penulis yang berakhir dengan penanda posesif ('s) pada kata TERAKHIR, tersambung
+    // lewat " and " dari frasa yang JAUH lebih panjang (3+ kata) sebelumnya, kemungkinan besar
+    // BUKAN sitasi 2-penulis genuine — itu 2 KLAUSA/FRASA BERBEDA yang kebetulan tersambung kata
+    // "and" biasa, mis. "Technology Acceptance Model and Ajzen's (1991)" (nama model + sitasi
+    // posesif terpisah, bukan "Model" dan "Ajzen" sebagai dua co-author). Sitasi 2-penulis
+    // posesif genuine ("Smith and Jones's (2020)") selalu pendek (1-2 kata sebelum "and"), jadi
+    // syarat 3+ kata aman membedakan keduanya tanpa salah memotong kasus asli.
+    var possessiveAndMatch = authors.match(/^(.+?)\s+and\s+([\p{Lu}\p{Lo}][\p{L}'\u2019.\-]*['\u2019]s)$/u);
+    if (possessiveAndMatch && possessiveAndMatch[1].trim().split(/\s+/).length >= 3) {
+      authors = possessiveAndMatch[2];
+    }
+    // Hindari menghitung ulang sitasi naratif yang SUDAH tercakup sebagai bagian dari grup
+    // parenthetical yang sudah ditemukan di loop sebelumnya, mis. "(Smith, 2020; Jones, 2021)"
+    // — "Jones, 2021" di situ TIDAK perlu dihitung LAGI sebagai sitasi naratif terpisah.
+    // PENTING: ini cek OVERLAP LANGSUNG terhadap sitasi parenthetical yang SUDAH DITEMUKAN,
+    // BUKAN sekadar menghitung semua "(" vs ")" di teks sebelumnya — pendekatan hitung-kurung-
+    // global yang lama SALAH mendeteksi tanda kurung lain yang TIDAK TERKAIT sitasi (mis. aside
+    // struktural seperti "Cluster 3 (n = 5; ..., termasuk Nambisan (2017), Barney (1991)...")
+    // sebagai "sedang di dalam grup sitasi", diam-diam MELEWATI SEMUA sitasi naratif berikutnya
+    // sampai tanda kurung yang tidak terkait itu kebetulan seimbang lagi.
+    var insideExistingParenCitation = citations.some(function (c) {
+      return c.type === 'parenthetical' && m.index >= c.position && m.index < c.position + c.raw.length;
+    });
+    if (insideExistingParenCitation) continue;
     var firstWordOriginal = authors.split(/[\s,]+/)[0];
     if (isSkipWord(firstWordOriginal)) continue;
     // `authors` may have had leading text stripped above (sentence fragments, discourse words,
