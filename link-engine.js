@@ -57,6 +57,13 @@
       if (refIndex[altKey]) return refIndex[altKey];
     }
     if (CE.isInstitutionalAuthor(firstAuthor)) {
+      // Kasus paling umum & sederhana: satu penulis institusi tunggal, dikutip apa adanya
+      // dengan nama lengkapnya sendiri (bukan akronim, bukan gabungan 2 institusi) — mis.
+      // "The Douglas Fir Group, 2016". Coba ini SEBELUM resolusi akronim, karena akronim cuma
+      // relevan kalau firstAuthor memang singkatan (mis. "BSP"), bukan nama lengkap yang sudah
+      // institusional dari awal.
+      var directInstKey = keyOf(firstAuthor, year, true);
+      if (refIndex[directInstKey]) return refIndex[directInstKey];
       var resolved = CE.resolveInstitutionalNameFromMap(firstAuthor, acronymMap);
       if (resolved && resolved !== firstAuthor) {
         var resolvedKey = keyOf(resolved, year, true);

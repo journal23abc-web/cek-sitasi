@@ -756,6 +756,25 @@ test('when a short "References" line appears early (a corpus-statistics table ce
   assert.strictEqual(result.refParseFailed.length, 0, 'tidak boleh ada entri refParseFailed sampah dari baris tabel statistik ("94,688", "Document Contents", dst.)');
 });
 
+console.log('\n=== Regression: a single institutional author cited by its own full name (no acronym, not a joint 2-institution citation) could never be linked ===');
+
+test('a citation to a single institutional author written out in full ("The Douglas Fir Group, 2016") correctly links to its reference — the simplest institutional case was previously missing from the bookmark-resolution fallback chain entirely', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('The ability to use language meaningfully in real contexts (The Douglas Fir Group, 2016; The New London Group, 1996) is well established in the literature overall.')),
+    para(run('Some article body text discussing the topic in sufficient detail for the parser to work correctly here.')),
+    para(run('REFERENCES')),
+    para(run('The Douglas Fir Group. (2016). A transdisciplinary framework for SLA. The Modern Language Journal, 100(S1), 19-47.')),
+    para(run('The New London Group. (1996). A pedagogy of multiliteracies. Harvard Educational Review, 66(1), 60-92.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var relsXmlDoc = new DOMParser().parseFromString('<?xml version="1.0"?><Relationships xmlns="x"></Relationships>', 'application/xml');
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', relsXmlDoc: relsXmlDoc });
+  assert.strictEqual(result.refCount, 2);
+  assert.strictEqual(result.linked, 2, 'kedua sitasi institusi tunggal harus tertaut: ' + JSON.stringify(result.unmatched));
+  assert.strictEqual(result.unmatched.length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

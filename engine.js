@@ -395,7 +395,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|\s+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -660,7 +660,7 @@ var AuthorParsers = {
     var parts = splitOnSeparators(cleaned);
     var authors = [];
     var buffer = null;
-    var initialsOnly = /^([A-Z]\.\s*)*[A-Z]\.?$/;
+    var initialsOnly = /^(?:(?:[A-Z]\.?|Md\.?|Mst\.?)\s*)+$/;
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
       if (initialsOnly.test(p)) {
@@ -1981,14 +1981,34 @@ MultiFormatValidator.prototype.detectMixedCitationStyles = function() {
   // scoring/ranking tables (MCDA, TOPSIS, AHP, etc.) — identified by either directly following a
   // decimal score value, or containing "Joint" (a tie-rank indicator no real citation ever has).
   var parenNumericRe = /(\d+\.\d+\s*)?\((?:Joint\s+)?\d{1,3}(?:\s*[,\-–]\s*\d{1,3})*\)/g;
-  var parenNumeric = 0;
   var pnMatch;
+  var pnMatches = [];
   while ((pnMatch = parenNumericRe.exec(text)) !== null) {
     if (pnMatch[1]) continue; // preceded by a decimal score -> table rank cell, not a citation
     if (/joint/i.test(pnMatch[0])) continue; // "(Joint 1)" -> tie-rank indicator, not a citation
     if (/^\(\d{4}\)$/.test(pnMatch[0])) continue; // plain 4-digit year
-    parenNumeric++;
+    pnMatches.push({ num: parseInt(pnMatch[0].replace(/\D/g, ''), 10), index: pnMatch.index });
   }
+  // Baris "(1) kriteria A, (2) kriteria B, (3) kriteria C, (4) kriteria D" (umum di metodologi
+  // scoping/systematic review) SALAH terdeteksi sebagai sitasi numerik hanya karena kebetulan
+  // jumlahnya cukup banyak. Buang rentetan angka yang NAIK BERURUTAN (1,2,3,...) dan
+  // BERDEKATAN posisinya (<400 karakter antar match) — pola khas daftar enumerasi prosa,
+  // bukan sitasi numerik genuine (yang biasanya tersebar, tidak berurutan rapat begini).
+  var runStart = 0;
+  var toExclude = new Set();
+  for (var qi = 1; qi <= pnMatches.length; qi++) {
+    var gap = qi < pnMatches.length ? pnMatches[qi].index - pnMatches[qi - 1].index : -1;
+    // Rentetan angka berurutan (1,2,3,...) dianggap ENUMERASI PROSA hanya kalau jarak antar
+    // angkanya SUBSTANSIAL (klausa/kalimat nyata, bukan cuma koma/"dan" penghubung pendek) —
+    // sitasi numerik yang genuinely dikelompokkan ("(1), (2), (3), dan (4) semua mendukung")
+    // punya jarak SANGAT PENDEK antar angka (cuma tanda baca), jadi TIDAK dibuang di sini.
+    var breaksRun = qi === pnMatches.length || pnMatches[qi].num !== pnMatches[qi - 1].num + 1 || gap < 25 || gap >= 400;
+    if (breaksRun) {
+      if (qi - runStart >= 3) { for (var qk = runStart; qk < qi; qk++) toExclude.add(qk); }
+      runStart = qi;
+    }
+  }
+  var parenNumeric = pnMatches.filter(function (_, idx) { return !toExclude.has(idx); }).length;
   var authorDate = (text.match(/\([\p{Lu}\p{Lo}][^()]*?,?\s*\d{4}[a-z]?\)/gu) || []).length;
   var authorPage = (text.match(/\([\p{Lu}\p{Lo}][\p{L}'\-]+\s+\d+(?:[-–]\d+)?\)/gu) || []).length;
 
