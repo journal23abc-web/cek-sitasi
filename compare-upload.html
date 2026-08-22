@@ -147,9 +147,13 @@
 
       <div class="row" style="margin-top:6px;">
         <button class="primary" id="downloadBtn">🖨️ Unduh sebagai PDF</button>
+        <button class="primary" id="downloadWordBtn" style="background:linear-gradient(135deg, var(--violet), var(--cyan));">📝 Unduh sebagai Word (Track Changes)</button>
         <span class="status info" id="downloadStatus" role="status" aria-live="polite"></span>
       </div>
-      <div class="disclaimer">Klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan <b>"Simpan sebagai PDF"</b>.</div>
+      <div class="disclaimer">
+        <b>PDF</b>: klik tombol di atas untuk membuka dialog cetak browser, lalu pilih tujuan "Simpan sebagai PDF" — teks polos, cepat untuk pratinjau cepat.<br>
+        <b>Word (Track Changes)</b>: menghasilkan file .docx sungguhan dengan perubahan ditandai sebagai <i>Track Changes</i> asli Word (bisa diterima/ditolak satu per satu di Word) — <b>format asli (font, bold, italic, heading) 100% terjaga</b> karena memakai XML dokumen asli, bukan direkonstruksi dari teks polos. Tabel di badan naskah dipertahankan utuh dari versi sesudah (isi tabel tidak ikut ditandai perubahannya di versi ini).
+      </div>
     </div>
 
     <div class="panel">

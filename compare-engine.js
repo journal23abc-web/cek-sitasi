@@ -44,6 +44,34 @@
     return merged;
   }
 
+  // Versi generik dari diffTokens: bekerja dengan ARRAY OBJEK APA PUN (bukan cuma string),
+  // pakai keyFn(item) untuk menentukan kesamaan saat pencocokan LCS — item ASLI (bukan cuma
+  // teksnya) dikembalikan di tiap op, TIDAK digabung otomatis (caller yang urus penggabungan
+  // sesuai kebutuhan, mis. dikelompokkan berdasarkan format run juga, bukan cuma tipe diff).
+  // Dipakai untuk fitur ekspor Word Track Changes, di mana tiap token perlu tetap melacak run
+  // asalnya (demi mempertahankan bold/italic/font aslinya), tidak bisa cuma dibandingkan sebagai
+  // string polos seperti diffTokens/diffWords di atas.
+  function diffTokensGeneric(oldItems, newItems, keyFn) {
+    var n = oldItems.length, m = newItems.length;
+    var dp = new Array(n + 1);
+    for (var i = 0; i <= n; i++) dp[i] = new Int32Array(m + 1);
+    for (i = n - 1; i >= 0; i--) {
+      for (var j = m - 1; j >= 0; j--) {
+        dp[i][j] = keyFn(oldItems[i]) === keyFn(newItems[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    var ops = [];
+    i = 0; var jj = 0;
+    while (i < n && jj < m) {
+      if (keyFn(oldItems[i]) === keyFn(newItems[jj])) { ops.push({ type: 'same', oldItem: oldItems[i], newItem: newItems[jj] }); i++; jj++; }
+      else if (dp[i + 1][jj] >= dp[i][jj + 1]) { ops.push({ type: 'del', oldItem: oldItems[i] }); i++; }
+      else { ops.push({ type: 'add', newItem: newItems[jj] }); jj++; }
+    }
+    while (i < n) { ops.push({ type: 'del', oldItem: oldItems[i] }); i++; }
+    while (jj < m) { ops.push({ type: 'add', newItem: newItems[jj] }); jj++; }
+    return ops;
+  }
+
   function diffWords(oldText, newText) {
     return diffTokens(tokenizeWords(oldText), tokenizeWords(newText));
   }
@@ -193,7 +221,7 @@
     return { added: added, deleted: deleted, modified: modified, unchanged: unchanged, totalChanges: added + deleted + modified };
   }
 
-  var API = { diffWords: diffWords, diffParagraphs: diffParagraphs, paraSimilarity: paraSimilarity, tokenizeWords: tokenizeWords, summarize: summarize };
+  var API = { diffWords: diffWords, diffParagraphs: diffParagraphs, paraSimilarity: paraSimilarity, tokenizeWords: tokenizeWords, summarize: summarize, diffTokensGeneric: diffTokensGeneric };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
   if (typeof window !== 'undefined') window.CompareEngine = API;
 })(typeof window !== 'undefined' ? window : globalThis);

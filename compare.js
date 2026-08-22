@@ -20,6 +20,7 @@
     summaryGrid: document.getElementById('summaryGrid'),
     diffPreview: document.getElementById('diffPreview'),
     downloadBtn: document.getElementById('downloadBtn'),
+    downloadWordBtn: document.getElementById('downloadWordBtn'),
     downloadStatus: document.getElementById('downloadStatus'),
     toast: document.getElementById('toast'),
   };
@@ -43,29 +44,58 @@
     setTimeout(function () { els.toast.classList.remove('show'); }, 2000);
   }
 
+  var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
   // ---------- Ekstraksi paragraf dari .docx (baca XML langsung, bukan pakai mammoth, supaya
   // batas paragraf presisi & konsisten dengan cara tool lain di sistem ini membaca .docx) ----------
-  function extractParagraphsFromDocx(file) {
+  // PENTING: cuma paragraf yang jadi ANAK LANGSUNG <w:body> yang diambil untuk dibandingkan/
+  // direkonstruksi (bukan getElementsByTagName('w:p') yang juga menjangkau paragraf DI DALAM
+  // sel tabel) — supaya saat membangun ulang dokumen Track Changes, tabel di badan naskah tidak
+  // ikut hilang/rusak. Tabel & elemen non-paragraf lain di badan naskah dipertahankan UTUH (tidak
+  // ikut di-diff isinya), disisipkan kembali di posisi relatifnya semula.
+  function loadDocxDetailed(file) {
     return file.arrayBuffer()
       .then(function (buf) { return JSZip.loadAsync(buf); })
       .then(function (zip) {
         var docPath = 'word/document.xml';
         if (!zip.file(docPath)) throw new Error('word/document.xml tidak ditemukan di dalam file .docx — pastikan ini file Word yang valid.');
-        return zip.file(docPath).async('string');
+        return zip.file(docPath).async('string').then(function (xmlString) { return { zip: zip, xmlString: xmlString }; });
       })
-      .then(function (xmlString) {
-        var xmlDoc = new DOMParser().parseFromString(xmlString, 'application/xml');
+      .then(function (res) {
+        var xmlDoc = new DOMParser().parseFromString(res.xmlString, 'application/xml');
         if (xmlDoc.getElementsByTagName('parsererror').length > 0) throw new Error('Gagal membaca struktur XML .docx.');
-        var paraEls = xmlDoc.getElementsByTagName('w:p');
-        var paragraphs = [];
-        for (var i = 0; i < paraEls.length; i++) {
-          var wts = paraEls[i].getElementsByTagName('w:t');
-          var t = '';
-          for (var j = 0; j < wts.length; j++) t += wts[j].textContent;
-          t = t.trim();
-          if (t) paragraphs.push(t);
+        var bodyList = xmlDoc.getElementsByTagName('w:body');
+        if (!bodyList.length) throw new Error('Struktur <w:body> tidak ditemukan.');
+        var body = bodyList[0];
+        var paragraphs = []; // {el, text, runs, pPrXml, bodyChildIndex}
+        var bodyChildren = []; // urutan ASLI semua anak ELEMEN langsung <w:body> — dipakai utk rekonstruksi posisi tabel dll. (node teks/whitespace antar elemen dilewati, tidak signifikan)
+        for (var c = 0; c < body.childNodes.length; c++) {
+          var node = body.childNodes[c];
+          if (node.nodeType !== 1) continue; // lewati node teks/whitespace, cuma elemen yang dilacak
+          var childIdx = bodyChildren.length;
+          bodyChildren.push(node);
+          if (node.tagName === 'w:p') {
+            var runEls = node.getElementsByTagName('w:r');
+            var runs = [];
+            var flat = '';
+            for (var j = 0; j < runEls.length; j++) {
+              var wts = runEls[j].getElementsByTagName('w:t');
+              var t = '';
+              for (var k = 0; k < wts.length; k++) t += wts[k].textContent;
+              if (t) {
+                var rPrList = runEls[j].getElementsByTagName('w:rPr');
+                runs.push({ text: t, rPrXml: rPrList.length ? new XMLSerializer().serializeToString(rPrList[0]) : null });
+                flat += t;
+              }
+            }
+            var trimmed = flat.trim();
+            if (trimmed) {
+              var pPrList = node.getElementsByTagName('w:pPr');
+              paragraphs.push({ el: node, text: trimmed, runs: runs, pPrXml: pPrList.length ? new XMLSerializer().serializeToString(pPrList[0]) : null, bodyChildIndex: childIdx });
+            }
+          }
         }
-        return paragraphs;
+        return { zip: res.zip, xmlDoc: xmlDoc, body: body, bodyChildren: bodyChildren, paragraphs: paragraphs };
       });
   }
 
@@ -124,9 +154,12 @@
     els.statusMsg.innerHTML = '<span class="spinner"></span>Membaca & membandingkan kedua file...';
     els.statusMsg.className = 'status info';
 
-    Promise.all([extractParagraphsFromDocx(state.fileBefore), extractParagraphsFromDocx(state.fileAfter)])
+    Promise.all([loadDocxDetailed(state.fileBefore), loadDocxDetailed(state.fileAfter)])
       .then(function (res) {
-        var oldParas = res[0], newParas = res[1];
+        state.beforeDetailed = res[0];
+        state.afterDetailed = res[1];
+        var oldParas = res[0].paragraphs.map(function (p) { return p.text; });
+        var newParas = res[1].paragraphs.map(function (p) { return p.text; });
         if (oldParas.length === 0 || newParas.length === 0) {
           throw new Error('Salah satu file tidak mengandung teks yang bisa dibaca — pastikan bukan file kosong atau hasil scan gambar.');
         }
@@ -186,8 +219,158 @@
     els.diffPreview.innerHTML = html;
   }
 
+  // ---------- Ekspor Word dengan Track Changes sungguhan (format 100% terjaga) ----------
+  function escXml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function buildRunXmlString(text, rPrXml, isDeleted) {
+    var tTag = isDeleted ? 'w:delText' : 'w:t';
+    return '<w:r>' + (rPrXml || '') + '<' + tTag + ' xml:space="preserve">' + escXml(text) + '</' + tTag + '></w:r>';
+  }
+
+  // Pecah tiap run jadi token kata+spasi (persis seperti CompareEngine.tokenizeWords), TAPI
+  // tiap token tetap membawa rPrXml dari run ASALNYA — inilah yang memungkinkan bold/italic/
+  // font run asli tetap terjaga persis sampai ke level kata, bukan cuma level paragraf.
+  function tokenizeRunsToWords(runs) {
+    var tokens = [];
+    runs.forEach(function (run) {
+      var parts = run.text.match(/\S+|\s+/g) || [];
+      parts.forEach(function (part) { tokens.push({ text: part, rPrXml: run.rPrXml }); });
+    });
+    return tokens;
+  }
+
+  var trackChangeIdCounter = 9000;
+  var TC_AUTHOR = ' w:author="Cek Sitasi \u2014 Bandingkan Revisi" w:date="' + new Date().toISOString() + '"';
+
+  function buildDeletedParagraphXmlString(oldPara) {
+    var runsXml = oldPara.runs.map(function (r) { return buildRunXmlString(r.text, r.rPrXml, true); }).join('');
+    return '<w:p>' + (oldPara.pPrXml || '') + '<w:del w:id="' + (trackChangeIdCounter++) + '"' + TC_AUTHOR + '>' + runsXml + '</w:del></w:p>';
+  }
+
+  function buildAddedParagraphXmlString(newPara) {
+    var runsXml = newPara.runs.map(function (r) { return buildRunXmlString(r.text, r.rPrXml, false); }).join('');
+    return '<w:p>' + (newPara.pPrXml || '') + '<w:ins w:id="' + (trackChangeIdCounter++) + '"' + TC_AUTHOR + '>' + runsXml + '</w:ins></w:p>';
+  }
+
+  // Paragraf yang SAMA tapi diedit sebagian — diff level-kata (bukan seluruh paragraf sekaligus)
+  // supaya cuma kata yang genuinely berubah yang ditandai, sisanya tampil normal (tidak ditandai
+  // apa-apa), persis seperti Word Track Changes asli. Token dikelompokkan dulu (gabung token
+  // berurutan dengan tipe+format SAMA) supaya tidak menghasilkan satu <w:r> terpisah per kata.
+  function buildModifiedParagraphXmlString(oldPara, newPara) {
+    var oldTokens = tokenizeRunsToWords(oldPara.runs);
+    var newTokens = tokenizeRunsToWords(newPara.runs);
+    var ops = window.CompareEngine.diffTokensGeneric(oldTokens, newTokens, function (t) { return t.text; });
+
+    var groups = [];
+    ops.forEach(function (op) {
+      var item = op.type === 'del' ? op.oldItem : op.newItem;
+      var key = op.type + '|' + (item.rPrXml || '');
+      var last = groups[groups.length - 1];
+      if (last && last.key === key) last.text += item.text;
+      else groups.push({ key: key, type: op.type, text: item.text, rPrXml: item.rPrXml });
+    });
+
+    var body = newPara.pPrXml || '';
+    groups.forEach(function (g) {
+      if (g.type === 'same') {
+        body += buildRunXmlString(g.text, g.rPrXml, false);
+      } else if (g.type === 'del') {
+        body += '<w:del w:id="' + (trackChangeIdCounter++) + '"' + TC_AUTHOR + '>' + buildRunXmlString(g.text, g.rPrXml, true) + '</w:del>';
+      } else {
+        body += '<w:ins w:id="' + (trackChangeIdCounter++) + '"' + TC_AUTHOR + '>' + buildRunXmlString(g.text, g.rPrXml, false) + '</w:ins>';
+      }
+    });
+    return '<w:p>' + body + '</w:p>';
+  }
+
+  // Susun ulang seluruh badan dokumen berdasar hasil diff, mempertahankan elemen NON-paragraf
+  // (tabel, dll.) dari versi SESUDAH apa adanya di posisi relatif aslinya — supaya tabel tidak
+  // ikut hilang/rusak (isinya tidak ikut di-diff, di luar cakupan fitur ini untuk saat ini).
+  function buildTrackedChangesXml(diff, beforeDetailed, afterDetailed) {
+    var serializer = new XMLSerializer();
+    var afterBodyChildren = afterDetailed.bodyChildren;
+    var output = '';
+    var lastEmittedIdx = -1;
+
+    function emitNonParagraphsUpTo(targetIdx) {
+      for (var i = lastEmittedIdx + 1; i < targetIdx; i++) {
+        var node = afterBodyChildren[i];
+        if (node.tagName !== 'w:p') output += serializer.serializeToString(node);
+      }
+    }
+
+    diff.forEach(function (d) {
+      if (d.type === 'same') {
+        var p1 = afterDetailed.paragraphs[d.newIndex];
+        emitNonParagraphsUpTo(p1.bodyChildIndex);
+        output += serializer.serializeToString(p1.el);
+        lastEmittedIdx = p1.bodyChildIndex;
+      } else if (d.type === 'add') {
+        var p2 = afterDetailed.paragraphs[d.newIndex];
+        emitNonParagraphsUpTo(p2.bodyChildIndex);
+        output += buildAddedParagraphXmlString(p2);
+        lastEmittedIdx = p2.bodyChildIndex;
+      } else if (d.type === 'modified') {
+        var oldP = beforeDetailed.paragraphs[d.oldIndex];
+        var newP = afterDetailed.paragraphs[d.newIndex];
+        emitNonParagraphsUpTo(newP.bodyChildIndex);
+        output += buildModifiedParagraphXmlString(oldP, newP);
+        lastEmittedIdx = newP.bodyChildIndex;
+      } else { // del — tidak punya posisi di dokumen SESUDAH, disisipkan di urutan hasil diff apa adanya
+        output += buildDeletedParagraphXmlString(beforeDetailed.paragraphs[d.oldIndex]);
+      }
+    });
+    emitNonParagraphsUpTo(afterBodyChildren.length); // sisa non-paragraf di akhir (mis. w:sectPr)
+    return output;
+  }
+
+  function buildTrackedChangesDocxBlob(diff, beforeDetailed, afterDetailed) {
+    trackChangeIdCounter = 9000;
+    var newBodyXml = buildTrackedChangesXml(diff, beforeDetailed, afterDetailed);
+    var serializer = new XMLSerializer();
+    var docEl = afterDetailed.xmlDoc.documentElement;
+    var docOpenTag = serializer.serializeToString(docEl).match(/^<w:document[^>]*>/)[0];
+    var fullXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + docOpenTag + '<w:body>' + newBodyXml + '</w:body></w:document>';
+    var zip = afterDetailed.zip;
+    zip.file('word/document.xml', fullXml);
+    // Setting yang mengaktifkan mode "tampilkan markup" saat file dibuka (opsional tapi
+    // membantu — Word tetap bisa menampilkan w:ins/w:del walau setting ini tidak ada).
+    return zip.generateAsync({ type: 'blob' });
+  }
+
+
   els.downloadBtn.addEventListener('click', function () {
     if (!state.lastDiff) return;
     window.print();
+  });
+
+  els.downloadWordBtn.addEventListener('click', function () {
+    if (!state.lastDiff) return;
+    els.downloadWordBtn.disabled = true;
+    els.downloadStatus.innerHTML = '<span class="spinner"></span>Menyusun file Word...';
+    els.downloadStatus.className = 'status info';
+    buildTrackedChangesDocxBlob(state.lastDiff, state.beforeDetailed, state.afterDetailed)
+      .then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        var baseName = (state.fileAfter.name || 'naskah').replace(/\.docx$/i, '');
+        a.href = url;
+        a.download = baseName + '-perbandingan-track-changes.docx';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+        els.downloadStatus.textContent = '✅ File Word berhasil dibuat & diunduh.';
+        els.downloadStatus.className = 'status ok';
+        els.downloadWordBtn.disabled = false;
+        showToast('File Word (Track Changes) berhasil diunduh.');
+      })
+      .catch(function (err) {
+        els.downloadStatus.textContent = '❌ Gagal membuat file Word: ' + err.message;
+        els.downloadStatus.className = 'status err';
+        els.downloadWordBtn.disabled = false;
+      });
   });
 })();
