@@ -289,6 +289,7 @@ function detectMalformedCitations(text) {
   // identical to the regex: a capitalized word followed by a comma). Not exhaustive — just the
   // common cases likely to appear in this exact "preposition + place, Author et al." shape.
   var twoThenEtAlRe = /(?<![\p{L}\p{N}])([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,\s*([\p{Lu}\p{Lo}][\p{L}'\-]+)\s*,?\s*([Ee]t\s+[Aa]l\.?)/gu;
+  var twoThenEtAlCandidates = [];
   while ((m = twoThenEtAlRe.exec(text)) !== null) {
     // Skip if the second token is itself an initial (e.g. "Smith, J., et al." is fine — that's
     // just the first author's initial, not a second author being listed).
@@ -301,15 +302,27 @@ function detectMalformedCitations(text) {
     // word — "Outside Nigeria, Syed et al. (2024)" is "Outside Nigeria" (a location) + a
     // correctly-formatted "Syed et al." citation, not two authors named "Nigeria" and "Syed".
     if (PLACE_WORDS.has(m[1].toLowerCase())) continue;
-    var ctx4 = citationContext(text, m.index, m.index + m[0].length);
+    twoThenEtAlCandidates.push({ first: m[1], second: m[2], index: m.index, length: m[0].length });
+  }
+  // A candidate is legitimate APA7 disambiguation (not a mistake) if ANOTHER candidate shares
+  // the SAME first surname but a DIFFERENT second surname, positioned nearby (same sentence/
+  // citation group, within ~250 chars) — the telltale shape of "(X, A, et al., YEAR; X, B, et
+  // al., YEAR)" distinguishing two same-first-author-same-year works whose first author also
+  // shares the same initial (so an initial alone couldn't disambiguate them).
+  twoThenEtAlCandidates.forEach(function (cand, ci) {
+    var isDisambiguation = twoThenEtAlCandidates.some(function (other, oi) {
+      return oi !== ci && other.first === cand.first && other.second !== cand.second && Math.abs(other.index - cand.index) < 250;
+    });
+    if (isDisambiguation) return;
+    var ctx4 = citationContext(text, cand.index, cand.index + cand.length);
     issues.push({
       type: 'multiple_authors_before_et_al',
       raw: ctx4,
-      position: m.index,
-      message: '"et al." semestinya langsung mengikuti penulis PERTAMA saja, bukan setelah ' + (m[2] ? 'dua nama (' + m[1] + ', ' + m[2] + ')' : 'beberapa nama') + ' disebutkan.',
-      suggestion: ctx4.replace(m[0], m[1] + ' et al.'),
+      position: cand.index,
+      message: '"et al." semestinya langsung mengikuti penulis PERTAMA saja, bukan setelah dua nama (' + cand.first + ', ' + cand.second + ') disebutkan.',
+      suggestion: ctx4.replace(cand.first + ', ' + cand.second + ', et al.', cand.first + ' et al.').replace(cand.first + ', ' + cand.second + ' et al.', cand.first + ' et al.'),
     });
-  }
+  });
 
   // 5. Missing space around "&" joining two author surnames — "Pitelis &Wagner" or "Smith& Jones"
   // instead of "Smith & Jones". Scoped to citation context (a 4-digit year within ~80 chars
@@ -1298,6 +1311,25 @@ MultiFormatValidator.prototype.validate = function() {
   this.annotateLocations();
   var analytics = computeReferenceAnalytics(this);
 
+  // Precompute matched/cited status DIRECTLY onto each citation/reference object, so the UI's
+  // citation-map coloring is correct even when this result gets serialized across a Web Worker
+  // boundary (postMessage only carries plain data — a live validator instance and its methods
+  // like isCitationMatched/isReferenceCited don't survive that trip). Computed here while
+  // `this` still has its internal refMap/citedKeys state built up during validation above.
+  if (family === 'author-date' || family === 'author-page') {
+    var mapSelf = this;
+    this.citations.forEach(function (c) {
+      if (c.parts) {
+        c.parts.forEach(function (p) { p.matched = mapSelf.isCitationMatched(p.firstAuthor, p.year != null ? p.year : null); });
+      } else {
+        var cleaned = (c.authors || '').replace(/\s*et\s+al\.?/i, '');
+        var firstTok = (splitOnSeparators(cleaned)[0]) || cleaned;
+        c.matched = mapSelf.isCitationMatched(firstTok, c.year != null ? c.year : null);
+      }
+    });
+    this.references.forEach(function (r) { r.cited = mapSelf.isReferenceCited(r); });
+  }
+
   return {
     errors: this.errors, warnings: this.warnings, suggestions: this.suggestions,
     citations: this.citations, references: this.references, styleId: this.styleId,
@@ -1450,7 +1482,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
             altKey = self.keyFromCitationToken(p.authors.join(' & ')) + '_' + p.year;
             citedKeys.add(altKey);
           }
-          citationDetails.push({ key: key, altKey: altKey, part: p, raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
+          citationDetails.push({ key: key, altKey: altKey, part: p, raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, initial: initialFromCitationToken(p.firstAuthor), secondAuthor: (p.authors && p.authors.length > 1) ? p.authors[1] : null, position: c.position });
         }
       });
     } else {
@@ -1472,7 +1504,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           altKey2 = self.keyFromCitationToken(authors.join(' & ')) + '_' + c.year;
           citedKeys.add(altKey2);
         }
-        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, groupRaw: c.raw, isMultiPart: false, initial: initialFromCitationToken(authors[0]), position: c.position });
+        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, groupRaw: c.raw, isMultiPart: false, initial: initialFromCitationToken(authors[0]), secondAuthor: authors.length > 1 ? authors[1] : null, position: c.position });
         if (authors.length >= style.etAlThreshold && !hasEtAl) {
           self.errors.push({ title: 'Sitasi naratif ' + style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi naratif "' + c.raw + '" menulis ' + authors.length + ' nama.', code: c.raw, correction: authors[0] + ' et al. (' + c.year + ')', severity: 'error' });
         }
@@ -1507,6 +1539,27 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           if (candidates[0].authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + candidates[0].authorCount + ' penulis', description: 'Referensi "' + candidates[0].firstAuthor + ' (' + candidates[0].year + ')" hanya punya ' + candidates[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
           }
+        } else if (d.secondAuthor && (function () {
+          // Kalau inisial tidak cukup (sama di semua kandidat, atau memang tidak ada inisial),
+          // coba disambiguasi lewat penulis KEDUA yang disebut di sitasi — pola APA7 yang sah
+          // untuk kasus penulis pertama & inisialnya SAMA persis di kedua referensi (mis.
+          // "Abercrombie, S." muncul di 2 karya beda tahun yang sama), di mana satu-satunya
+          // cara membedakan di teks adalah menyebut penulis kedua yang berbeda.
+          var secondKey = normalizeKeyName(surnameFromCitationToken(d.secondAuthor), false);
+          var narrowed = candidates.filter(function(ref) {
+            if (!ref.authors || ref.authors.length < 2) return false;
+            return normalizeKeyName(surnameOf(ref.authors[1], self.styleId), false) === secondKey;
+          });
+          if (narrowed.length !== 1) return false;
+          matchedRefs.add(narrowed[0]);
+          d.matchedRef = narrowed[0];
+          self.citationCounts.set(narrowed[0], (self.citationCounts.get(narrowed[0]) || 0) + 1);
+          if (narrowed[0].authorCount <= 2 && d.part.hasEtAl) {
+            self.errors.push({ title: '"et al." untuk sumber hanya ' + narrowed[0].authorCount + ' penulis', description: 'Referensi "' + narrowed[0].firstAuthor + ' (' + narrowed[0].year + ')" hanya punya ' + narrowed[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
+          }
+          return true;
+        })()) {
+          // resolved via second-author disambiguation, nothing more to do here
         } else {
           self.errors.push({ title: 'Sitasi ambigu', description: 'Sitasi "' + d.raw + '" bisa merujuk ke ' + refs.length + ' referensi berbeda yang nama belakang & tahunnya sama (' + refs.map(function(r){return r.firstAuthor;}).join(' / ') + '). Tambahkan inisial pada sitasi untuk memperjelas.', code: d.raw, severity: 'error' });
         }

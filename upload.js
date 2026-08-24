@@ -251,7 +251,7 @@
     function runOnMainThread() {
       var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
       var result = validator.validate();
-      state.lastValidator = validator; // needed by renderCitationMap() for matched/unmatched lookups
+      state.lastValidator = validator; // kept for potential debugging use — no longer read by renderCitationMap() (see engine.js's precomputed matched/cited flags instead)
       return result;
     }
     if (combined < WORKER_THRESHOLD || typeof Worker === 'undefined') {
@@ -260,10 +260,10 @@
     var worker = getWorker();
     if (!worker) return Promise.resolve(runOnMainThread());
     // A Web Worker only gives back plain serialized data, never a live class instance with
-    // methods — so state.lastValidator can't be populated on this path. renderCitationMap()
-    // treats a null validator the same way it already does before any validation has run
-    // (falls back to "matched"), so this only affects the map's coloring for very large
-    // documents, not the actual validation results.
+    // methods — so state.lastValidator can't be populated on this path. This used to make the
+    // citation map fall back to showing everything as "matched" (green) for documents large
+    // enough to route through the Worker — fixed by having engine.js precompute matched/cited
+    // flags directly onto result.citations/result.references, which DO survive serialization.
     state.lastValidator = null;
     return new Promise(function(resolve) {
       var settled = false;
@@ -484,10 +484,12 @@
       return;
     }
 
-    // author-date / author-page: use the validator's real match index when available (main
-    // thread path) — falls back to "matched" (green) for very large documents that ran through
-    // the Web Worker, same as before any validation has run. See runValidation() for why.
-    var lastValidator = state.lastValidator;
+    // author-date / author-page: use the precomputed matched/cited flags baked directly onto
+    // each citation/reference object by engine.js's validate() — this survives serialization
+    // across the Web Worker boundary (unlike calling methods on a live validator instance,
+    // which is what state.lastValidator used to be needed for, and why the map used to fall
+    // back to showing EVERYTHING as "matched"/green whenever a document was large enough to be
+    // routed through the Worker and state.lastValidator ended up null).
     var citeItems = [];
     var seenCiteLabels = new Set();
     result.citations.forEach(function(c) {
@@ -496,21 +498,18 @@
           var label = (p.firstAuthor||'-') + (p.year ? ', ' + p.year : (p.page ? ' p.' + p.page : ''));
           if (seenCiteLabels.has(label)) return;
           seenCiteLabels.add(label);
-          var matched = lastValidator ? lastValidator.isCitationMatched(p.firstAuthor, p.year || null) : null;
-          citeItems.push({ label: label, matched: matched !== false, linkKey: mapLinkKey(p.firstAuthor, p.year) });
+          citeItems.push({ label: label, matched: p.matched !== false, linkKey: mapLinkKey(p.firstAuthor, p.year) });
         });
       } else {
         var label2 = (c.authors||'-') + (c.year ? ', ' + c.year : '');
         if (seenCiteLabels.has(label2)) return;
         seenCiteLabels.add(label2);
         var firstTok = splitFirstToken(c.authors);
-        var matched2 = lastValidator ? lastValidator.isCitationMatched(firstTok, c.year || null) : null;
-        citeItems.push({ label: label2, matched: matched2 !== false, linkKey: mapLinkKey(firstTok, c.year) });
+        citeItems.push({ label: label2, matched: c.matched !== false, linkKey: mapLinkKey(firstTok, c.year) });
       }
     });
     var refItems = result.references.map(function(r){
-      var cited = lastValidator ? lastValidator.isReferenceCited(r) : null;
-      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: cited !== false, linkKey: mapLinkKey(r.firstAuthor, r.year) };
+      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: r.cited !== false, linkKey: mapLinkKey(r.firstAuthor, r.year) };
     });
     panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
     wireMapLinks(panel);

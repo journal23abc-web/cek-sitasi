@@ -621,7 +621,10 @@
       return;
     }
 
-    // author-date / author-page: use the validator's real match index (not a placeholder)
+    // author-date / author-page: use the precomputed matched/cited flags baked directly onto
+    // each citation/reference object by engine.js's validate() (see engine.js for why — this
+    // survives serialization across a Web Worker boundary, so it's used consistently here too
+    // even though app.js itself doesn't currently use a Worker).
     var citeItems = [];
     var seenCiteLabels = new Set();
     result.citations.forEach(function(c) {
@@ -630,21 +633,18 @@
           var label = (p.firstAuthor||'-') + (p.year ? ', ' + p.year : (p.page ? ' p.' + p.page : ''));
           if (seenCiteLabels.has(label)) return;
           seenCiteLabels.add(label);
-          var matched = lastValidator ? lastValidator.isCitationMatched(p.firstAuthor, p.year || null) : null;
-          citeItems.push({ label: label, matched: matched !== false, linkKey: mapLinkKey(p.firstAuthor, p.year) });
+          citeItems.push({ label: label, matched: p.matched !== false, linkKey: mapLinkKey(p.firstAuthor, p.year) });
         });
       } else {
         var label2 = (c.authors||'-') + (c.year ? ', ' + c.year : '');
         if (seenCiteLabels.has(label2)) return;
         seenCiteLabels.add(label2);
         var firstTok = splitFirstToken(c.authors);
-        var matched2 = lastValidator ? lastValidator.isCitationMatched(firstTok, c.year || null) : null;
-        citeItems.push({ label: label2, matched: matched2 !== false, linkKey: mapLinkKey(firstTok, c.year) });
+        citeItems.push({ label: label2, matched: c.matched !== false, linkKey: mapLinkKey(firstTok, c.year) });
       }
     });
     var refItems = result.references.map(function(r){
-      var cited = lastValidator ? lastValidator.isReferenceCited(r) : null;
-      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: cited !== false, linkKey: mapLinkKey(r.firstAuthor, r.year) };
+      return { label: (r.firstAuthor||'-') + (r.year ? ' ('+r.year+')' : '') + (r.isInstitutional ? ' 🏛' : ''), matched: r.cited !== false, linkKey: mapLinkKey(r.firstAuthor, r.year) };
     });
     panel.innerHTML = mapHTML('In-Text Citations', citeItems, 'Reference List', refItems);
     wireMapLinks(panel);

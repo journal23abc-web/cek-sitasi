@@ -1114,6 +1114,27 @@ test('these two bugs combined no longer produce false "reference not cited in te
   assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
 });
 
+console.log('\n=== Regression: legitimate APA7 disambiguation by naming a second author ("Author, SecondAuthor, et al., Year") — needed when two colliding same-surname-same-year references also share the same first-author initial — was flagged as malformed AND failed to match its reference ===');
+
+test('"(Abercrombie, Bang, et al., 2022; Abercrombie, Carbonneau, et al., 2022)" — two different works by the same first author (same initial too) in the same year, disambiguated by naming a different second author for each — is NOT flagged as "et al. follows multiple names" (it is the correct, necessary APA7 disambiguation form here)', () => {
+  const issues = CE.detectMalformedCitations('Findings (Abercrombie, Bang, et al., 2022; Abercrombie, Carbonneau, et al., 2022) support this claim.');
+  assert.strictEqual(issues.filter((i) => i.type === 'multiple_authors_before_et_al').length, 0);
+});
+
+test('a genuine "et al. follows two names" mistake ("Smith, Jones et al., 2020") is still correctly flagged — the fix above only excludes the specific disambiguation shape, not the general mistake', () => {
+  const issues = CE.detectMalformedCitations('Research by Smith, Jones et al. (2020) shows this clearly across the whole sample.');
+  assert.strictEqual(issues.filter((i) => i.type === 'multiple_authors_before_et_al').length, 1);
+});
+
+test('both halves of the "Abercrombie, Bang/Carbonneau, et al., 2022" disambiguated citation group correctly match their own distinct reference — not flagged as ambiguous, and both references count as cited', () => {
+  const article = 'Findings (Abercrombie, Bang, et al., 2022; Abercrombie, Carbonneau, et al., 2022) support this claim across the sample studied here overall.';
+  const refs = 'Abercrombie, S., Bang, H., & Vaughan, A. (2022). Motivational and disciplinary differences. Educational Psychology, 1(1), 1-10.\n' +
+    'Abercrombie, S., Carbonneau, K. J., & Hushman, C. J. (2022). Re-examining academic risk taking. Journal, 2(2), 5-15.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Sitasi ambigu').length, 0);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
