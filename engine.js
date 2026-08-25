@@ -425,6 +425,12 @@ function extractAuthorDateCitations(text) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
     var year = m[2].trim();
     if (!authors) continue;
+    // Legal case citations ("X v. Y (2020)" / "X vs. Y (2020)") are a completely different
+    // citation convention (case names, not academic author-date) — the SECOND party ("Y") must
+    // never be extracted as if it were a standalone citable author, e.g. "Puttaswamy v. Union
+    // of India (2017)" should not try to match "Union of India" against the reference list.
+    var beforeCase = text.slice(Math.max(0, m.index - 6), m.index);
+    if (/\bv\.?\s*$|\bvs\.?\s*$/i.test(beforeCase)) continue;
     // The bare-whitespace chaining above (needed for space-joined names/orgs with no comma,
     // e.g. "van Dijk" or "Institute of International Finance") doesn't know about sentence
     // boundaries, so it can also glue on the tail of the PREVIOUS sentence when it ends right
@@ -459,6 +465,16 @@ function extractAuthorDateCitations(text) {
     var possessiveAndMatch = authors.match(/^(.+?)\s+and\s+([\p{Lu}\p{Lo}][\p{L}'\u2019.\-]*['\u2019]s)$/u);
     if (possessiveAndMatch && possessiveAndMatch[1].trim().split(/\s+/).length >= 3) {
       authors = possessiveAndMatch[2];
+    }
+    // Akronim pendek huruf besar semua (2-5 huruf, mis. "AI", "GDPR", "NEP") yang jadi bagian
+    // AKHIR kalimat/frasa sebelumnya, tersambung via ", and " ke sitasi LAIN yang genuinely
+    // terpisah (bertanda "et al." — sinyal kuat itu sitasi asli, bukan co-author), mis.
+    // "...multiple actors in educational AI, and Ifenthaler et al. (2024), who stress...".
+    // Daftar 2 penulis genuine TIDAK PERNAH berbentuk "akronim huruf besar semua, and
+    // NamaOrang et al." — pola ini SELALU berarti akronim itu bagian frasa lain, bukan penulis.
+    var acronymAndMatch = authors.match(/^([\p{Lu}]{2,5}),\s*and\s+(.+et\s+al\.?)$/u);
+    if (acronymAndMatch) {
+      authors = acronymAndMatch[2];
     }
     // Hindari menghitung ulang sitasi naratif yang SUDAH tercakup sebagai bagian dari grup
     // parenthetical yang sudah ditemukan di loop sebelumnya, mis. "(Smith, 2020; Jones, 2021)"
@@ -565,7 +581,7 @@ function parseSingleAuthorDate(text) {
   // introducing its own acronym — its official name may itself legitimately contain "and"
   // (e.g. "Organisation for Economic Co-operation and Development [OECD]"), which must NOT be
   // misread as a personal-author separator splitting it into two fake "co-authors".
-  var authors = extractAcronymPairing(cleanAuthorPart) ? [cleanAuthorPart] : splitOnSeparators(cleanAuthorPart);
+  var authors = (extractAcronymPairing(cleanAuthorPart) || isInstitutionalAuthor(cleanAuthorPart)) ? [cleanAuthorPart] : splitOnSeparators(cleanAuthorPart);
   var authorCount = authors.length;
   if (hasEtAl) authorCount = Math.max(authorCount, 3);
   var firstAuthor = authors[0] || null;

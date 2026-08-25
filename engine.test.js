@@ -1184,6 +1184,54 @@ test('a disambiguating initial does not distort alphabetical sorting — "H. Zha
   assert.strictEqual(r.errors.filter((e) => e.title === 'Multiple citations tidak alfabetis').length, 0);
 });
 
+console.log('\n=== Regression: a legal case citation ("X v. Y (Year)") had its second party wrongly extracted as if it were a standalone academic author-date citation ===');
+
+test('"Justice K.S. Puttaswamy (Retd.) v. Union of India (2017)" — a legal case name, not an academic citation — does not extract "Union of India (2017)" as a fake standalone citation', () => {
+  const cites = CE.extractAuthorDateCitations('In Justice K.S. Puttaswamy (Retd.) v. Union of India (2017), the Supreme Court held that privacy is a fundamental right.');
+  assert.strictEqual(cites.length, 0);
+});
+
+test('a genuine citation immediately after an unrelated "vs." elsewhere in the sentence is unaffected — the exclusion is narrowly scoped to text immediately preceding the match', () => {
+  const cites = CE.extractAuthorDateCitations('Smith (2020) argues this differs from the older vs. newer framing used in prior debates on the topic.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Smith');
+});
+
+console.log('\n=== Regression: a short all-caps acronym at the end of unrelated prose got wrongly chained via ", and" into a genuinely separate citation ===');
+
+test('"...actors in educational AI, and Ifenthaler et al. (2024), who stress..." correctly extracts only "Ifenthaler et al. (2024)", not "AI, and Ifenthaler et al." as one fake compound author', () => {
+  const cites = CE.extractAuthorDateCitations('who emphasize the responsibilities of multiple actors in educational AI, and Ifenthaler et al. (2024), who stress meaningful human involvement.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Ifenthaler et al.');
+});
+
+test('a genuine multi-author citation using "and" is unaffected by the acronym-chaining fix above (it only excludes the specific "SHORTACRONYM, and Name et al." shape)', () => {
+  const cites = CE.extractAuthorDateCitations('Smith and Jones et al. (2020) argue that this holds broadly across most contexts studied here overall.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Smith and Jones et al.');
+});
+
+console.log('\n=== Regression: a hierarchical institutional author name written with internal commas ("Legislative Department, Ministry of Law and Justice, Government of India") was wrongly split into 3 fake co-authors ===');
+
+test('a hierarchical institutional citation with internal commas is treated as ONE author, not flagged as "3+ authors without et al."', () => {
+  const cites = CE.extractAuthorDateCitations('constitutional guarantees exist (Legislative Department, Ministry of Law and Justice, Government of India, 2025) as established.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].parts[0].authorCount, 1);
+  assert.strictEqual(cites[0].parts[0].firstAuthor, 'Legislative Department, Ministry of Law and Justice, Government of India');
+});
+
+test('a genuine 3-author citation (not institutional) still correctly splits into 3 separate authors — the fix above only affects recognized institutional names', () => {
+  const cites = CE.extractAuthorDateCitations('(Smith, Jones, and Brown, 2020) show this clearly across all cases studied here overall in the sample.');
+  assert.strictEqual(cites[0].parts[0].authorCount, 3);
+});
+
+test('full validation no longer flags the hierarchical institutional citation as "3+ authors without et al."', () => {
+  const article = 'constitutional guarantees exist (Legislative Department, Ministry of Law and Justice, Government of India, 2025) as established under the framework.';
+  const refs = 'Legislative Department, Ministry of Law and Justice, Government of India. (2025). The Constitution of India. Government of India.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title.includes('penulis tanpa "et al."')).length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
