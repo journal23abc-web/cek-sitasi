@@ -408,7 +408,7 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)?(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -525,7 +525,9 @@ function parseParentheticalAuthorDate(content) {
 var LEADING_PARTICLE_RE = /^(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+/i;
 
 function looksLikePlausibleAuthorStart(authorPart) {
-  var stripped = authorPart.replace(LEADING_PARTICLE_RE, '');
+  var stripped = authorPart;
+  var prevLen;
+  do { prevLen = stripped.length; stripped = stripped.replace(LEADING_PARTICLE_RE, ''); } while (stripped.length !== prevLen);
   // Wajib diawali HURUF (bukan angka, bukan tanda baca) — menyaring teks prosa biasa yang
   // kebetulan diikuti tahun berkoma, mis. "(28 July 2026)" (diawali angka "28") atau "(through
   // July 2026, ...)" (diawali kata sambung huruf kecil "through", bukan nama).
@@ -1216,6 +1218,17 @@ function normalizeKeyName(name, isInstitutional) {
   return stripNameParticles(name).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+// Sama seperti normalizeKeyName, TAPI TIDAK membuang partikel nama ("van", "der", "von", dst.)
+// — dipakai KHUSUS untuk perbandingan urutan alfabetis (bukan pencocokan sitasi-ke-referensi).
+// APA7 secara konvensi memperlakukan partikel sebagai bagian dari nama yang bisa diurutkan
+// (mis. "van der Kleij" diurutkan di bawah huruf V), beda dari kebutuhan PENCOCOKAN yang
+// justru diuntungkan oleh toleransi pembuangan partikel (supaya perbedaan cara penulisan
+// partikel antara teks sitasi & daftar referensi tidak menyebabkan gagal cocok).
+function sortKeyFromName(name) {
+  if (!name) return '';
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
 function acronymOf(name) {
   var pairing = extractAcronymPairing(name);
   if (pairing) return pairing.acronym.toLowerCase();
@@ -1454,7 +1467,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           self.errors.push({ title: style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi menulis ' + p.authorCount + ' nama, padahal ' + style.name + ' mengharuskan "et al." mulai ' + style.etAlThreshold + ' penulis.', code: '(' + p.raw + ')', correction: '(' + p.firstAuthor + ' et al., ' + p.year + ')', severity: 'error' });
         }
       } else {
-        var fa = c.parts.map(function(p){return self.keyFromCitationToken(p.firstAuthor);});
+        var fa = c.parts.map(function(p){return sortKeyFromName(surnameFromCitationToken(p.firstAuthor));});
         // localeCompare (bukan operator < / > mentah) supaya huruf berdiakritik (Ç, Ú, É, Ñ, ...)
         // dibandingkan berdasarkan huruf dasarnya, bukan urutan kode-Unicode mentahnya — kode
         // Unicode taruh huruf besar berdiakritik SETELAH huruf kecil 'z' biasa, yang salah

@@ -1135,6 +1135,55 @@ test('both halves of the "Abercrombie, Bang/Carbonneau, et al., 2022" disambigua
   assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
 });
 
+console.log('\n=== Regression: surnames with a DOUBLE leading particle ("van der Kleij", "von der Leyen", "de la Cruz") were completely invisible to citation extraction — the optional particle prefix only consumed ONE particle word, leaving the second lowercase particle unable to match the required capitalized base-word segment ===');
+
+test('a parenthetical citation with a double-particle surname ("(van der Kleij et al., 2015)") is correctly extracted, not silently dropped', () => {
+  const cites = CE.extractAuthorDateCitations('This is discussed further (van der Kleij et al., 2015) in recent literature on the subject.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].parts[0].firstAuthor, 'van der Kleij');
+});
+
+test('a narrative citation with a double-particle surname ("van der Kleij et al. (2015)") is correctly extracted too', () => {
+  const cites = CE.extractAuthorDateCitations('van der Kleij et al. (2015) argue that this approach improves outcomes considerably overall.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'van der Kleij et al.');
+});
+
+test('full validation correctly matches a double-particle-surname citation to its reference, with no false "not cited" error', () => {
+  const article = 'This is discussed further (van der Kleij et al., 2015) in recent literature on the subject overall.';
+  const refs = 'van der Kleij, F. M., Vermeulen, J. A., Schildkamp, K., & Eggen, T. J. H. M. (2015). Integrating data-based decision making. Journal, 1(1), 1-10.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
+});
+
+console.log('\n=== Regression: alphabetical-order checking for multiple citations used the same particle-STRIPPING normalization as citation-to-reference MATCHING — correct for matching (tolerates inconsistent particle usage), but wrong for sorting (APA7 keeps the particle as part of the sortable surname, e.g. "van der Kleij" sorts under V, not stripped to "Kleij" under K) ===');
+
+test('a multi-citation group already in correct APA7 alphabetical order — including a particle surname sorted by its FULL form ("Lodge" < "Schildkamp" < "van der Kleij") — is NOT flagged as out of order', () => {
+  const article = 'This is supported (Lodge & Corrin, 2017; Schildkamp, 2019; van der Kleij, 2015) consistently across several studies in this area.';
+  const refs = 'Lodge, J. M., & Corrin, L. (2017). Title A. Journal, 1(1), 1-10.\n' +
+    'Schildkamp, K. (2019). Title B. Journal, 2(2), 5-15.\n' +
+    'van der Kleij, F. M. (2015). Title C. Journal, 3(3), 1-9.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Multiple citations tidak alfabetis').length, 0);
+});
+
+test('a multi-citation group that IS genuinely out of alphabetical order is still correctly flagged — the fix above only changes how particles are sorted, not whether misordering is detected', () => {
+  const article = 'This is supported (Schildkamp, 2019; Lodge & Corrin, 2017) consistently across several studies in this specific area.';
+  const refs = 'Lodge, J. M., & Corrin, L. (2017). Title A. Journal, 1(1), 1-10.\n' +
+    'Schildkamp, K. (2019). Title B. Journal, 2(2), 5-15.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Multiple citations tidak alfabetis').length, 1);
+});
+
+test('a disambiguating initial does not distort alphabetical sorting — "H. Zhang" still sorts under "Zhang" (Z), not under "H"', () => {
+  const article = 'Studies (Adams, 2020; H. Zhang, 2023) support this claim broadly across the research literature reviewed here.';
+  const refs = 'Adams, K. (2020). Title A. Journal, 1(1), 1-10.\n' +
+    'Zhang, H. (2023). Title B. Journal, 2(2), 5-15.\n' +
+    'Zhang, F. (2023). Title C. Journal, 3(3), 1-9.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Multiple citations tidak alfabetis').length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {
