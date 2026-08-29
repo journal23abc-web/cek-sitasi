@@ -1,7 +1,7 @@
 // Runs MultiFormatValidator.validate() off the main thread for large documents, so the tab
 // doesn't freeze while parsing/matching hundreds of references. Only handles the CPU-bound
 // validation step — DOI network checks stay on the main thread (already async/progressive).
-importScripts('engine.js');
+importScripts('engine.js?v=14');
 
 self.onmessage = function(e) {
   var msg = e.data || {};

@@ -243,7 +243,7 @@
   var validatorWorker = null;
   function getWorker() {
     if (validatorWorker) return validatorWorker;
-    try { validatorWorker = new Worker('validator-worker.js?v=1'); return validatorWorker; }
+    try { validatorWorker = new Worker('validator-worker.js?v=2'); return validatorWorker; }
     catch (e) { return null; }
   }
   function runValidation(articleText, referenceText, styleId) {

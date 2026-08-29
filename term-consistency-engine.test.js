@@ -1,9 +1,9 @@
 // Automated tests for term-consistency-engine.js — zero dependencies, pure Node `assert`.
-// Run with: node tests/term-consistency-engine.test.js
+// Run with: node term-consistency-engine.test.js
 
 const assert = require('assert');
 const path = require('path');
-const TCE = require(path.join(__dirname, '..', 'term-consistency-engine.js'));
+const TCE = require(path.join(__dirname, 'term-consistency-engine.js'));
 
 let pass = 0, fail = 0;
 const failures = [];

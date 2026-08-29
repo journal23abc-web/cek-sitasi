@@ -44,14 +44,6 @@ node converter-engine.test.js
 Tidak perlu `npm install` — semua *-engine.js murni JavaScript tanpa dependency, tes memakai
 modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal (aman dipakai di CI).
 
-> **Catatan:** file-file `*.test.js` sebenarnya ada di root proyek (bukan di folder `tests/`),
-> tapi `require`-nya masih menulis `path.join(__dirname, '..', 'engine.js')` — itu menunjuk ke
-> SATU LEVEL DI ATAS root proyek, sehingga `node engine.test.js` gagal dengan
-> `Cannot find module`. Ini bukan sesuatu yang berubah lewat perubahan di dokumen ini; perlu
-> perbaikan terpisah (ubah requirenya jadi `path.join(__dirname, 'engine.js')`, atau benar-benar
-> pindahkan file test ke folder `tests/`) sebelum instruksi di atas benar-benar bisa dijalankan.
-> `converter-engine.test.js` (baru) sudah memakai path yang benar sejak awal.
-
 ## Gaya sitasi yang didukung
 
 APA 7th Edition, MLA 9th Edition, Chicago (Author-Date), Harvard, IEEE, Vancouver.

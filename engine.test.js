@@ -1,10 +1,10 @@
 // Automated tests for engine.js — zero dependencies, pure Node `assert`.
-// Run with: node tests/engine.test.js
+// Run with: node engine.test.js
 // Exits with code 1 if any test fails (safe to wire into CI).
 
 const assert = require('assert');
 const path = require('path');
-const CE = require(path.join(__dirname, '..', 'engine.js'));
+const CE = require(path.join(__dirname, 'engine.js'));
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -229,6 +229,70 @@ test('a short acronym citation matches its reference even with a trailing period
     'GEM. (2022). GEM 2022. Global Entrepreneurship Monitor. https://www.gemconsortium.org/data/sets?id=aps');
   assert.strictEqual(r.errors.some(e => e.title === 'Sitasi tidak ada di daftar referensi'), false);
   assert.strictEqual(r.errors.some(e => e.title === 'Referensi tidak disitasi dalam teks'), false);
+});
+
+console.log('\n=== Regression: surnames that are also common words were stripped before "et al." and left fake "al. (Year)" citations ===');
+
+test('"Can et al. (2023)" keeps Can as the surname instead of extracting the fake fragment "al. (2023)"', () => {
+  const cites = CE.extractAuthorDateCitations('Can et al. (2023) explain how life-cycle stages affect capital expenditure.');
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].authors, 'Can et al.');
+  assert.strictEqual(cites[0].raw, 'Can et al. (2023)');
+});
+
+test('the common-word-surname guard generalizes to other surnames and author connectors', () => {
+  const cases = [
+    ['May et al. (2024) report the same result.', 'May et al.'],
+    ['Will and Stone (2022) report the same result.', 'Will and Stone'],
+    ['Per & Holm (2021) report the same result.', 'Per & Holm'],
+  ];
+  cases.forEach(([text, expected]) => {
+    const cites = CE.extractAuthorDateCitations(text);
+    assert.strictEqual(cites.length, 1, text);
+    assert.strictEqual(cites[0].authors, expected, text);
+  });
+});
+
+test('line breaks inside "et al." do not revive the orphan "al." false positive', () => {
+  const variants = [
+    'Can et\nal. (2023) explain the result.',
+    'Can et\r\nal. (2023) explain the result.',
+    'Can et\n\nal. (2023) explain the result.',
+  ];
+  variants.forEach((text) => {
+    const cites = CE.extractAuthorDateCitations(text);
+    assert.strictEqual(cites.length, 1, JSON.stringify(text));
+    assert.strictEqual(cites[0].authors.replace(/\s+/g, ' '), 'Can et al.', JSON.stringify(text));
+    assert.strictEqual(/^al\./i.test(cites[0].authors), false, JSON.stringify(text));
+  });
+});
+
+test('capitalized genuine surnames Al and Et remain valid while lowercase fragments stay excluded', () => {
+  const cites = CE.extractAuthorDateCitations('Al (2018) and Et (2017) reported this; lowercase al. (2016) is only a fragment.');
+  assert.deepStrictEqual(cites.map(c => c.authors), ['Al', 'Et']);
+});
+
+test('common-word surnames match their references end to end without false missing-citation errors', () => {
+  const article = 'Can et al. (2023), May et al. (2024), and Will and Stone (2022) report consistent evidence.';
+  const refs = [
+    'Can, G., Demiraj, R., & Mersni, H. (2023). Life-cycle stages and capital expenditures. Journal A, 1(1), 1-10.',
+    'May, A., Doe, B., & Lee, C. (2024). Evidence from another setting. Journal B, 2(1), 11-20.',
+    'Will, R., & Stone, S. (2022). A two-author study. Journal C, 3(1), 21-30.',
+  ].join('\n');
+  const r = validate(article, refs);
+  assert.strictEqual(r.citations.length, 3);
+  assert.strictEqual(r.errors.some(e => e.title === 'Sitasi tidak ada di daftar referensi'), false);
+  assert.strictEqual(r.errors.some(e => e.title === 'Referensi tidak disitasi dalam teks'), false);
+  assert.strictEqual(r.citations.some(c => c.authors && /^al\./i.test(c.authors)), false);
+});
+
+test('hyphenated and Unicode given-name initials stay attached to their surnames', () => {
+  const ref = CE.parseReferenceLine(
+    'Yang, T.-J., Howard, A., & Álvarez, É. (2018). NetAdapt. Journal X, 1(1), 1-9.',
+    'apa7'
+  );
+  assert.deepStrictEqual(ref.authors, ['Yang, T.-J.', 'Howard, A.', 'Álvarez, É']);
+  assert.strictEqual(ref.authorCount, 3);
 });
 
 console.log('\n=== Unicode / international names ===');
@@ -1239,4 +1303,3 @@ if (fail > 0) {
   failures.forEach(f => console.log('  - ' + f.name + ': ' + f.err.message));
   process.exit(1);
 }
-

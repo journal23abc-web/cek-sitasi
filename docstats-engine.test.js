@@ -1,9 +1,9 @@
 // Automated tests for docstats-engine.js — zero dependencies, pure Node `assert`.
-// Run with: node tests/docstats-engine.test.js
+// Run with: node docstats-engine.test.js
 
 const assert = require('assert');
 const path = require('path');
-const DS = require(path.join(__dirname, '..', 'docstats-engine.js'));
+const DS = require(path.join(__dirname, 'docstats-engine.js'));
 
 let pass = 0, fail = 0;
 const failures = [];

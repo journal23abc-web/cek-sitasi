@@ -416,10 +416,24 @@ function extractAuthorDateCitations(text) {
   // these must only be treated as skip-fragments when the ORIGINAL text was already lowercase.
   var caseSensitiveSkipWords = new Set(['al', 'et', 'cf', 'e.g', 'i.e']);
   function isSkipWord(originalWord) {
-    var lower = originalWord.toLowerCase();
+    // Strip punctuation around a candidate before consulting the skip list. This matters when
+    // a broader regex match is trimmed in stages: "Can et al. (2023)" used to lose the surname
+    // "Can" (because it is also an English modal verb), then leave the punctuated fragment
+    // "al." behind. Looking up the literal "al." missed the existing "al" guard and created a
+    // fake citation. Internal punctuation is kept so abbreviations such as "e.g." still
+    // normalize to the deliberately-listed token "e.g" rather than an unrelated word.
+    var normalizedOriginal = originalWord.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    var lower = normalizedOriginal.toLowerCase();
     if (!skipWords.has(lower)) return false;
-    if (caseSensitiveSkipWords.has(lower)) return originalWord === lower;
+    if (caseSensitiveSkipWords.has(lower)) return normalizedOriginal === lower;
     return true;
+  }
+  // Some valid surnames are also ordinary words (Can, May, Will, Per, etc.). A following
+  // "et al." or explicit author connector is strong evidence that such a capitalized token is
+  // a surname, not prose. Keep that sequence intact. Requiring an uppercase/uncased first
+  // letter intentionally does not rescue lowercase prose such as "can et al.".
+  function startsWithStrongAuthorSequence(value) {
+    return /^(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s+et\s+al\.?)|(?:\s*,?\s*(?:and|dan)\s+[\p{Lu}\p{Lo}])|(?:\s*&\s*[\p{Lu}\p{Lo}]))/u.test(value);
   }
   while ((m = narrativeRegex.exec(text)) !== null) {
     var authors = m[1].trim().replace(/^(The|A|An)\s+/, '');
@@ -449,6 +463,7 @@ function extractAuthorDateCitations(text) {
     // check). Without this, the whole match gets discarded by the skipWords check below and
     // the citation is lost entirely (shows up as a false "not cited in text" warning instead).
     for (var stripGuard = 0; stripGuard < 4; stripGuard++) {
+      if (startsWithStrongAuthorSequence(authors)) break;
       var leadMatch = authors.match(/^([\p{L}]+),?\s+/u);
       if (!leadMatch || !(isSkipWord(leadMatch[1]) || PLACE_WORDS.has(leadMatch[1].toLowerCase()))) break;
       authors = authors.slice(leadMatch[0].length).trim();
@@ -490,7 +505,7 @@ function extractAuthorDateCitations(text) {
     });
     if (insideExistingParenCitation) continue;
     var firstWordOriginal = authors.split(/[\s,]+/)[0];
-    if (isSkipWord(firstWordOriginal)) continue;
+    if (isSkipWord(firstWordOriginal) && !startsWithStrongAuthorSequence(authors)) continue;
     // `authors` may have had leading text stripped above (sentence fragments, discourse words,
     // "The/A/An"), so it's no longer necessarily positioned at m.index — every stripping step
     // only ever removes a prefix, though, so `authors` is still a verbatim substring of the
@@ -691,7 +706,10 @@ var AuthorParsers = {
     var parts = splitOnSeparators(cleaned);
     var authors = [];
     var buffer = null;
-    var initialsOnly = /^(?:(?:[A-Z]\.?|Md\.?|Mst\.?)\s*)+$/;
+    // Keep compound initials such as "T.-J." attached to the preceding surname. Treating the
+    // hyphenated pair as a separate comma-delimited author shifted every following name and
+    // produced malformed converted references. Unicode uppercase initials are accepted too.
+    var initialsOnly = /^(?:(?:\p{Lu}\.?(?:-\p{Lu}\.?)*|Md\.?|Mst\.?)\s*)+$/u;
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
       if (initialsOnly.test(p)) {

@@ -1,9 +1,9 @@
 // Automated tests for journal-rules-engine.js — zero dependencies, pure Node `assert`.
-// Run with: node tests/journal-rules-engine.test.js
+// Run with: node journal-rules-engine.test.js
 
 const assert = require('assert');
 const path = require('path');
-const JR = require(path.join(__dirname, '..', 'journal-rules-engine.js'));
+const JR = require(path.join(__dirname, 'journal-rules-engine.js'));
 
 let pass = 0, fail = 0;
 const failures = [];

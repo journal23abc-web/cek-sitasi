@@ -1,12 +1,12 @@
 // Automated tests for scopus-engine.js — zero dependencies, pure Node `assert`.
-// Run with: node tests/scopus-engine.test.js
+// Run with: node scopus-engine.test.js
 
 const assert = require('assert');
 const path = require('path');
-const CE = require(path.join(__dirname, '..', 'engine.js'));
+const CE = require(path.join(__dirname, 'engine.js'));
 
 global.window = { CitationEngine: CE };
-const SM = require(path.join(__dirname, '..', 'scopus-engine.js'));
+const SM = require(path.join(__dirname, 'scopus-engine.js'));
 
 let pass = 0, fail = 0;
 const failures = [];

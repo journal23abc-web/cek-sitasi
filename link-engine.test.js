@@ -1,5 +1,5 @@
 // Automated tests for link-engine.js — zero dependencies beyond @xmldom/xmldom, pure Node `assert`.
-// Run with: node tests/link-engine.test.js
+// Run with: node link-engine.test.js
 //
 // These build small, realistic word/document.xml fragments by hand (rather than a full real
 // .docx) so each scenario is isolated and fast — the fixtures below mirror the exact structural
@@ -8,12 +8,12 @@
 const assert = require('assert');
 const path = require('path');
 const { DOMParser, XMLSerializer } = require('@xmldom/xmldom');
-const CE = require(path.join(__dirname, '..', 'engine.js'));
+const CE = require(path.join(__dirname, 'engine.js'));
 
 global.window = { CitationEngine: CE };
 global.DOMParser = DOMParser;
 global.XMLSerializer = XMLSerializer;
-require(path.join(__dirname, '..', 'link-engine.js'));
+require(path.join(__dirname, 'link-engine.js'));
 const CitationLinker = global.window.CitationLinker;
 
 let pass = 0, fail = 0;
