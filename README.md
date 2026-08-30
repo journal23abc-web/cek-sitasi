@@ -51,6 +51,9 @@ Auto-detect gaya tersedia, tapi untuk dokumen ambigu selalu ada opsi pilih manua
 ## Apa yang diperiksa
 
 - Kecocokan sitasi di teks ↔ entri di daftar referensi (dan sebaliknya)
+- Resolver terpusat untuk Validator, Converter, dan Tautkan Sitasi. Setiap keputusan membawa
+  status, alasan, serta confidence; kemiripan fuzzy hanya menjadi bahan tinjauan dan tidak
+  diterapkan otomatis dalam mode aman.
 - Format pemisah penulis ("&" vs "and"), aturan "et al.", urutan alfabetis
 - Duplikat referensi (DOI sama, judul sangat mirip)
 - Tabrakan nama-belakang + tahun yang sama (mis. "H. Zhang, 2023" vs "F. Zhang, 2023") —
@@ -64,6 +67,21 @@ Auto-detect gaya tersedia, tapi untuk dokumen ambigu selalu ada opsi pilih manua
 - **Peta Sitasi ↔ Referensi**: tampilan dua kolom (sitasi vs referensi) dengan status
   cocok/tidak cocok; entri yang cocok bisa **diklik untuk lompat & disorot** ke
   pasangannya di kolom sebelah
+- **Penautan DOCX aman dan idempoten**: bookmark/hyperlink yang sudah benar dipakai ulang,
+  nama/ID bookmark dicek agar tidak bertabrakan, teks terlihat tidak boleh berubah, dan struktur
+  OOXML diperiksa sebelum file keluaran ditawarkan. Content-control Zotero/Mendeley/EndNote
+  tetap dipertahankan; hyperlink disisipkan di dalam kontennya tanpa melepas metadata sitasi.
+
+## Tingkat keyakinan pencocokan author-date
+
+| Keputusan | Confidence | Perlakuan mode aman |
+|---|---:|---|
+| Nama personal/institusi sama persis | 100% | Diterapkan otomatis |
+| Akronim yang diperkenalkan eksplisit | 98–99% | Diterapkan jika target unik |
+| Akronim yang diturunkan dari nama institusi | 94% | Diterapkan jika target unik |
+| Nama institusi dipendekkan hanya pada kualifier yurisdiksi | 90% | Diterapkan jika target unik |
+| Kemiripan awalan/fuzzy | 55% | Tidak diterapkan; ditandai untuk tinjauan |
+| Beberapa kandidat sama kuat | — | Abstain; pengguna harus mendisambiguasi |
 
 ## Keterbatasan yang jujur perlu diketahui
 
@@ -117,6 +135,11 @@ berbasis **pola teks (heuristik)**, bukan parsing gaya-sitasi yang benar-benar f
   sitasi berurutan ditulis terpisah dengan koma ("[1], [2]"), bukan rentang tanda pisah —
   rentang ("[1]-[3]") hanya dipakai untuk 3 sitasi berurutan atau lebih, sesuai konvensi
   editorial IEEE yang sebenarnya.
+- **Content-control pengelola sitasi** dipertahankan secara default saat auto-link. Hyperlink
+  internal dibuat di dalam `w:sdtContent`; memperbarui sitasi dari Zotero/Mendeley/EndNote di
+  kemudian hari dapat menulis ulang tampilan sitasi dan menghilangkan hyperlink tersebut, tetapi
+  hubungan sitasi dengan pengelolanya tidak diputus oleh alat ini. Opsi kompatibilitas untuk
+  membongkar wrapper tetap tersedia, namun bukan default.
 - **Deteksi &amp; perbaikan gaya campuran** — kalau naskah sumbernya sendiri sudah bercampur
   gaya (mis. mayoritas APA tapi ada beberapa sitasi yang kadung ditulis format IEEE/numerik,
   atau sebaliknya), converter tidak cuma memproses sitasi bergaya sumber yang dipilih —
@@ -171,6 +194,9 @@ seluruh naskah, ke api.crossref.org).
   `validator-upload.html` otomatis diproses di background thread (`validator-worker.js`)
   supaya tab browser tidak macet, dengan fallback otomatis ke main thread kalau
   Worker gagal/timeout.
+- **CI**: workflow GitHub Actions menjalankan seluruh suite pada setiap push dan pull request.
+  Suite mencakup resolver, konversi, mutasi OOXML, perlindungan content-control, serta uji
+  idempotensi dua kali proses.
 - **Aksesibilitas**: tab (baik input mode maupun kategori hasil) pakai pola ARIA
   tabs standar (`role="tab"`, `aria-selected`, navigasi panah kiri/kanan), status
   proses punya `aria-live="polite"` supaya terbaca screen reader, dan tombol

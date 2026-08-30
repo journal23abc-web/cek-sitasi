@@ -227,6 +227,25 @@ test('when target itself is numeric, stray bracket citations are just normal pri
   assert.strictEqual(r.mixedStyleFoundCount, 0);
 });
 
+console.log('\n=== Shared safe resolver (validator/linker/converter parity) ===');
+
+test('converter resolves a derived institutional acronym through the shared high-confidence resolver', () => {
+  const article = 'The requirement applies (BPKP, 2019) across local agencies.';
+  const refs = 'Badan Pengawasan Keuangan dan Pembangunan. (2019). Annual performance report. BPKP.';
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.ok(r.convertedArticle.includes('[1]'), r.convertedArticle);
+  assert.strictEqual(r.unmatched.length, 0);
+});
+
+test('converter abstains from a fuzzy-prefix guess instead of silently converting the wrong citation', () => {
+  const article = 'Prior work (Smithe, 2020) supports this claim.';
+  const refs = 'Smith, J. (2020). Title. Journal, 1(1), 1-10.';
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.ok(r.convertedArticle.includes('(Smithe, 2020)'), r.convertedArticle);
+  assert.strictEqual(r.unmatched.length, 1);
+  assert.ok(!r.convertedArticle.includes('[1]'), r.convertedArticle);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));

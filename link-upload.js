@@ -9,6 +9,8 @@
     fileSize: document.getElementById('fileSize'),
     fileRemove: document.getElementById('fileRemove'),
     styleSelect: document.getElementById('styleSelect'),
+    safeMode: document.getElementById('safeMode'),
+    preserveCitationControls: document.getElementById('preserveCitationControls'),
     linkScope: document.getElementById('linkScope'),
     applyColor: document.getElementById('applyColor'),
     linkColor: document.getElementById('linkColor'),
@@ -106,8 +108,10 @@
     state.file.arrayBuffer()
       .then(function (buf) { return JSZip.loadAsync(buf); })
       .then(function (zip) {
+        ['[Content_Types].xml', '_rels/.rels', 'word/document.xml'].forEach(function (requiredPart) {
+          if (!zip.file(requiredPart)) throw new Error('Paket DOCX tidak lengkap: ' + requiredPart + ' tidak ditemukan.');
+        });
         var docFile = zip.file('word/document.xml');
-        if (!docFile) throw new Error('word/document.xml tidak ditemukan — file mungkin bukan .docx yang valid.');
         var relsFile = zip.file('word/_rels/document.xml.rels');
         return Promise.all([
           docFile.async('string'),
@@ -128,6 +132,8 @@
         var result = window.CitationLinker.linkDocx(xmlDoc, {
           styleId: styleId,
           linkScope: els.linkScope.value,
+          safeMode: els.safeMode ? els.safeMode.checked : true,
+          preserveCitationControls: els.preserveCitationControls ? els.preserveCitationControls.checked : true,
           linkColor: els.applyColor.checked ? els.linkColor.value : null,
           narrowToHighlight: els.narrowToHighlight.checked,
           onlyHighlighted: els.onlyHighlighted.checked,
@@ -137,6 +143,9 @@
         });
         if (result.error === 'NO_HEADING') {
           throw new Error('Heading daftar referensi tidak ditemukan. Pastikan ada paragraf tersendiri bertuliskan "References" / "Daftar Pustaka" / "Bibliography" sebelum daftar referensi dimulai.');
+        }
+        if (result.integrity && !result.integrity.ok) {
+          throw new Error('Pemeriksaan integritas OOXML gagal (' + result.integrity.issues.join(', ') + '). File keluaran dibatalkan agar naskah asli tetap aman.');
         }
         var serializer = new XMLSerializer();
         var newXmlStr = serializer.serializeToString(xmlDoc);
@@ -177,7 +186,7 @@
   function renderReport(result) {
     els.results.classList.add('active');
 
-    var bannerClass = result.unmatched.length === 0 ? 'ok' : 'ok';
+    var bannerClass = result.unmatched.length === 0 ? 'ok' : 'warn';
     var styleLabel = result.styleName + (result.detected ? ' (auto-detect, keyakinan ' + result.detected.confidence + '%)' : ' (dipilih manual)');
     var hlNote = '';
     if (result.docHasHighlight) {
@@ -200,7 +209,9 @@
     els.parseBanner.innerHTML =
       '<div class="parse-banner ' + bannerClass + '">' +
       '<div class="pb-title">Gaya sitasi: ' + escHtml(styleLabel) + '</div>' +
-      '<div class="pb-stats">' + result.refCount + ' referensi terdeteksi &middot; ' + result.linked + ' sitasi tertaut &middot; ' + result.unmatched.length + ' tidak cocok</div>' +
+      '<div class="pb-stats">' + result.refCount + ' referensi terdeteksi &middot; ' + result.linked + ' sitasi tertaut &middot; ' + result.unmatched.length + ' tidak cocok' +
+      (result.reviewRequired ? ' &middot; ' + result.reviewRequired + ' perlu ditinjau' : '') +
+      (result.protectedControlsSkipped ? ' &middot; ' + result.protectedControlsSkipped + ' field sitasi dilindungi' : '') + '</div>' +
       hlNote + figTblNote +
       '</div>';
 
@@ -208,6 +219,7 @@
       '<div class="sum-card"><div class="n">' + result.refCount + '</div><div class="l">Referensi</div></div>' +
       '<div class="sum-card ok"><div class="n">' + result.linked + '</div><div class="l">Tertaut</div></div>' +
       '<div class="sum-card ' + (result.unmatched.length ? 'warn' : 'ok') + '"><div class="n">' + result.unmatched.length + '</div><div class="l">Tidak Cocok</div></div>' +
+      (result.reviewRequired ? '<div class="sum-card warn"><div class="n">' + result.reviewRequired + '</div><div class="l">Perlu Ditinjau</div></div>' : '') +
       '<div class="sum-card fmt"><div class="n">' + escHtml(result.styleName) + '</div><div class="l">Gaya</div></div>' +
       (result.urlsLinked ? '<div class="sum-card ok"><div class="n">' + result.urlsLinked + '</div><div class="l">URL Referensi Ditautkan</div></div>' : '') +
       (els.linkFiguresTables && els.linkFiguresTables.checked ? '<div class="sum-card ok"><div class="n">' + result.figuresTablesLinked + '</div><div class="l">Figure/Table Tertaut</div></div>' : '') +
@@ -216,15 +228,22 @@
     var html = '';
     if (result.unmatched.length) {
       html += '<h3>Sitasi yang tidak berhasil ditautkan — cek manual</h3>';
-      result.unmatched.slice(0, 40).forEach(function (u) {
-        html += '<div class="cite-row"><span>' + escHtml(u) + '</span><span class="tag bad">tidak cocok</span></div>';
+      result.unmatched.slice(0, 40).forEach(function (u, idx) {
+        var detail = result.unmatchedDetails && result.unmatchedDetails[idx];
+        var reasonLabel = detail && window.CitationEngine.AUTHOR_DATE_MATCH_REASONS
+          ? window.CitationEngine.AUTHOR_DATE_MATCH_REASONS[detail.reason]
+          : null;
+        var suffix = reasonLabel ? ' — ' + reasonLabel + (detail.confidence ? ' (' + Math.round(detail.confidence * 100) + '%)' : '') : '';
+        html += '<div class="cite-row"><span>' + escHtml(u + suffix) + '</span><span class="tag bad">' + (detail && (detail.status === 'review' || detail.status === 'ambiguous') ? 'tinjau' : 'tidak cocok') + '</span></div>';
       });
       if (result.unmatched.length > 40) html += '<div class="more-note">...dan ' + (result.unmatched.length - 40) + ' lainnya.</div>';
     }
     if (result.linkedList.length) {
       html += '<h3>Contoh sitasi yang berhasil ditautkan</h3>';
-      result.linkedList.slice(0, 15).forEach(function (l) {
-        html += '<div class="cite-row"><span>' + escHtml(l) + '</span><span class="tag ok">tertaut</span></div>';
+      result.linkedList.slice(0, 15).forEach(function (l, idx) {
+        var detail = result.linkedDetails && result.linkedDetails[idx];
+        var reasonLabel = detail && window.CitationEngine.AUTHOR_DATE_MATCH_REASONS ? window.CitationEngine.AUTHOR_DATE_MATCH_REASONS[detail.reason] : null;
+        html += '<div class="cite-row"><span>' + escHtml(l + (reasonLabel ? ' — ' + reasonLabel + ' (' + Math.round(detail.confidence * 100) + '%)' : '')) + '</span><span class="tag ok">tertaut</span></div>';
       });
       if (result.linkedList.length > 15) html += '<div class="more-note">...dan ' + (result.linkedList.length - 15) + ' lainnya.</div>';
     }

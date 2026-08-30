@@ -49,26 +49,41 @@
   // two separate personal co-authors — citation-text extraction alone can't tell these apart.
   // Tries the normal single-first-author key first, then the full "&"-joined form, then (for a
   // bare acronym like "BSP") its resolved full institutional name, as fallbacks.
-  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap, refTargets, styleId) {
+  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap, refTargets, styleId, safeMode) {
     // Prefer the shared, reference-aware resolver from engine.js.  It handles derived
     // institutional acronyms, conservative shortened institution names, and -- critically --
     // returns ALL candidates so an ambiguous same-name/same-year citation is never linked to
     // whichever reference happened to appear first in the list.
-    if (CE.findAuthorDateReferenceMatches && refTargets) {
+    if (CE.resolveAuthorDateReference && refTargets) {
       var refs = refTargets.map(function(t) { return t.ref; });
-      var resolved = CE.findAuthorDateReferenceMatches(firstAuthor, allAuthorNames, year, refs, styleId, acronymMap);
-      if (resolved.length > 1) return null;
-      if (resolved.length === 1) {
+      var decision = CE.resolveAuthorDateReference(firstAuthor, allAuthorNames, year, refs, styleId, acronymMap);
+      if (decision.status === 'matched' && decision.autoSafe) {
         for (var rt = 0; rt < refTargets.length; rt++) {
-          if (refTargets[rt].ref === resolved[0]) return refTargets[rt].bookmarkName;
+          if (refTargets[rt].ref === decision.ref) {
+            return { bookmarkName: refTargets[rt].bookmarkName, status: decision.status, reason: decision.reason, confidence: decision.confidence };
+          }
         }
       }
+      if (safeMode === false && decision.status === 'review' && decision.candidates.length === 1) {
+        for (var weakIdx = 0; weakIdx < refTargets.length; weakIdx++) {
+          if (refTargets[weakIdx].ref === decision.candidates[0]) {
+            return { bookmarkName: refTargets[weakIdx].bookmarkName, status: 'matched', reason: decision.reason, confidence: decision.confidence, lowConfidence: true };
+          }
+        }
+      }
+      // Safe mode abstains on ambiguity and weak fuzzy similarity.  The diagnostic decision is
+      // still returned so the report can tell the user exactly why a link was not created.
+      if (safeMode !== false || decision.status !== 'nomatch') {
+        return { bookmarkName: null, status: decision.status, reason: decision.reason, confidence: decision.confidence, candidates: decision.candidates };
+      }
     }
+    // Compatibility fallback for callers that explicitly disable safe mode.  New/default flows
+    // never use these first-hit indexes because they cannot represent ambiguity.
     var key = keyOf(surnameFromCitationToken(firstAuthor), year, false);
-    if (refIndex[key]) return refIndex[key];
+    if (refIndex[key]) return { bookmarkName: refIndex[key], status: 'matched', reason: 'legacy-exact', confidence: 0.80 };
     if (allAuthorNames && allAuthorNames.length === 2 && CE.isInstitutionalAuthor(firstAuthor)) {
       var altKey = keyOf(allAuthorNames.join(' & '), year, true);
-      if (refIndex[altKey]) return refIndex[altKey];
+      if (refIndex[altKey]) return { bookmarkName: refIndex[altKey], status: 'matched', reason: 'legacy-joint-institution', confidence: 0.80 };
     }
     if (CE.isInstitutionalAuthor(firstAuthor)) {
       // Kasus paling umum & sederhana: satu penulis institusi tunggal, dikutip apa adanya
@@ -77,14 +92,14 @@
       // relevan kalau firstAuthor memang singkatan (mis. "BSP"), bukan nama lengkap yang sudah
       // institusional dari awal.
       var directInstKey = keyOf(firstAuthor, year, true);
-      if (refIndex[directInstKey]) return refIndex[directInstKey];
+      if (refIndex[directInstKey]) return { bookmarkName: refIndex[directInstKey], status: 'matched', reason: 'legacy-institution', confidence: 0.80 };
       var resolved = CE.resolveInstitutionalNameFromMap(firstAuthor, acronymMap);
       if (resolved && resolved !== firstAuthor) {
         var resolvedKey = keyOf(resolved, year, true);
-        if (refIndex[resolvedKey]) return refIndex[resolvedKey];
+        if (refIndex[resolvedKey]) return { bookmarkName: refIndex[resolvedKey], status: 'matched', reason: 'legacy-acronym', confidence: 0.80 };
       }
     }
-    return null;
+    return { bookmarkName: null, status: 'nomatch', reason: 'no-match', confidence: 0 };
   }
 
   // Word bookmark names: must start with a letter, contain only letters/digits/underscores (no
@@ -113,6 +128,55 @@
       paras.push({ el: p, text: text });
     }
     return paras;
+  }
+
+  function documentVisibleText(xmlDoc) {
+    return buildParagraphList(xmlDoc).map(function(p) { return p.text; }).join('\n');
+  }
+
+  function scanDocumentStructure(xmlDoc) {
+    var names = {}, startIds = {}, endIds = {}, nestedHyperlinks = 0;
+    var starts = xmlDoc.getElementsByTagName('w:bookmarkStart');
+    var ends = xmlDoc.getElementsByTagName('w:bookmarkEnd');
+    var links = xmlDoc.getElementsByTagName('w:hyperlink');
+    var i;
+    for (i = 0; i < starts.length; i++) {
+      var name = starts[i].getAttribute('w:name');
+      var startId = starts[i].getAttribute('w:id');
+      if (name) names[name] = (names[name] || 0) + 1;
+      if (startId) startIds[startId] = (startIds[startId] || 0) + 1;
+    }
+    for (i = 0; i < ends.length; i++) {
+      var endId = ends[i].getAttribute('w:id');
+      if (endId) endIds[endId] = (endIds[endId] || 0) + 1;
+    }
+    for (i = 0; i < links.length; i++) {
+      var parent = links[i].parentNode;
+      while (parent) {
+        if (parent.tagName === 'w:hyperlink') { nestedHyperlinks++; break; }
+        parent = parent.parentNode;
+      }
+    }
+    var duplicateBookmarkNames = Object.keys(names).filter(function(n) { return names[n] > 1; });
+    var unbalancedBookmarkIds = Object.keys(startIds).concat(Object.keys(endIds)).filter(function(id, idx, all) {
+      return all.indexOf(id) === idx && (startIds[id] || 0) !== (endIds[id] || 0);
+    });
+    return { duplicateBookmarkNames: duplicateBookmarkNames, unbalancedBookmarkIds: unbalancedBookmarkIds, nestedHyperlinks: nestedHyperlinks };
+  }
+
+  function auditDocumentIntegrity(xmlDoc, beforeText, beforeStructure) {
+    var after = scanDocumentStructure(xmlDoc);
+    beforeStructure = beforeStructure || { duplicateBookmarkNames: [], unbalancedBookmarkIds: [], nestedHyperlinks: 0 };
+    var newDuplicates = after.duplicateBookmarkNames.filter(function(n) { return beforeStructure.duplicateBookmarkNames.indexOf(n) === -1; });
+    var newUnbalanced = after.unbalancedBookmarkIds.filter(function(id) { return beforeStructure.unbalancedBookmarkIds.indexOf(id) === -1; });
+    var textPreserved = documentVisibleText(xmlDoc) === beforeText;
+    var newNested = Math.max(0, after.nestedHyperlinks - beforeStructure.nestedHyperlinks);
+    var issues = [];
+    if (!textPreserved) issues.push('visible-text-changed');
+    if (newDuplicates.length) issues.push('duplicate-bookmark-name');
+    if (newUnbalanced.length) issues.push('unbalanced-bookmark');
+    if (newNested) issues.push('nested-hyperlink');
+    return { ok: issues.length === 0, textPreserved: textPreserved, issues: issues, newDuplicateBookmarkNames: newDuplicates, newUnbalancedBookmarkIds: newUnbalanced, newNestedHyperlinks: newNested };
   }
 
   function findHeadingIndex(paras) {
@@ -272,7 +336,7 @@
   // TIDAK direkonstruksi ulang lewat createRun (itu akan menghancurkan struktur field/instrText-
   // nya). Hyperlink boleh membungkus field yang utuh (sama seperti Ctrl+K manual di Word pada
   // teks yang mengandung field) — yang TIDAK boleh cuma memotong/menyisip DI TENGAH field-nya.
-  function wrapWithHyperlink(xmlDoc, p, s, e, anchorName, colorHex) {
+  function wrapWithHyperlink(xmlDoc, p, s, e, anchorName, colorHex, allowedContainer) {
     var info = getRunInfos(p);
     var overlapping = info.infos.filter(function (inf) { return inf.end > s && inf.start < e; });
     if (overlapping.length === 0) return false;
@@ -298,7 +362,7 @@
     // Run yang TIDAK spliceable ditolak, KECUALI penanda struktural dari grup yang baru saja
     // terverifikasi aman tercakup penuh di atas.
     if (overlapping.some(function (inf) {
-      if (inf.spliceable) return false;
+      if (inf.spliceable || (allowedContainer && inf.run.parentNode === allowedContainer && !inf.isStructuralMarker)) return false;
       if (inf.fieldGroupId != null && verifiedGroups[inf.fieldGroupId]) return false;
       return true;
     })) return false;
@@ -457,6 +521,28 @@
     return null;
   }
 
+  function isInsideContentControl(runEl, p) {
+    var node = runEl.parentNode;
+    while (node && node !== p) {
+      if (node.tagName === 'w:sdt') return true;
+      node = node.parentNode;
+    }
+    return false;
+  }
+
+  // A run-level content control can safely keep all of its metadata while its visible runs are
+  // wrapped INSIDE w:sdtContent.  This is materially safer than deleting the whole w:sdt wrapper:
+  // Zotero/Mendeley/EndNote can still recognize and update the citation later (an update may
+  // overwrite our hyperlink, but it will not detach the citation from its manager).
+  function directContentControlContainer(runEl, p) {
+    var node = runEl.parentNode;
+    while (node && node !== p) {
+      if (node.tagName === 'w:sdtContent') return runEl.parentNode === node ? node : null;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
   // Menaut sebuah match [s,e) ke bookmarkName. Kasus nyata paling umum di naskah yang sitasinya
   // dibuat lewat Mendeley/Zotero/EndNote: HANYA SEBAGIAN teks sitasi (biasanya cuma tahunnya)
   // yang sudah dibungkus <w:hyperlink> lama, sisanya (nama penulis, tanda kurung) masih run polos
@@ -475,38 +561,42 @@
 
     var groups = [];
     overlapping.forEach(function (inf) {
-      var key = inf.spliceable ? 'SPLICE' : findWrapperHyperlink(inf.run, p);
+      var key = inf.spliceable ? 'SPLICE' : (findWrapperHyperlink(inf.run, p) || directContentControlContainer(inf.run, p) || (isInsideContentControl(inf.run, p) ? 'PROTECTED_SDT' : null));
       var last = groups[groups.length - 1];
       if (last && last.key === key) last.infos.push(inf);
       else groups.push({ key: key, infos: [inf] });
     });
 
-    var anyOk = false, anyRetarget = false, anyFail = false;
+    var anyOk = false, anyNew = false, anyRetarget = false, anyAlready = false, anyFail = false, anyProtected = false;
     groups.forEach(function (g) {
       var segStart = Math.max(s, g.infos[0].start);
       var segEnd = Math.min(e, g.infos[g.infos.length - 1].end);
       if (g.key === 'SPLICE') {
-        if (wrapWithHyperlink(xmlDoc, p, segStart, segEnd, bookmarkName, colorHex)) anyOk = true;
+        if (wrapWithHyperlink(xmlDoc, p, segStart, segEnd, bookmarkName, colorHex)) { anyOk = true; anyNew = true; }
         else anyFail = true;
+      } else if (g.key && g.key.tagName === 'w:sdtContent') {
+        if (wrapWithHyperlink(xmlDoc, p, segStart, segEnd, bookmarkName, colorHex, g.key)) { anyOk = true; anyNew = true; }
+        else { anyFail = true; anyProtected = true; }
       } else if (g.key && g.key.tagName === 'w:hyperlink') {
         var already = g.key.getAttribute('w:anchor') === bookmarkName;
         if (!already) {
           g.key.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
           g.key.setAttributeNS(W_NS, 'w:history', '1');
           anyRetarget = true;
-        }
+        } else anyAlready = true;
         if (colorHex) {
           var innerRuns = g.key.getElementsByTagName('w:r');
           for (var ri = 0; ri < innerRuns.length; ri++) applyColorToRun(xmlDoc, innerRuns[ri], colorHex);
         }
         anyOk = true;
       } else {
+        if (g.key === 'PROTECTED_SDT') anyProtected = true;
         anyFail = true; // wrapper selain hyperlink (tracked-change dst.) — dilewati apa adanya
       }
     });
 
-    if (!anyOk) return { ok: false, mode: 'unsupported' };
-    return { ok: true, mode: anyRetarget ? 'retargeted' : (anyFail ? 'partial' : 'new') };
+    if (!anyOk) return { ok: false, mode: anyProtected ? 'protected-control' : 'unsupported' };
+    return { ok: true, mode: anyRetarget ? 'retargeted' : (anyFail ? 'partial' : (anyNew ? 'new' : (anyAlready ? 'already' : 'new'))) };
   }
 
   function insertBookmark(xmlDoc, p, name, id) {
@@ -522,6 +612,16 @@
     else if (p.firstChild) p.insertBefore(bmStart, p.firstChild);
     else p.appendChild(bmStart);
     p.appendChild(bmEnd);
+  }
+
+  function nextAvailableBookmarkId(xmlDoc, minimum) {
+    var next = minimum || 1;
+    var starts = xmlDoc.getElementsByTagName('w:bookmarkStart');
+    for (var i = 0; i < starts.length; i++) {
+      var n = parseInt(starts[i].getAttribute('w:id'), 10);
+      if (!isNaN(n)) next = Math.max(next, n + 1);
+    }
+    return next;
   }
 
   // ---------- deteksi teks yang sudah di-highlight manual oleh pengguna ----------
@@ -790,6 +890,12 @@
     var onlyHighlighted = !!options.onlyHighlighted;
     var linkScope = options.linkScope === 'year' ? 'year' : 'full'; // 'full' (default) | 'year'
     var linkColor = options.linkColor || null; // null = format asli tidak diubah; atau hex mis. "0000FF"
+    var safeMode = options.safeMode !== false;
+    // Zotero/Mendeley/EndNote content controls may contain live citation metadata.  Preserve
+    // them by default; users can explicitly opt into the destructive compatibility path.
+    var preserveCitationControls = options.preserveCitationControls !== false;
+    var visibleTextBefore = documentVisibleText(xmlDoc);
+    var structureBefore = scanDocumentStructure(xmlDoc);
 
     var paras = buildParagraphList(xmlDoc);
     var headingIdx = findHeadingIndex(paras);
@@ -797,11 +903,7 @@
 
     var bodyParas = paras.slice(0, headingIdx);
     var refParas = paras.slice(headingIdx + 1);
-    // Flatten any citation-manager content-control wrappers before anything else touches the
-    // DOM — see unwrapSdtElements() for why. Must happen before highlight-range/text extraction
-    // below only in the sense that it should be done once, up front; it doesn't change any text,
-    // so it's safe regardless of exact ordering relative to those reads.
-    bodyParas.forEach(function (p) { unwrapSdtElements(p.el); });
+    if (!preserveCitationControls) bodyParas.forEach(function (p) { unwrapSdtElements(p.el); });
     var highlightRangesByPara = bodyParas.map(function (p) { return buildHighlightRanges(p.el); });
     var docHasHighlight = highlightRangesByPara.some(function (r) { return r.length > 0; });
 
@@ -829,10 +931,16 @@
     var refIndex = {};   // key(surname/acronym + tahun) -> bookmarkName  (gaya penulis-tahun)
     var numIndex = {};   // nomor -> bookmarkName                         (gaya numerik)
     var refTargets = []; // parsed ref object -> bookmark; shared resolver keeps ambiguity explicit
-    var bookmarkSeq = 5000;
+    var bookmarkSeq = nextAvailableBookmarkId(xmlDoc, 5000);
     var usedBookmarkNames = {};
     var refCount = 0;
     var ordinal = 0;
+
+    var allExistingBookmarkStarts = xmlDoc.getElementsByTagName('w:bookmarkStart');
+    for (var existingIdx = 0; existingIdx < allExistingBookmarkStarts.length; existingIdx++) {
+      var existingName = allExistingBookmarkStarts[existingIdx].getAttribute('w:name');
+      if (existingName) usedBookmarkNames[existingName] = true;
+    }
 
     parsed.references.forEach(function (ref) {
       var paraObj = refParas[ref.lineNumber - 1];
@@ -892,12 +1000,20 @@
 
     var matchesByPara = {};
     var unmatched = [];
-    function addMatch(startAbs, endAbs, bookmarkName, raw, yearText) {
+    var unmatchedDetails = [];
+    function addMatch(startAbs, endAbs, resolution, raw, yearText) {
+      resolution = resolution && typeof resolution === 'object'
+        ? resolution
+        : { bookmarkName: resolution || null, status: resolution ? 'matched' : 'nomatch', reason: resolution ? 'numeric-exact' : 'no-match', confidence: resolution ? 1 : 0 };
       var a = locate(startAbs), b = locate(endAbs);
-      if (!a || !b || a.paraIndex !== b.paraIndex) { unmatched.push(raw); return; }
+      if (!a || !b || a.paraIndex !== b.paraIndex) {
+        unmatched.push(raw);
+        unmatchedDetails.push({ raw: raw, status: 'unsupported', reason: 'cross-paragraph', confidence: 0 });
+        return;
+      }
       var pi = a.paraIndex;
       if (!matchesByPara[pi]) matchesByPara[pi] = [];
-      matchesByPara[pi].push({ start: a.offset, end: b.offset, bookmarkName: bookmarkName, raw: raw, yearText: yearText || null });
+      matchesByPara[pi].push({ start: a.offset, end: b.offset, bookmarkName: resolution.bookmarkName, resolution: resolution, raw: raw, yearText: yearText || null });
     }
 
     if (style.family === 'numeric') {
@@ -906,7 +1022,7 @@
         for (var k = 0; k < c.numbers.length; k++) {
           if (numIndex[c.numbers[k]]) { bm = numIndex[c.numbers[k]]; break; }
         }
-        addMatch(c.position, c.position + c.raw.length, bm, c.raw, null);
+        addMatch(c.position, c.position + c.raw.length, { bookmarkName: bm, status: bm ? 'matched' : 'nomatch', reason: bm ? 'numeric-exact' : 'no-match', confidence: bm ? 1 : 0 }, c.raw, null);
       });
     } else {
       // Tracks, per shared author-position, where the previously-linked span for a grouped
@@ -927,9 +1043,9 @@
               var segEndAbs = segStartAbs + segText.length;
               offset += segText.length + 1; // +1 untuk ';'
               var part = c.parts[idx];
-              var bmSeg = null;
+              var bmSeg = { bookmarkName: null, status: 'nomatch', reason: 'no-match', confidence: 0 };
               if (part && part.firstAuthor) {
-                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap, refTargets, styleId);
+                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap, refTargets, styleId, safeMode);
               }
               // trim spasi di tepi segmen supaya link tidak "makan" spasi pemisah
               var leadWs = segText.match(/^\s*/)[0].length;
@@ -946,12 +1062,12 @@
           } else {
             // Bentuk tak umum (mis. sitasi tahun-ganda "Smith, 2019, 2021" dalam satu kurung)
             // — tautkan seluruh blok ke referensi pertama yang cocok, lebih aman daripada menebak.
-            var bm = null, bmYear = null;
+            var bm = { bookmarkName: null, status: 'nomatch', reason: 'no-match', confidence: 0 }, bmYear = null;
             for (var i = 0; i < c.parts.length; i++) {
               var part2 = c.parts[i];
               if (!part2.firstAuthor) continue;
-              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap, refTargets, styleId);
-              if (bmFound) { bm = bmFound; bmYear = part2.year; break; }
+              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap, refTargets, styleId, safeMode);
+              if (bmFound.bookmarkName) { bm = bmFound; bmYear = part2.year; break; }
             }
             addMatch(c.position, c.position + c.raw.length, bm, c.raw, bmYear);
           }
@@ -963,7 +1079,7 @@
           // awal SESUNGGUHNYA dari `authors` yang sudah bersih itu di dalam teks.
           var narrativeAuthorTokens = c.authors.split(/\s*(?:&|,|\band\b|\bdan\b|\bet\s+al\.?)\s*/i).filter(Boolean);
           var firstTok = narrativeAuthorTokens[0];
-          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap, refTargets, styleId);
+          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap, refTargets, styleId, safeMode);
           var authorIdx = articleText.indexOf(c.authors, c.position);
           var realStart = authorIdx >= 0 && authorIdx <= c.position + c.raw.length ? authorIdx : c.position;
           // Grouped multi-year citation for the SAME author, e.g. "BSP (2020, 2024, 2025,
@@ -985,8 +1101,14 @@
 
 
     var linkedList = [];
+    var linkedDetails = [];
+    var matchBreakdown = {};
     var narrowedCount = 0, skippedNotHighlighted = 0;
-    var newCount = 0, retargetedCount = 0, alreadyCount = 0;
+    var newCount = 0, retargetedCount = 0, alreadyCount = 0, protectedControlsSkipped = 0;
+    function countReason(reason) {
+      reason = reason || 'unknown';
+      matchBreakdown[reason] = (matchBreakdown[reason] || 0) + 1;
+    }
     Object.keys(matchesByPara).forEach(function (piStr) {
       var pi = parseInt(piStr, 10);
       var list = matchesByPara[pi];
@@ -1036,14 +1158,23 @@
           var r = wrapOrRetarget(xmlDoc, bodyParas[pi].el, m.start, m.end, m.bookmarkName, linkColor);
           if (r.ok) {
             linkedList.push(m.raw);
+            linkedDetails.push({ raw: m.raw, reason: m.resolution.reason, confidence: m.resolution.confidence, mode: r.mode });
+            countReason(m.resolution.reason);
             if (r.mode === 'already') alreadyCount++;
             else if (r.mode === 'retargeted') retargetedCount++;
             else newCount++;
           } else {
-            unmatched.push(m.raw + ' (struktur run tidak didukung — kemungkinan bagian dari hyperlink/format khusus lain)');
+            var protectedControl = r.mode === 'protected-control';
+            if (protectedControl) protectedControlsSkipped++;
+            unmatched.push(m.raw + (protectedControl
+              ? ' (dilewati: berada di field/content-control pengelola sitasi)'
+              : ' (struktur run tidak didukung — kemungkinan bagian dari hyperlink/format khusus lain)'));
+            unmatchedDetails.push({ raw: m.raw, status: 'unsupported', reason: protectedControl ? 'protected-citation-control' : 'unsupported-run-structure', confidence: m.resolution.confidence || 0 });
           }
         } else {
           unmatched.push(m.raw);
+          unmatchedDetails.push({ raw: m.raw, status: m.resolution.status || 'nomatch', reason: m.resolution.reason || 'no-match', confidence: m.resolution.confidence || 0, candidateCount: m.resolution.candidates ? m.resolution.candidates.length : 0 });
+          countReason(m.resolution.reason);
         }
       });
     });
@@ -1061,8 +1192,10 @@
     // NONAKTIF — beda dari dua fitur di atas, ini cuma jalan kalau eksplisit diminta.
     var figTblResult = { linked: 0, captionsFound: 0 };
     if (options.linkFiguresTables) {
-      figTblResult = linkFigureTableReferences(xmlDoc, bodyParas, articleText, 8000, linkColor);
+      figTblResult = linkFigureTableReferences(xmlDoc, bodyParas, articleText, nextAvailableBookmarkId(xmlDoc, 8000), linkColor);
     }
+
+    var integrity = auditDocumentIntegrity(xmlDoc, visibleTextBefore, structureBefore);
 
     return {
       styleId: styleId,
@@ -1071,7 +1204,14 @@
       refCount: refCount,
       linked: linkedList.length,
       linkedList: linkedList,
+      linkedDetails: linkedDetails,
       unmatched: unmatched,
+      unmatchedDetails: unmatchedDetails,
+      matchBreakdown: matchBreakdown,
+      reviewRequired: unmatchedDetails.filter(function(d) { return d.status === 'review' || d.status === 'ambiguous'; }).length,
+      safeMode: safeMode,
+      preserveCitationControls: preserveCitationControls,
+      protectedControlsSkipped: protectedControlsSkipped,
       refParseFailed: parsed.failedLines,
       docHasHighlight: docHasHighlight,
       narrowedToHighlight: narrowedCount,
@@ -1081,7 +1221,8 @@
       alreadyLinked: alreadyCount,
       urlsLinked: urlsLinked,
       figuresTablesLinked: figTblResult.linked,
-      figuresTablesCaptionsFound: figTblResult.captionsFound
+      figuresTablesCaptionsFound: figTblResult.captionsFound,
+      integrity: integrity
     };
   }
 
@@ -1092,6 +1233,9 @@
     linkifyReferenceUrls: linkifyReferenceUrls,
     findFigureTableCaptions: findFigureTableCaptions,
     linkFigureTableReferences: linkFigureTableReferences,
+    documentVisibleText: documentVisibleText,
+    scanDocumentStructure: scanDocumentStructure,
+    auditDocumentIntegrity: auditDocumentIntegrity,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = CitationLinker;
   if (typeof window !== 'undefined') window.CitationLinker = CitationLinker;

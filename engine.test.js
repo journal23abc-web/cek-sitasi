@@ -1345,6 +1345,54 @@ test('the combined real-world class produces neither false missing citations nor
   assert.strictEqual(r.errors.filter((e) => /Sitasi tidak ada|Referensi tidak disitasi/.test(e.title)).length, 0);
 });
 
+console.log('\n=== Structured author-date resolver: confidence, reason, and abstention ===');
+
+test('resolver returns an exact personal match with explicit confidence and reason', () => {
+  const refs = CE.parseReferenceList('Smith, J. (2020). Title. Journal, 1(1), 1-10.', 'apa7');
+  const d = CE.resolveAuthorDateReference('Smith', ['Smith'], '2020', refs, 'apa7', {});
+  assert.strictEqual(d.status, 'matched');
+  assert.strictEqual(d.reason, 'exact-personal');
+  assert.strictEqual(d.confidence, 1);
+  assert.strictEqual(d.autoSafe, true);
+});
+
+test('resolver explains derived acronyms and shortened institutional matches separately', () => {
+  const refs = CE.parseReferenceList([
+    'Badan Pengawasan Keuangan dan Pembangunan. (2019). Annual report. BPKP.',
+    'Ministry of Home Affairs of the Republic of Indonesia. (2018). Regulation. Government Press.',
+  ].join('\n'), 'apa7');
+  const acronym = CE.resolveAuthorDateReference('BPKP', ['BPKP'], '2019', refs, 'apa7', {});
+  const shortened = CE.resolveAuthorDateReference('Ministry of Home Affairs', ['Ministry of Home Affairs'], '2018', refs, 'apa7', {});
+  assert.strictEqual(acronym.status, 'matched');
+  assert.strictEqual(acronym.reason, 'derived-acronym');
+  assert.strictEqual(acronym.confidence, 0.94);
+  assert.strictEqual(shortened.status, 'matched');
+  assert.strictEqual(shortened.reason, 'shortened-institution');
+  assert.strictEqual(shortened.confidence, 0.90);
+});
+
+test('a unique fuzzy-prefix candidate is review-only and never auto-safe', () => {
+  const refs = CE.parseReferenceList('Smith, J. (2020). Title. Journal, 1(1), 1-10.', 'apa7');
+  const d = CE.resolveAuthorDateReference('Smithe', ['Smithe'], '2020', refs, 'apa7', {});
+  assert.strictEqual(d.status, 'review');
+  assert.strictEqual(d.reason, 'fuzzy-prefix');
+  assert.strictEqual(d.confidence, 0.55);
+  assert.strictEqual(d.autoSafe, false);
+  assert.strictEqual(CE.findAuthorDateReferenceMatches('Smithe', ['Smithe'], '2020', refs, 'apa7', {}).length, 0);
+});
+
+test('equally strong same-surname/year candidates cause abstention instead of first-hit selection', () => {
+  const refs = CE.parseReferenceList([
+    'Smith, J. (2020). First title. Journal, 1(1), 1-10.',
+    'Smith, K. (2020). Second title. Journal, 2(1), 11-20.',
+  ].join('\n'), 'apa7');
+  const d = CE.resolveAuthorDateReference('Smith', ['Smith'], '2020', refs, 'apa7', {});
+  assert.strictEqual(d.status, 'ambiguous');
+  assert.strictEqual(d.reason, 'multiple-candidates');
+  assert.strictEqual(d.candidates.length, 2);
+  assert.strictEqual(d.autoSafe, false);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

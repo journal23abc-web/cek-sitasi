@@ -12,7 +12,6 @@
     "test:terms": "node term-consistency-engine.test.js"
   },
   "devDependencies": {
-    "@xmldom/xmldom": "^0.9.12"
+    "@xmldom/xmldom": "0.9.12"
   }
 }
-

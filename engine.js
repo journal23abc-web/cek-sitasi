@@ -1371,26 +1371,115 @@ function citationAuthorKeyCandidates(firstAuthor, allAuthorNames, acronymMap) {
   return variants.filter(function(k, i) { return k && variants.indexOf(k) === i; });
 }
 
-// Shared resolver used by the validator, converter-facing helpers, and DOCX linker.  It returns
-// every plausible reference rather than silently choosing the first one; callers may link only
-// when the result is unique.  The reference-list sizes handled by this tool are small enough
-// that a transparent O(citations * references) scan is preferable to several divergent indexes.
-function findAuthorDateReferenceMatches(firstAuthor, allAuthorNames, year, references, styleId, acronymMap) {
-  // Keep APA/Harvard disambiguation suffixes significant: 2020a and 2020b are different
-  // references and must never collapse to one auto-link target.
-  var wantedYear = String(year || '').toLowerCase();
-  var citeKeys = citationAuthorKeyCandidates(firstAuthor, allAuthorNames, acronymMap);
-  var out = [];
-  (references || []).forEach(function(ref) {
-    if (!ref || !ref.firstAuthor) return;
-    if (String(ref.year || '').toLowerCase() !== wantedYear) return;
-    var refKeys = referenceAuthorKeyCandidates(ref, styleId, acronymMap);
-    var exact = citeKeys.some(function(k) { return refKeys.indexOf(k) !== -1; });
-    var institutionalCompat = ref.isInstitutional && isInstitutionalAuthor(firstAuthor) &&
-      institutionalNamesCompatible(resolveInstitutionalNameFromMap(firstAuthor, acronymMap), resolveInstitutionalNameFromMap(ref.firstAuthor, acronymMap));
-    if ((exact || institutionalCompat) && out.indexOf(ref) === -1) out.push(ref);
+// One structured resolver for validation, conversion, and DOCX linking.  Besides the candidate,
+// it returns WHY the match was accepted and how safe it is to apply automatically.  A caller no
+// longer needs to recreate matching heuristics or silently take the first fuzzy result.
+//
+// status:
+//   matched   unique, high-confidence result; safe for automatic operations
+//   ambiguous two or more equally strong results; a human/disambiguating initial is required
+//   review    one or more weak fuzzy candidates; show as a suggestion, never auto-apply
+//   nomatch   no plausible result
+var AUTHOR_DATE_MATCH_REASONS = {
+  'exact-personal': 'Nama belakang dan tahun sama persis',
+  'exact-institution': 'Nama institusi dan tahun sama persis',
+  'explicit-acronym': 'Akronim institusi dipetakan secara eksplisit',
+  'derived-acronym': 'Akronim institusi diturunkan dari nama lengkap',
+  'shortened-institution': 'Nama institusi cocok setelah kualifier yurisdiksi diperhitungkan',
+  'fuzzy-prefix': 'Kemiripan awalan nama; perlu ditinjau manual',
+  'multiple-candidates': 'Lebih dari satu referensi sama kuat',
+  'no-match': 'Tidak ada referensi yang cukup cocok'
+};
+
+function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acronymMap) {
+  if (!firstAuthor || !ref || !ref.firstAuthor) return null;
+  var citeInstitutional = isInstitutionalAuthor(firstAuthor);
+  if (citeInstitutional !== !!ref.isInstitutional) return null;
+
+  if (!citeInstitutional) {
+    var citeSurname = normalizeKeyName(surnameFromCitationToken(firstAuthor), false);
+    var refSurname = normalizeKeyName(surnameOf(ref.firstAuthor, styleId), false);
+    if (citeSurname && citeSurname === refSurname) {
+      return { score: 1, confidence: 1, reason: 'exact-personal' };
+    }
+    if (citeSurname.length > 3 && refSurname.length > 3 &&
+        (citeSurname.indexOf(refSurname.substring(0, 3)) === 0 || refSurname.indexOf(citeSurname.substring(0, 3)) === 0)) {
+      return { score: 0.55, confidence: 0.55, reason: 'fuzzy-prefix', reviewOnly: true };
+    }
+    return null;
+  }
+
+  var citationVariants = [firstAuthor];
+  if (allAuthorNames && allAuthorNames.length === 2) citationVariants.push(allAuthorNames.join(' & '));
+  var refPair = extractAcronymPairing(ref.firstAuthor);
+  var refFull = resolveInstitutionalNameFromMap(refPair ? refPair.full : ref.firstAuthor, acronymMap);
+  var refFullKey = normalizeKeyName(refFull, true);
+  var refExplicitAcronym = refPair ? refPair.acronym.toLowerCase() : acronymOf(ref.firstAuthor);
+  var refDerivedAcronym = deriveInstitutionalAcronym(refFull);
+  var best = null;
+
+  citationVariants.forEach(function(variant) {
+    if (!variant) return;
+    var citePair = extractAcronymPairing(variant);
+    var bareAcronym = ACRONYM_PATTERN.test(variant.trim().replace(/\.$/, '')) ? variant.trim().replace(/\.$/, '').toLowerCase() : null;
+    var citeFull = resolveInstitutionalNameFromMap(citePair ? citePair.full : variant, acronymMap);
+    var citeFullKey = normalizeKeyName(citeFull, true);
+    var candidate = null;
+
+    if (bareAcronym && refExplicitAcronym && bareAcronym === refExplicitAcronym) {
+      candidate = { score: 0.99, confidence: 0.99, reason: 'explicit-acronym' };
+    } else if (bareAcronym && refDerivedAcronym && bareAcronym === refDerivedAcronym) {
+      // If the manuscript itself introduced this acronym, it is stronger than a purely derived
+      // initialism, but both remain unique/high-confidence matches.
+      var explicitlyMapped = acronymMap && acronymMap[bareAcronym];
+      candidate = explicitlyMapped
+        ? { score: 0.98, confidence: 0.98, reason: 'explicit-acronym' }
+        : { score: 0.94, confidence: 0.94, reason: 'derived-acronym' };
+    } else if (citeFullKey && citeFullKey === refFullKey) {
+      candidate = bareAcronym
+        ? { score: 0.98, confidence: 0.98, reason: 'explicit-acronym' }
+        : { score: 1, confidence: 1, reason: 'exact-institution' };
+    } else if (institutionalNamesCompatible(citeFull, refFull)) {
+      candidate = { score: 0.90, confidence: 0.90, reason: 'shortened-institution' };
+    }
+
+    if (candidate && (!best || candidate.score > best.score)) best = candidate;
   });
-  return out;
+  return best;
+}
+
+function resolveAuthorDateReference(firstAuthor, allAuthorNames, year, references, styleId, acronymMap, options) {
+  options = options || {};
+  var wantedYear = String(year || '').toLowerCase();
+  var scored = [];
+  (references || []).forEach(function(ref) {
+    // Keep APA/Harvard disambiguation suffixes significant: 2020a != 2020b.
+    if (!ref || String(ref.year || '').toLowerCase() !== wantedYear) return;
+    var match = authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acronymMap);
+    if (match) scored.push({ ref: ref, score: match.score, confidence: match.confidence, reason: match.reason, reviewOnly: !!match.reviewOnly });
+  });
+
+  if (!scored.length) {
+    return { status: 'nomatch', ref: null, candidates: [], confidence: 0, reason: 'no-match', autoSafe: false };
+  }
+  scored.sort(function(a, b) { return b.score - a.score; });
+  var bestScore = scored[0].score;
+  var best = scored.filter(function(item) { return item.score === bestScore; });
+  var candidateRefs = best.map(function(item) { return item.ref; });
+  if (bestScore < (options.minimumAutoConfidence == null ? 0.90 : options.minimumAutoConfidence) || best[0].reviewOnly) {
+    return { status: 'review', ref: null, candidates: candidateRefs, confidence: best[0].confidence, reason: best[0].reason, autoSafe: false };
+  }
+  if (best.length > 1) {
+    return { status: 'ambiguous', ref: null, candidates: candidateRefs, confidence: best[0].confidence, reason: 'multiple-candidates', autoSafe: false };
+  }
+  return { status: 'matched', ref: best[0].ref, candidates: candidateRefs, confidence: best[0].confidence, reason: best[0].reason, autoSafe: true };
+}
+
+// Backward-compatible helper.  It deliberately excludes review-only fuzzy suggestions, so old
+// callers that treat a non-empty array as permission to mutate a document remain safe.
+function findAuthorDateReferenceMatches(firstAuthor, allAuthorNames, year, references, styleId, acronymMap) {
+  var decision = resolveAuthorDateReference(firstAuthor, allAuthorNames, year, references, styleId, acronymMap);
+  return decision.status === 'matched' || decision.status === 'ambiguous' ? decision.candidates : [];
 }
 
 // ---------- MAIN VALIDATOR ----------
@@ -1694,16 +1783,16 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
 
   // cross-reference
   citationDetails.forEach(function(d) {
-    var resolvedRefs = findAuthorDateReferenceMatches(d.part.firstAuthor, d.allAuthorNames, d.part.year, self.references, self.styleId, self.acronymMap);
+    var decision = resolveAuthorDateReference(d.part.firstAuthor, d.allAuthorNames, d.part.year, self.references, self.styleId, self.acronymMap);
+    d.matchDecision = decision;
+    var resolvedRefs = decision.candidates;
     var isPartOfGroup = !!d.isMultiPart;
     var groupNote = isPartOfGroup ? ' (bagian dari kelompok sitasi "' + d.groupRaw + '")' : '';
-    if (resolvedRefs.length === 0) {
-      var fuzzy = self.fuzzyFind(d.key, refMap);
-      if (!fuzzy) {
-        self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '"' + groupNote + ' tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error' });
-      } else {
-        self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '"' + groupNote + ' mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'suggestion' });
-      }
+    if (decision.status === 'nomatch') {
+      self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '"' + groupNote + ' tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error', matchReason: decision.reason, matchConfidence: decision.confidence });
+    } else if (decision.status === 'review') {
+      var possible = resolvedRefs[0];
+      self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '"' + groupNote + (possible ? ' mungkin merujuk "' + possible.firstAuthor + ' (' + possible.year + ')"' : ' memiliki kemiripan lemah dengan daftar referensi') + ', tetapi keyakinannya hanya ' + Math.round(decision.confidence * 100) + '% sehingga tidak dipasangkan otomatis.', code: d.raw, severity: 'suggestion', matchReason: decision.reason, matchConfidence: decision.confidence });
     } else {
       var refs = resolvedRefs;
       if (refs.length > 1) {
@@ -1758,11 +1847,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       if (!matchedRefs.has(r)) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak ada sitasi yang jelas merujuk ke sini (perlu inisial untuk memastikan).', code: r.raw.substring(0, 120), severity: 'error' });
       return;
     }
-    if (!citedKeys.has(key)) {
-      var found = false;
-      for (var ck of citedKeys) { if (self.isFuzzyMatch(key, ck)) { found = true; break; } }
-      if (!found) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'error' });
-    }
+    if (!citedKeys.has(key)) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'error' });
   });
 
   // APA7: an institutional/group author with a recognizable acronym must be spelled out in
@@ -1925,8 +2010,8 @@ MultiFormatValidator.prototype.keyFromCitationToken = function(token) {
 MultiFormatValidator.prototype.isCitationMatched = function(token, year) {
   if (!this.refMap) return null; // not yet validated (numeric family doesn't use this)
   if (this.style.family === 'author-date') {
-    var resolved = findAuthorDateReferenceMatches(token, [token], year, this.references, this.styleId, this.acronymMap);
-    if (resolved.length > 0) return true;
+    var decision = resolveAuthorDateReference(token, [token], year, this.references, this.styleId, this.acronymMap);
+    return decision.status === 'matched';
   }
   var key = this.keyFromCitationToken(token) + (year != null ? '_' + year : (this.style.family === 'author-date' ? '_' : ''));
   if (this.refMap.has(key)) return true;
@@ -1937,6 +2022,7 @@ MultiFormatValidator.prototype.isReferenceCited = function(r) {
   if (!this.citedKeys) return null;
   var key = this.keyFromRefAuthor(r) + (this.style.family === 'author-date' ? '_' + (r.year || '') : '');
   if (this.citedKeys.has(key)) return true;
+  if (this.style.family === 'author-date') return false;
   for (var ck of this.citedKeys) { if (this.isFuzzyMatch(key, ck)) return true; }
   return false;
 };
@@ -3026,6 +3112,8 @@ var CitationEngine = {
   acronymOf: acronymOf,
   deriveInstitutionalAcronym: deriveInstitutionalAcronym,
   institutionalNamesCompatible: institutionalNamesCompatible,
+  resolveAuthorDateReference: resolveAuthorDateReference,
+  AUTHOR_DATE_MATCH_REASONS: AUTHOR_DATE_MATCH_REASONS,
   findAuthorDateReferenceMatches: findAuthorDateReferenceMatches,
   looksLikeFullCalendarDate: looksLikeFullCalendarDate,
   parseReferenceLine: parseReferenceLine,

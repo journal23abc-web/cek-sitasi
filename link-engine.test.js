@@ -67,6 +67,23 @@ function plainText(xmlDoc) {
 
 console.log('\n=== SDT-wrapped citations (content-control plugin, the reported bug) ===');
 
+test('safe default preserves an SDT citation-manager field while linking inside its content', () => {
+  var paras = [
+    sdtWrappedPara([], ['(Smith, 2020)'], []),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var textBefore = plainText(xmlDoc);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 1);
+  assert.strictEqual(result.protectedControlsSkipped, 0);
+  assert.strictEqual(xmlDoc.getElementsByTagName('w:sdt').length, 1);
+  assert.strictEqual(xmlDoc.getElementsByTagName('w:sdt')[0].getElementsByTagName('w:hyperlink').length, 1);
+  assert.strictEqual(plainText(xmlDoc), textBefore);
+  assert.strictEqual(result.integrity.ok, true);
+});
+
 test('a citation wrapped in <w:sdt><w:sdtContent> gets linked (regression for the reported bug)', () => {
   var paras = [
     para(run('Studi oleh ')),
@@ -77,7 +94,7 @@ test('a citation wrapped in <w:sdt><w:sdtContent> gets linked (regression for th
   ];
   var xmlDoc = xmlDocFromParas(paras);
   var textBefore = plainText(xmlDoc);
-  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', preserveCitationControls: false });
   assert.strictEqual(result.linked, 1);
   assert.strictEqual(result.unmatched.length, 0);
   assert.strictEqual(xmlDoc.getElementsByTagName('w:sdt').length, 0, 'the sdt wrapper should be fully unwrapped');
@@ -100,7 +117,7 @@ test('multiple SDT-wrapped citations in the same paragraph all get linked', () =
   ];
   var xmlDoc = xmlDocFromParas(paras);
   var textBefore = plainText(xmlDoc);
-  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', preserveCitationControls: false });
   assert.strictEqual(result.linked, 2);
   assert.strictEqual(result.unmatched.length, 0);
   assert.strictEqual(xmlDoc.getElementsByTagName('w:sdt').length, 0);
@@ -166,6 +183,27 @@ test('a citation with no matching reference is reported as unmatched, not crashe
   var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
   assert.strictEqual(result.linked, 0);
   assert.strictEqual(result.unmatched.length, 1);
+});
+
+test('running the linker twice is idempotent: no duplicate bookmark/hyperlink and second pass is reported as already linked', () => {
+  var paras = [
+    para(run('Studi oleh ') + run('(Smith, 2020)') + run(' menunjukkan hal ini.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var textBefore = plainText(xmlDoc);
+  var first = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  var bookmarksAfterFirst = xmlDoc.getElementsByTagName('w:bookmarkStart').length;
+  var linksAfterFirst = xmlDoc.getElementsByTagName('w:hyperlink').length;
+  var second = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(first.newlyLinked, 1);
+  assert.strictEqual(second.newlyLinked, 0);
+  assert.strictEqual(second.alreadyLinked, 1);
+  assert.strictEqual(xmlDoc.getElementsByTagName('w:bookmarkStart').length, bookmarksAfterFirst);
+  assert.strictEqual(xmlDoc.getElementsByTagName('w:hyperlink').length, linksAfterFirst);
+  assert.strictEqual(plainText(xmlDoc), textBefore);
+  assert.strictEqual(second.integrity.ok, true);
 });
 
 console.log('\n=== Readable bookmark names (Surname+Year, not opaque ref_5000) ===');
@@ -806,7 +844,38 @@ test('an ambiguous same-surname same-year citation is reported but never auto-li
   var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
   assert.strictEqual(result.linked, 0);
   assert.strictEqual(result.unmatched.length, 1);
+  assert.strictEqual(result.unmatchedDetails[0].status, 'ambiguous');
+  assert.strictEqual(result.unmatchedDetails[0].reason, 'multiple-candidates');
   assert.strictEqual(hyperlinkTexts(xmlDoc).length, 0);
+});
+
+test('safe mode abstains from a unique fuzzy-prefix guess and reports confidence/reason', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smithe, 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 0);
+  assert.strictEqual(result.reviewRequired, 1);
+  assert.strictEqual(result.unmatchedDetails[0].reason, 'fuzzy-prefix');
+  assert.strictEqual(result.unmatchedDetails[0].confidence, 0.55);
+});
+
+test('permissive mode may apply one unique fuzzy candidate but still exposes its low confidence', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smithe, 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). Title. Journal, 1(1), 1-10.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', safeMode: false });
+  assert.strictEqual(result.linked, 1);
+  assert.strictEqual(result.linkedDetails[0].reason, 'fuzzy-prefix');
+  assert.strictEqual(result.linkedDetails[0].confidence, 0.55);
 });
 
 console.log('\n' + '='.repeat(50));
