@@ -1,0 +1,18 @@
+{
+  "name": "cek-sitasi",
+  "private": true,
+  "scripts": {
+    "test": "npm run test:engine && npm run test:link && npm run test:converter && npm run test:docstats && npm run test:journal-rules && npm run test:scopus && npm run test:terms",
+    "test:engine": "node engine.test.js",
+    "test:link": "node link-engine.test.js",
+    "test:converter": "node converter-engine.test.js",
+    "test:docstats": "node docstats-engine.test.js",
+    "test:journal-rules": "node journal-rules-engine.test.js",
+    "test:scopus": "node scopus-engine.test.js",
+    "test:terms": "node term-consistency-engine.test.js"
+  },
+  "devDependencies": {
+    "@xmldom/xmldom": "^0.9.12"
+  }
+}
+

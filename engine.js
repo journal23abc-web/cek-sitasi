@@ -568,6 +568,13 @@ function looksLikePlausibleAuthorStart(authorPart) {
 function parseSingleAuthorDate(text) {
   text = text.trim();
   if (!text) return null;
+  // A complete calendar date inside parentheses is normally metadata for a letter, approval,
+  // regulation, meeting, interview, etc. -- not an academic author-date citation.  Without
+  // this guard, strings such as "(Letter No. 123/ABC, July 25, 2025)" are parsed with
+  // "Letter No. 123/ABC" as a fake author and then reported as a missing reference.  Require
+  // a day as well as a month and year so genuine surnames that happen to be month names (for
+  // example "May, 2020") remain valid citations.
+  if (looksLikeFullCalendarDate(text)) return null;
   var yearMatch = text.match(/,?\s*(?<![.\d])(\d{4}[a-z]?|n\.d\.)(?:\s*[,:]\s*(.+))?$/);
   if (!yearMatch) return null;
   var year = yearMatch[1];
@@ -609,6 +616,14 @@ function parseSingleAuthorDate(text) {
   return { raw: text, authors: authors, authorCount: authorCount, year: year, pageInfo: pageInfo, hasEtAl: hasEtAl, firstAuthor: firstAuthor, usedAmp: usedAmp, usedAnd: usedAnd };
 }
 
+var MONTH_NAME_SOURCE = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)';
+var MONTH_DAY_YEAR_RE = new RegExp('\\b' + MONTH_NAME_SOURCE + '\\s+\\d{1,2}(?:st|nd|rd|th)?\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
+var DAY_MONTH_YEAR_RE = new RegExp('\\b\\d{1,2}(?:st|nd|rd|th)?\\s+' + MONTH_NAME_SOURCE + '\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
+
+function looksLikeFullCalendarDate(text) {
+  return MONTH_DAY_YEAR_RE.test(text || '') || DAY_MONTH_YEAR_RE.test(text || '');
+}
+
 function extractAuthorPageCitations(text) {
   // MLA-style (Author Page) or (Author Page-Page) or (Author, Page) - no year
   var citations = [];
@@ -635,7 +650,7 @@ function extractAuthorPageCitations(text) {
 }
 
 function buildSkipWordSet() {
-  return new Set(['the','this','that','these','those','according','see','also','however','therefore','furthermore','additionally','although','despite','while','when','where','which','what','how','why','if','then','but','for','with','from','into','after','before','during','between','through','about','above','below','under','over','chapter','table','figure','section','part','page','volume','issue','article','book','report','study','research','data','result','analysis','method','model','system','process','program','project','case','based','related','compared','combined','integrated','developed','proposed','presented','discussed','examined','investigated','observed','found','showed','demonstrated','indicated','suggested','reported','published','available','retrieved','accessed','and','or','not','all','any','both','each','few','many','most','other','some','such','only','own','same','so','than','too','very','just','because','until','against','among','around','along','across','outside','within','inside','beyond','throughout','it','its','he','she','they','we','you','is','are','was','were','has','have','had','do','does','did','will','would','could','should','may','must','can','in','on','at','by','to','of','as','be','been','being','per','via','versus','vs','etc','e.g','i.e','cf','al','et',
+  return new Set(['the','this','that','these','those','according','following','citing','drawing','adapting','extending','applying','adopting','building','relying','see','also','however','therefore','furthermore','additionally','although','despite','while','when','where','which','what','how','why','if','then','but','for','with','from','into','after','before','during','between','through','about','above','below','under','over','chapter','table','figure','section','part','page','volume','issue','article','book','report','study','research','data','result','analysis','method','model','system','process','program','project','case','based','related','compared','combined','integrated','developed','proposed','presented','discussed','examined','investigated','observed','found','showed','demonstrated','indicated','suggested','reported','published','available','retrieved','accessed','and','or','not','all','any','both','each','few','many','most','other','some','such','only','own','same','so','than','too','very','just','because','until','against','among','around','along','across','outside','within','inside','beyond','throughout','it','its','he','she','they','we','you','is','are','was','were','has','have','had','do','does','did','will','would','could','should','may','must','can','in','on','at','by','to','of','as','be','been','being','per','via','versus','vs','etc','e.g','i.e','cf','al','et',
     'moreover','meanwhile','consequently','hence','thus','similarly','conversely','nonetheless','nevertheless','accordingly','subsequently','specifically','notably','overall','finally','importantly','interestingly','surprisingly','unfortunately','fortunately','clearly','indeed','certainly','likewise','regardless','instead','otherwise','still','yet','besides','elsewhere','first','second','third','next','last','lastly','initially','ultimately','thereafter','therein','herein','conversely',
     'selanjutnya','kemudian','selain','meskipun','walaupun','oleh','karena','sehingga','dengan','pada','dari','dalam','untuk','yang','adalah','merupakan','menurut','berdasarkan','sebagai','turut','serta','bahwa','tidak','sudah','masih','juga','bahkan','hanya','saja',
     'namun','sementara','sedangkan','akibatnya','demikian','singkatnya','secara','tentu','pasti','selain itu','di sisi lain','sebaliknya','pertama','kedua','ketiga','terakhir','akhirnya']);
@@ -1270,6 +1285,114 @@ function acronymOf(name) {
   return null;
 }
 
+// Derive the conventional initialism of an institutional name when the reference does not
+// spell it out explicitly, e.g. "Badan Pengawasan Keuangan dan Pembangunan" -> "bpkp" and
+// "World Health Organization" -> "who".  Connector words are intentionally ignored.  This
+// is used only as a MATCHING ALIAS and never as replacement/display text, so the engine does
+// not invent an acronym in the user's manuscript.
+var INSTITUTION_ACRONYM_STOPWORDS = new Set([
+  'a', 'an', 'the', 'of', 'for', 'and', 'dan', 'untuk', 'bagi', 'ng', 'sa', 'at', 'para',
+  'de', 'la', 'del', 'da', 'do', 'dos', 'das', 'der', 'den', 'van', 'von',
+]);
+
+function deriveInstitutionalAcronym(name) {
+  if (!name) return null;
+  var pairing = extractAcronymPairing(name);
+  if (pairing) return pairing.acronym.toLowerCase();
+  var base = name.trim().replace(/\.$/, '');
+  if (ACRONYM_PATTERN.test(base)) return base.toLowerCase();
+  if (!isInstitutionalAuthor(base)) return null;
+  var words = base.match(/[\p{L}\p{N}]+/gu) || [];
+  var significant = words.filter(function(w) { return !INSTITUTION_ACRONYM_STOPWORDS.has(w.toLowerCase()); });
+  if (significant.length < 2 || significant.length > 10) return null;
+  var letters = significant.map(function(w) {
+    var first = Array.from(w)[0] || '';
+    return /^[A-Za-z]$/.test(first) ? first.toLowerCase() : '';
+  }).join('');
+  return letters.length >= 2 && letters.length <= 10 ? letters : null;
+}
+
+// Conservative compatibility for a shortened institutional citation.  It deliberately does
+// NOT accept every arbitrary prefix: the omitted tail must look like a jurisdiction/branch
+// qualifier ("of the Republic of Indonesia", "Regional Office ...", "Department ..." etc.).
+// That keeps "Badan Pengawasan Keuangan" from being silently equated with the distinct
+// "Badan Pengawasan Keuangan dan Pembangunan" merely because the first words overlap.
+var INSTITUTION_QUALIFIER_TAIL_RE = /^(?:(?:of|for)\s+(?:the\s+)?(?:republic|government|state|kingdom|province|provincial|city|county|region|regional|nation|national|country)\b|(?:regional|national|country|provincial|state|city|county)\s+(?:office|branch|chapter|secretariat|department|division|directorate|bureau|agency)\b|(?:office|branch|chapter|secretariat|department|division|directorate|bureau)\s+(?:of|for)\b)/i;
+
+function normalizeInstitutionWords(name) {
+  var pairing = extractAcronymPairing(name || '');
+  return (pairing ? pairing.full : (name || ''))
+    .trim().replace(/^(?:the|a|an)\s+/i, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function institutionalNamesCompatible(citationName, referenceName) {
+  if (!citationName || !referenceName) return false;
+  if (!isInstitutionalAuthor(citationName) || !isInstitutionalAuthor(referenceName)) return false;
+  var a = normalizeInstitutionWords(citationName);
+  var b = normalizeInstitutionWords(referenceName);
+  if (!a || !b) return false;
+  if (a.toLocaleLowerCase() === b.toLocaleLowerCase()) return true;
+  var shorter = a.length <= b.length ? a : b;
+  var longer = a.length <= b.length ? b : a;
+  var prefixRe = new RegExp('^' + shorter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+(.+)$', 'i');
+  var m = longer.match(prefixRe);
+  if (!m) return false;
+  var meaningfulCount = shorter.split(/\s+/).filter(function(w) {
+    return !INSTITUTION_ACRONYM_STOPWORDS.has(w.toLowerCase());
+  }).length;
+  return meaningfulCount >= 3 && INSTITUTION_QUALIFIER_TAIL_RE.test(m[1]);
+}
+
+function referenceAuthorKeyCandidates(ref, styleId, acronymMap) {
+  if (!ref || !ref.firstAuthor) return [];
+  if (!ref.isInstitutional) return [normalizeKeyName(surnameOf(ref.firstAuthor, styleId), false)];
+  var full = resolveInstitutionalNameFromMap(ref.firstAuthor, acronymMap);
+  var keys = [normalizeKeyName(full, true)];
+  var explicit = acronymOf(ref.firstAuthor);
+  var derived = deriveInstitutionalAcronym(full);
+  [explicit, derived].forEach(function(acr) {
+    if (acr) keys.push(normalizeKeyName(acr, false));
+  });
+  return keys.filter(function(k, i) { return k && keys.indexOf(k) === i; });
+}
+
+function citationAuthorKeyCandidates(firstAuthor, allAuthorNames, acronymMap) {
+  if (!firstAuthor) return [];
+  var variants = [];
+  function add(name, institutional) {
+    if (!name) return;
+    variants.push(normalizeKeyName(name, institutional));
+  }
+  var institutional = isInstitutionalAuthor(firstAuthor);
+  add(institutional ? resolveInstitutionalNameFromMap(firstAuthor, acronymMap) : surnameFromCitationToken(firstAuthor), institutional);
+  if (institutional && allAuthorNames && allAuthorNames.length === 2) {
+    add(allAuthorNames.join(' & '), true);
+  }
+  return variants.filter(function(k, i) { return k && variants.indexOf(k) === i; });
+}
+
+// Shared resolver used by the validator, converter-facing helpers, and DOCX linker.  It returns
+// every plausible reference rather than silently choosing the first one; callers may link only
+// when the result is unique.  The reference-list sizes handled by this tool are small enough
+// that a transparent O(citations * references) scan is preferable to several divergent indexes.
+function findAuthorDateReferenceMatches(firstAuthor, allAuthorNames, year, references, styleId, acronymMap) {
+  // Keep APA/Harvard disambiguation suffixes significant: 2020a and 2020b are different
+  // references and must never collapse to one auto-link target.
+  var wantedYear = String(year || '').toLowerCase();
+  var citeKeys = citationAuthorKeyCandidates(firstAuthor, allAuthorNames, acronymMap);
+  var out = [];
+  (references || []).forEach(function(ref) {
+    if (!ref || !ref.firstAuthor) return;
+    if (String(ref.year || '').toLowerCase() !== wantedYear) return;
+    var refKeys = referenceAuthorKeyCandidates(ref, styleId, acronymMap);
+    var exact = citeKeys.some(function(k) { return refKeys.indexOf(k) !== -1; });
+    var institutionalCompat = ref.isInstitutional && isInstitutionalAuthor(firstAuthor) &&
+      institutionalNamesCompatible(resolveInstitutionalNameFromMap(firstAuthor, acronymMap), resolveInstitutionalNameFromMap(ref.firstAuthor, acronymMap));
+    if ((exact || institutionalCompat) && out.indexOf(ref) === -1) out.push(ref);
+  });
+  return out;
+}
+
 // ---------- MAIN VALIDATOR ----------
 function MultiFormatValidator(articleText, referenceText, styleId) {
   this.articleText = articleText;
@@ -1529,7 +1652,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
             altKey = self.keyFromCitationToken(p.authors.join(' & ')) + '_' + p.year;
             citedKeys.add(altKey);
           }
-          citationDetails.push({ key: key, altKey: altKey, part: p, raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, initial: initialFromCitationToken(p.firstAuthor), secondAuthor: (p.authors && p.authors.length > 1) ? p.authors[1] : null, position: c.position });
+          citationDetails.push({ key: key, altKey: altKey, part: p, allAuthorNames: p.authors || [p.firstAuthor], raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, initial: initialFromCitationToken(p.firstAuthor), secondAuthor: (p.authors && p.authors.length > 1) ? p.authors[1] : null, position: c.position });
         }
       });
     } else {
@@ -1551,7 +1674,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           altKey2 = self.keyFromCitationToken(authors.join(' & ')) + '_' + c.year;
           citedKeys.add(altKey2);
         }
-        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, raw: c.raw, groupRaw: c.raw, isMultiPart: false, initial: initialFromCitationToken(authors[0]), secondAuthor: authors.length > 1 ? authors[1] : null, position: c.position });
+        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authors: authors, authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, allAuthorNames: authors, raw: c.raw, groupRaw: c.raw, isMultiPart: false, initial: initialFromCitationToken(authors[0]), secondAuthor: authors.length > 1 ? authors[1] : null, position: c.position });
         if (authors.length >= style.etAlThreshold && !hasEtAl) {
           self.errors.push({ title: 'Sitasi naratif ' + style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi naratif "' + c.raw + '" menulis ' + authors.length + ' nama.', code: c.raw, correction: authors[0] + ' et al. (' + c.year + ')', severity: 'error' });
         }
@@ -1559,12 +1682,22 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     }
   });
 
+  function rememberResolvedReference(ref, detail) {
+    matchedRefs.add(ref);
+    detail.matchedRef = ref;
+    self.citationCounts.set(ref, (self.citationCounts.get(ref) || 0) + 1);
+    // Always record the canonical reference key as cited too.  Alias matches (derived acronym,
+    // shortened jurisdictional institution name) otherwise resolve correctly here but are later
+    // reported again as "reference not cited" because citedKeys only held the surface alias.
+    citedKeys.add(self.keyFromRefAuthor(ref) + '_' + (ref.year || ''));
+  }
+
   // cross-reference
   citationDetails.forEach(function(d) {
-    var matchKey = refMap.has(d.key) ? d.key : (d.altKey && refMap.has(d.altKey) ? d.altKey : null);
+    var resolvedRefs = findAuthorDateReferenceMatches(d.part.firstAuthor, d.allAuthorNames, d.part.year, self.references, self.styleId, self.acronymMap);
     var isPartOfGroup = !!d.isMultiPart;
     var groupNote = isPartOfGroup ? ' (bagian dari kelompok sitasi "' + d.groupRaw + '")' : '';
-    if (!matchKey) {
+    if (resolvedRefs.length === 0) {
       var fuzzy = self.fuzzyFind(d.key, refMap);
       if (!fuzzy) {
         self.errors.push({ title: 'Sitasi tidak ada di daftar referensi', description: 'Sitasi "' + d.raw + '"' + groupNote + ' tidak memiliki entri cocok di daftar referensi.', code: d.raw, severity: 'error' });
@@ -1572,7 +1705,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '"' + groupNote + ' mungkin merujuk "' + fuzzy.firstAuthor + ' (' + fuzzy.year + ')".', code: d.raw, severity: 'suggestion' });
       }
     } else {
-      var refs = refMap.get(matchKey);
+      var refs = resolvedRefs;
       if (refs.length > 1) {
         // Collision group: try to resolve to ONE specific reference via the citation's initial.
         var candidates = refs.filter(function(ref) {
@@ -1580,9 +1713,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           return d.initial && ri ? ri === d.initial : true;
         });
         if (d.initial && candidates.length === 1) {
-          matchedRefs.add(candidates[0]);
-          d.matchedRef = candidates[0];
-          self.citationCounts.set(candidates[0], (self.citationCounts.get(candidates[0]) || 0) + 1);
+          rememberResolvedReference(candidates[0], d);
           if (candidates[0].authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + candidates[0].authorCount + ' penulis', description: 'Referensi "' + candidates[0].firstAuthor + ' (' + candidates[0].year + ')" hanya punya ' + candidates[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
           }
@@ -1598,9 +1729,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
             return normalizeKeyName(surnameOf(ref.authors[1], self.styleId), false) === secondKey;
           });
           if (narrowed.length !== 1) return false;
-          matchedRefs.add(narrowed[0]);
-          d.matchedRef = narrowed[0];
-          self.citationCounts.set(narrowed[0], (self.citationCounts.get(narrowed[0]) || 0) + 1);
+          rememberResolvedReference(narrowed[0], d);
           if (narrowed[0].authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + narrowed[0].authorCount + ' penulis', description: 'Referensi "' + narrowed[0].firstAuthor + ' (' + narrowed[0].year + ')" hanya punya ' + narrowed[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
           }
@@ -1612,9 +1741,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         }
       } else {
         refs.forEach(function(ref) {
-          matchedRefs.add(ref);
-          d.matchedRef = ref;
-          self.citationCounts.set(ref, (self.citationCounts.get(ref) || 0) + 1);
+          rememberResolvedReference(ref, d);
           if (ref.authorCount <= 2 && d.part.hasEtAl) {
             self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
           }
@@ -1797,6 +1924,10 @@ MultiFormatValidator.prototype.keyFromCitationToken = function(token) {
 // Used by the citation map so unmatched items render as errors (red), not green.
 MultiFormatValidator.prototype.isCitationMatched = function(token, year) {
   if (!this.refMap) return null; // not yet validated (numeric family doesn't use this)
+  if (this.style.family === 'author-date') {
+    var resolved = findAuthorDateReferenceMatches(token, [token], year, this.references, this.styleId, this.acronymMap);
+    if (resolved.length > 0) return true;
+  }
   var key = this.keyFromCitationToken(token) + (year != null ? '_' + year : (this.style.family === 'author-date' ? '_' : ''));
   if (this.refMap.has(key)) return true;
   return this.fuzzyFind(key, this.refMap) !== null;
@@ -2893,6 +3024,10 @@ var CitationEngine = {
   MultiFormatValidator: MultiFormatValidator,
   normalizeKeyName: normalizeKeyName,
   acronymOf: acronymOf,
+  deriveInstitutionalAcronym: deriveInstitutionalAcronym,
+  institutionalNamesCompatible: institutionalNamesCompatible,
+  findAuthorDateReferenceMatches: findAuthorDateReferenceMatches,
+  looksLikeFullCalendarDate: looksLikeFullCalendarDate,
   parseReferenceLine: parseReferenceLine,
   parseReferenceList: parseReferenceList,
   parseReferenceListDetailed: parseReferenceListDetailed,

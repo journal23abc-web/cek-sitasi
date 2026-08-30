@@ -1296,6 +1296,55 @@ test('full validation no longer flags the hierarchical institutional citation as
   assert.strictEqual(r.errors.filter((e) => e.title.includes('penulis tanpa "et al."')).length, 0);
 });
 
+console.log('\n=== General resolver: institutional aliases, shortened official names, citation cues, and calendar metadata ===');
+
+test('a bare institutional acronym is derived from the full reference author even when the document never explicitly introduces the acronym', () => {
+  const article = 'The implementation is mandatory (BPKP, 2019) and shapes local reporting practice.';
+  const refs = 'Badan Pengawasan Keuangan dan Pembangunan. (2019). Annual performance report. BPKP.';
+  const r = validate(article, refs);
+  assert.strictEqual(CE.deriveInstitutionalAcronym('Badan Pengawasan Keuangan dan Pembangunan'), 'bpkp');
+  assert.strictEqual(r.errors.filter((e) => /Sitasi tidak ada|Referensi tidak disitasi/.test(e.title)).length, 0);
+});
+
+test('a shortened institution name matches a unique reference when only a jurisdiction qualifier was omitted', () => {
+  const article = 'The rule remains applicable (Ministry of Home Affairs, 2018) in this setting.';
+  const refs = 'Ministry of Home Affairs of the Republic of Indonesia. (2018). Regulation on village financial management. Government Press.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => /Sitasi tidak ada|Referensi tidak disitasi/.test(e.title)).length, 0);
+  assert.strictEqual(r.suggestions.filter((e) => e.title === 'Kemungkinan ketidakcocokan').length, 0);
+});
+
+test('institution-prefix matching stays conservative: a functional tail is not treated as a removable jurisdiction qualifier', () => {
+  assert.strictEqual(
+    CE.institutionalNamesCompatible('Badan Pengawasan Keuangan', 'Badan Pengawasan Keuangan dan Pembangunan'),
+    false
+  );
+});
+
+test('leading citation cue phrases are stripped generically before narrative-author matching', () => {
+  const cites = CE.extractAuthorDateCitations('Following Faul et al. (2009), the analysis was repeated. Drawing on Smith (2020), the model was extended.');
+  assert.deepStrictEqual(cites.map((c) => c.authors), ['Faul et al.', 'Smith']);
+});
+
+test('complete calendar dates for letters/approvals are not extracted as citations, while a surname that is also a month remains valid', () => {
+  const text = 'Authorization was issued (Letter No. 3531/ABC/2025, July 25, 2025) and renewed (Surat No. 12, 28 Juli 2025). The result follows prior work (May, 2020).';
+  const cites = CE.extractAuthorDateCitations(text);
+  assert.strictEqual(cites.length, 1);
+  assert.strictEqual(cites[0].parts[0].firstAuthor, 'May');
+  assert.strictEqual(cites[0].parts[0].year, '2020');
+});
+
+test('the combined real-world class produces neither false missing citations nor false uncited references', () => {
+  const article = 'INTRODUCTION\nThe system is mandatory (BPKP, 2019; Ministry of Home Affairs, 2018). Following Faul et al. (2009), power was evaluated. Authorization was obtained (Letter No. 3531/ABC/2025, July 25, 2025).';
+  const refs = [
+    'Badan Pengawasan Keuangan dan Pembangunan. (2019). Annual performance report. BPKP.',
+    'Faul, F., Erdfelder, E., Buchner, A., & Lang, A.-G. (2009). Statistical power analyses using G*Power. Behavior Research Methods, 41(4), 1149-1160.',
+    'Ministry of Home Affairs of the Republic of Indonesia. (2018). Regulation on village financial management. Government Press.',
+  ].join('\n');
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => /Sitasi tidak ada|Referensi tidak disitasi/.test(e.title)).length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

@@ -775,6 +775,40 @@ test('a citation to a single institutional author written out in full ("The Doug
   assert.strictEqual(result.unmatched.length, 0);
 });
 
+console.log('\n=== General resolver shared by citation checking and DOCX auto-linking ===');
+
+test('derived institutional acronyms, shortened jurisdictional names, and leading citation cues all auto-link in one document while full calendar metadata is ignored', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('The system is mandatory ') + run('(BPKP, 2019; Ministry of Home Affairs, 2018)') + run('. ')),
+    para(run('Following Faul et al. (2009), power was evaluated. Authorization was obtained (Letter No. 3531/ABC/2025, July 25, 2025).')),
+    para(run('REFERENCES')),
+    para(run('Badan Pengawasan Keuangan dan Pembangunan. (2019). Annual performance report. BPKP.')),
+    para(run('Faul, F., Erdfelder, E., Buchner, A., & Lang, A.-G. (2009). Statistical power analyses. Journal, 41(4), 1149-1160.')),
+    para(run('Ministry of Home Affairs of the Republic of Indonesia. (2018). Regulation on village financial management. Government Press.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 3);
+  assert.strictEqual(result.unmatched.length, 0);
+  assert.deepStrictEqual(hyperlinkTexts(xmlDoc).sort(), ['(BPKP, 2019', 'Faul et al. (2009)', 'Ministry of Home Affairs, 2018)'].sort());
+});
+
+test('an ambiguous same-surname same-year citation is reported but never auto-linked to the first reference arbitrarily', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smith, 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). First title. Journal, 1(1), 1-10.')),
+    para(run('Smith, K. (2020). Second title. Journal, 2(1), 11-20.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 0);
+  assert.strictEqual(result.unmatched.length, 1);
+  assert.strictEqual(hyperlinkTexts(xmlDoc).length, 0);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

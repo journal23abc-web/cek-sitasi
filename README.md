@@ -35,14 +35,13 @@ tautan/isinya, tanpa perlu mengubah apa pun di halaman tool lainnya.
 ## Menjalankan tes
 
 ```
-node engine.test.js
-node docstats-engine.test.js
-node journal-rules-engine.test.js
-node converter-engine.test.js
+npm install
+npm test
 ```
 
-Tidak perlu `npm install` — semua *-engine.js murni JavaScript tanpa dependency, tes memakai
-modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal (aman dipakai di CI).
+Kode aplikasi tetap berjalan langsung di browser tanpa proses build. Dependency development
+`@xmldom/xmldom` hanya dipakai oleh tes Node yang memverifikasi mutasi OOXML/DOCX; mesin lain
+tetap memakai modul `assert` bawaan Node. Exit code 1 kalau ada tes yang gagal (aman dipakai di CI).
 
 ## Gaya sitasi yang didukung
 

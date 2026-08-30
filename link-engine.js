@@ -41,7 +41,7 @@
   }
 
   function keyOf(name, year, isInstitutional) {
-    return CE.normalizeKeyName(name, !!isInstitutional) + '_' + String(year || '').replace(/[a-z]$/, '');
+    return CE.normalizeKeyName(name, !!isInstitutional) + '_' + String(year || '').toLowerCase();
   }
 
   // Resolves a bookmark for a citation "part" that may actually be a joint institutional
@@ -49,7 +49,21 @@
   // two separate personal co-authors — citation-text extraction alone can't tell these apart.
   // Tries the normal single-first-author key first, then the full "&"-joined form, then (for a
   // bare acronym like "BSP") its resolved full institutional name, as fallbacks.
-  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap) {
+  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap, refTargets, styleId) {
+    // Prefer the shared, reference-aware resolver from engine.js.  It handles derived
+    // institutional acronyms, conservative shortened institution names, and -- critically --
+    // returns ALL candidates so an ambiguous same-name/same-year citation is never linked to
+    // whichever reference happened to appear first in the list.
+    if (CE.findAuthorDateReferenceMatches && refTargets) {
+      var refs = refTargets.map(function(t) { return t.ref; });
+      var resolved = CE.findAuthorDateReferenceMatches(firstAuthor, allAuthorNames, year, refs, styleId, acronymMap);
+      if (resolved.length > 1) return null;
+      if (resolved.length === 1) {
+        for (var rt = 0; rt < refTargets.length; rt++) {
+          if (refTargets[rt].ref === resolved[0]) return refTargets[rt].bookmarkName;
+        }
+      }
+    }
     var key = keyOf(surnameFromCitationToken(firstAuthor), year, false);
     if (refIndex[key]) return refIndex[key];
     if (allAuthorNames && allAuthorNames.length === 2 && CE.isInstitutionalAuthor(firstAuthor)) {
@@ -814,6 +828,7 @@
 
     var refIndex = {};   // key(surname/acronym + tahun) -> bookmarkName  (gaya penulis-tahun)
     var numIndex = {};   // nomor -> bookmarkName                         (gaya numerik)
+    var refTargets = []; // parsed ref object -> bookmark; shared resolver keeps ambiguity explicit
     var bookmarkSeq = 5000;
     var usedBookmarkNames = {};
     var refCount = 0;
@@ -844,6 +859,7 @@
       } else {
         usedBookmarkNames[bookmarkName] = true;
       }
+      refTargets.push({ ref: ref, bookmarkName: bookmarkName });
 
       if (style.family === 'numeric') {
         var label = ref.numLabel || ordinal;
@@ -913,7 +929,7 @@
               var part = c.parts[idx];
               var bmSeg = null;
               if (part && part.firstAuthor) {
-                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap);
+                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap, refTargets, styleId);
               }
               // trim spasi di tepi segmen supaya link tidak "makan" spasi pemisah
               var leadWs = segText.match(/^\s*/)[0].length;
@@ -934,7 +950,7 @@
             for (var i = 0; i < c.parts.length; i++) {
               var part2 = c.parts[i];
               if (!part2.firstAuthor) continue;
-              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap);
+              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap, refTargets, styleId);
               if (bmFound) { bm = bmFound; bmYear = part2.year; break; }
             }
             addMatch(c.position, c.position + c.raw.length, bm, c.raw, bmYear);
@@ -947,7 +963,7 @@
           // awal SESUNGGUHNYA dari `authors` yang sudah bersih itu di dalam teks.
           var narrativeAuthorTokens = c.authors.split(/\s*(?:&|,|\band\b|\bdan\b|\bet\s+al\.?)\s*/i).filter(Boolean);
           var firstTok = narrativeAuthorTokens[0];
-          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap);
+          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap, refTargets, styleId);
           var authorIdx = articleText.indexOf(c.authors, c.position);
           var realStart = authorIdx >= 0 && authorIdx <= c.position + c.raw.length ? authorIdx : c.position;
           // Grouped multi-year citation for the SAME author, e.g. "BSP (2020, 2024, 2025,
