@@ -1196,16 +1196,32 @@ function parseReferenceLine(line, styleId) {
       if (dm) { numLabel = parseInt(dm[1], 10); rest = dm[2]; }
     }
     var authorSeg;
+    var titleStartOverride = null;
     if (style.authorForm === 'non-inverted') {
       var qIdx = rest.search(/["“]/);
-      authorSeg = qIdx > -1 ? rest.substring(0, qIdx).replace(/,\s*$/, '') : rest.split('.')[0];
+      if (qIdx > -1) {
+        authorSeg = rest.substring(0, qIdx).replace(/,\s*$/, '');
+      } else {
+        // No quoted title (typical of IEEE BOOK references, which never quote the title) —
+        // naively splitting on the first "." breaks here, since author initials themselves
+        // contain periods ("R. Luckin and W. Holmes, Title..." would split after just "R").
+        // Instead, match the actual "F. M. Last[, and F. M. Last...]" author-list SHAPE and
+        // take the boundary right after it (before the comma that introduces the title).
+        var authorListMatch = rest.match(/^((?:[\p{Lu}]\.?\s*)+[\p{Lu}\p{Lo}][\p{L}'\-]+(?:,?\s+and\s+(?:[\p{Lu}]\.?\s*)+[\p{Lu}\p{Lo}][\p{L}'\-]+)*)\s*,\s*/u);
+        if (authorListMatch) {
+          authorSeg = authorListMatch[1];
+          titleStartOverride = authorListMatch[0].length; // consume the trailing ", " too
+        } else {
+          authorSeg = rest.split('.')[0];
+        }
+      }
     } else {
       var firstPeriod = rest.indexOf('. ');
       authorSeg = firstPeriod > -1 ? rest.substring(0, firstPeriod) : rest;
     }
     var parsedAuthors = parseAuthorsForStyle(authorSeg, styleId);
     var year = extractYear(rest, style) || (rest.match(/\b(19|20)\d{2}\b/) || [null])[0];
-    var titleStart = authorSeg.length;
+    var titleStart = titleStartOverride != null ? titleStartOverride : authorSeg.length;
     var title = extractTitle(rest, style, titleStart);
     var doi = extractDOI(raw);
     var bibFields = extractBibliographicFields(raw, title);

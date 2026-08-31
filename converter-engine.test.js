@@ -304,6 +304,13 @@ test('year extraction still works normally for references with no page range at 
   assert.ok(r.convertedArticle.includes('(Ilie, 2025)'), r.convertedArticle);
 });
 
+test('two-author reference-list entry uses a comma before "&" (APA7 rule), unlike in-text', () => {
+  const article = 'Studi ini didukung oleh temuan sebelumnya [1].';
+  const refs = '[1] A. Alammar and E. A. R. Amin, "EFL students perception," Arab World English Journal, vol. 14, no. 3, pp. 166-181, 2023.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.referenceLines[0].line.startsWith('Alammar, A., & Amin, E. A. R.'), r.referenceLines[0].line);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));

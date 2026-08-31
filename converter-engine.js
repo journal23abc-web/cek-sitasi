@@ -663,7 +663,12 @@
       return rendered.length === 2 ? rendered[0] + ' and ' + rendered[1] : rendered.slice(0, -1).join(', ') + ', and ' + rendered[rendered.length - 1];
     }
     var sep = style.sep === '&' ? '&' : 'and';
-    return rendered.length === 2 ? rendered[0] + ' ' + sep + ' ' + rendered[1] : rendered.slice(0, -1).join(', ') + ', ' + sep + ' ' + rendered[rendered.length - 1];
+    // APA7 always separates reference-list authors with a comma, including right before the
+    // final "&" — even for exactly two authors ("Smith, J., & Jones, K."), unlike the in-text
+    // citation form ("Smith & Jones, 2020") which correctly omits it. Harvard/Chicago's "and"
+    // separator convention is left as-is (not the same documented requirement).
+    if (rendered.length === 2) return sep === '&' ? rendered[0] + ', ' + sep + ' ' + rendered[1] : rendered[0] + ' ' + sep + ' ' + rendered[1];
+    return rendered.slice(0, -1).join(', ') + ', ' + sep + ' ' + rendered[rendered.length - 1];
   }
 
   // Recovers the exact original connector (whitespace/comma) that sat between the end of the
@@ -717,6 +722,8 @@
       renderAuthorForStyle: renderAuthorForStyle,
       compressRanges: compressRanges,
       formatNumeric: formatNumeric,
+      renderAuthorListForReference: renderAuthorListForReference,
+      canonicalAuthorsFromRef: canonicalAuthorsFromRef,
     },
   };
 
