@@ -246,6 +246,18 @@ test('converter abstains from a fuzzy-prefix guess instead of silently convertin
   assert.ok(!r.convertedArticle.includes('[1]'), r.convertedArticle);
 });
 
+test('converter resolves APA7 collisions from an arbitrary-length explicit author prefix, matching validator/linker behavior', () => {
+  const article = 'Both studies apply (Smith, Jones, Clark, et al., 2020; Smith, Jones, Brown, et al., 2020).';
+  const refs = [
+    'Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Brown, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = CC.convert(article, refs, 'apa7', 'ieee');
+  assert.strictEqual(r.unmatched.length, 0, JSON.stringify(r.unmatched));
+  assert.strictEqual(r.changedCount, 1);
+  assert.ok(r.convertedArticle.includes('[1], [2]') || r.convertedArticle.includes('[1]\u2013[2]'), r.convertedArticle);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));

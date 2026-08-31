@@ -849,6 +849,84 @@ test('an ambiguous same-surname same-year citation is reported but never auto-li
   assert.strictEqual(hyperlinkTexts(xmlDoc).length, 0);
 });
 
+test('same first author/year but different SECOND authors: both two-author APA7 citations link to their own references', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smith & Jones, 2020; Smith & Brown, 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, A., & Jones, B. (2020). Alpha study. Journal, 1(1), 1-10.')),
+    para(run('Smith, A., & Brown, C. (2020). Beta study. Journal, 2(1), 11-20.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 2, JSON.stringify(result.unmatchedDetails));
+  assert.strictEqual(result.unmatched.length, 0);
+  var links = Array.from(xmlDoc.getElementsByTagName('w:hyperlink')).map((h) => ({ text: h.textContent, anchor: h.getAttribute('w:anchor') }));
+  assert.deepStrictEqual(links, [
+    { text: '(Smith & Jones, 2020', anchor: 'Smith2020' },
+    { text: 'Smith & Brown, 2020)', anchor: 'Smith2020_2' },
+  ]);
+});
+
+test('same first two authors/year but different THIRD authors: expanded APA7 citations link by the complete explicit prefix', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smith, Jones, Clark, et al., 2020; Smith, Jones, Brown, et al., 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.')),
+    para(run('Smith, A., Jones, B., Brown, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 2, JSON.stringify(result.unmatchedDetails));
+  assert.strictEqual(result.unmatched.length, 0);
+  assert.ok(result.linkedDetails.every((d) => d.reason === 'exact-author-prefix'), JSON.stringify(result.linkedDetails));
+});
+
+test('difference at author #4 with only one author after it: full five-author forms link without requiring et al.', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smith, Jones, Clark, White, & Green, 2020; Smith, Jones, Clark, Black, & Gray, 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.')),
+    para(run('Smith, A., Jones, B., Clark, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 2, JSON.stringify(result.unmatchedDetails));
+  assert.strictEqual(result.unmatched.length, 0);
+});
+
+test('identical author lists in the same year link safely when the references and citations use matching a/b suffixes', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smith et al., 2020a; Smith et al., 2020b)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, A., Jones, B., & Clark, C. (2020a). Alpha study. Journal, 1(1), 1-10.')),
+    para(run('Smith, A., Jones, B., & Clark, C. (2020b). Zebra study. Journal, 2(1), 11-20.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 2, JSON.stringify(result.unmatchedDetails));
+  assert.strictEqual(result.unmatched.length, 0);
+  assert.deepStrictEqual(bookmarkNamesIn(xmlDoc).sort(), ['Smith2020a', 'Smith2020b']);
+});
+
+test('an under-specified Smith et al. citation stays unlinked when later coauthors are the only distinction', () => {
+  var paras = [
+    para(run('INTRODUCTION')),
+    para(run('Prior work ') + run('(Smith et al., 2020)') + run(' supports the claim.')),
+    para(run('REFERENCES')),
+    para(run('Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.')),
+    para(run('Smith, A., Jones, B., Brown, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.')),
+  ];
+  var xmlDoc = xmlDocFromParas(paras);
+  var result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 0);
+  assert.strictEqual(result.unmatchedDetails[0].status, 'ambiguous');
+  assert.strictEqual(hyperlinkTexts(xmlDoc).length, 0);
+});
+
 test('safe mode abstains from a unique fuzzy-prefix guess and reports confidence/reason', () => {
   var paras = [
     para(run('INTRODUCTION')),

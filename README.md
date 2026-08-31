@@ -63,6 +63,12 @@ Auto-detect gaya tersedia, tapi untuk dokumen ambigu selalu ada opsi pilih manua
 - Duplikat referensi (DOI sama, judul sangat mirip)
 - Tabrakan nama-belakang + tahun yang sama (mis. "H. Zhang, 2023" vs "F. Zhang, 2023") —
   dibedakan otomatis via inisial; kalau ambigu, ditandai jelas
+- **Disambiguasi APA7 berdasarkan seluruh urutan penulis**: dua-penulis dicocokkan dari kedua
+  nama; karya 3+ penulis diperluas sampai posisi nama pertama yang berbeda (penulis ke-2, ke-3,
+  ke-4, dan seterusnya). `et al.` hanya dipakai jika masih menggantikan sedikitnya dua nama.
+  Suffix tahun `a/b/c` hanya disarankan bila daftar penulis lengkapnya identik, dengan urutan
+  suffix berdasarkan alfabet judul. Resolver yang sama dipakai penaut DOCX, sehingga sitasi
+  ambigu tidak pernah ditautkan ke referensi pertama secara sembarang.
 - Gaya sitasi campuran dalam satu naskah (numerik + penulis-tahun tercampur)
 - Rentang tahun referensi (deteksi referensi "usang" di luar rentang pilihan)
 - Validitas DOI via CrossRef (opsional, butuh koneksi internet)

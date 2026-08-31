@@ -325,9 +325,9 @@
     function register(ref) { if (!seen.has(ref)) { seen.add(ref); matchedOrder.push(ref); } }
     function numberOf(ref) { register(ref); return matchedOrder.indexOf(ref) + 1; }
 
-    function resolveAuthorYear(token, authors, year) {
+    function resolveAuthorYear(token, authors, year, hasEtAl) {
       if (!CE.resolveAuthorDateReference) return { status: 'nomatch', reason: 'resolver-unavailable' };
-      var decision = CE.resolveAuthorDateReference(token, authors || [token], year, v.references, sourceStyleId, v.acronymMap);
+      var decision = CE.resolveAuthorDateReference(token, authors || [token], year, v.references, sourceStyleId, v.acronymMap, { hasEtAl: !!hasEtAl });
       if (decision.status === 'matched') {
         return { status: 'ok', ref: decision.ref, reason: decision.reason, confidence: decision.confidence };
       }
@@ -429,7 +429,7 @@
           start = c.position; raw = c.raw; end = start + raw.length;
           if (c.parts.length === 1) {
             var p = c.parts[0];
-            var res = p.firstAuthor ? resolveAuthorYear(p.firstAuthor, p.authors, p.year) : { status: 'nomatch' };
+            var res = p.firstAuthor ? resolveAuthorYear(p.firstAuthor, p.authors, p.year, p.hasEtAl) : { status: 'nomatch' };
             if (res.status === 'ok') {
               register(res.ref);
               var pg = normalizePageInfo(p.pageInfo);
@@ -442,7 +442,7 @@
             var refs = [], ok = true;
             c.parts.forEach(function(part) {
               if (!ok) return;
-              var r = part.firstAuthor ? resolveAuthorYear(part.firstAuthor, part.authors, part.year) : { status: 'nomatch' };
+              var r = part.firstAuthor ? resolveAuthorYear(part.firstAuthor, part.authors, part.year, part.hasEtAl) : { status: 'nomatch' };
               if (r.status === 'ok') refs.push(r.ref); else ok = false;
             });
             if (ok && refs.length > 0) {
@@ -460,7 +460,7 @@
             start = span.start; end = span.end; raw = span.raw;
             var cleanAuthors = c.authors.replace(/\s*et\s+al\.?/i, '');
             var authorsArr = CE.splitOnSeparators(cleanAuthors);
-            var res2 = authorsArr.length ? resolveAuthorYear(authorsArr[0], authorsArr, c.year) : { status: 'nomatch' };
+            var res2 = authorsArr.length ? resolveAuthorYear(authorsArr[0], authorsArr, c.year, /et\s+al/i.test(c.authors)) : { status: 'nomatch' };
             if (res2.status === 'ok') {
               register(res2.ref);
               replacement = renderForTarget([res2.ref], sourceStyleId, targetStyleId, 'narrative', {}, numberOf, c.authors);

@@ -49,14 +49,14 @@
   // two separate personal co-authors — citation-text extraction alone can't tell these apart.
   // Tries the normal single-first-author key first, then the full "&"-joined form, then (for a
   // bare acronym like "BSP") its resolved full institutional name, as fallbacks.
-  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap, refTargets, styleId, safeMode) {
+  function resolveBookmarkForPart(firstAuthor, allAuthorNames, year, refIndex, acronymMap, refTargets, styleId, safeMode, hasEtAl) {
     // Prefer the shared, reference-aware resolver from engine.js.  It handles derived
     // institutional acronyms, conservative shortened institution names, and -- critically --
     // returns ALL candidates so an ambiguous same-name/same-year citation is never linked to
     // whichever reference happened to appear first in the list.
     if (CE.resolveAuthorDateReference && refTargets) {
       var refs = refTargets.map(function(t) { return t.ref; });
-      var decision = CE.resolveAuthorDateReference(firstAuthor, allAuthorNames, year, refs, styleId, acronymMap);
+      var decision = CE.resolveAuthorDateReference(firstAuthor, allAuthorNames, year, refs, styleId, acronymMap, { hasEtAl: !!hasEtAl });
       if (decision.status === 'matched' && decision.autoSafe) {
         for (var rt = 0; rt < refTargets.length; rt++) {
           if (refTargets[rt].ref === decision.ref) {
@@ -1045,7 +1045,7 @@
               var part = c.parts[idx];
               var bmSeg = { bookmarkName: null, status: 'nomatch', reason: 'no-match', confidence: 0 };
               if (part && part.firstAuthor) {
-                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap, refTargets, styleId, safeMode);
+                bmSeg = resolveBookmarkForPart(part.firstAuthor, part.authors, part.year, refIndex, acronymMap, refTargets, styleId, safeMode, part.hasEtAl);
               }
               // trim spasi di tepi segmen supaya link tidak "makan" spasi pemisah
               var leadWs = segText.match(/^\s*/)[0].length;
@@ -1066,7 +1066,7 @@
             for (var i = 0; i < c.parts.length; i++) {
               var part2 = c.parts[i];
               if (!part2.firstAuthor) continue;
-              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap, refTargets, styleId, safeMode);
+              var bmFound = resolveBookmarkForPart(part2.firstAuthor, part2.authors, part2.year, refIndex, acronymMap, refTargets, styleId, safeMode, part2.hasEtAl);
               if (bmFound.bookmarkName) { bm = bmFound; bmYear = part2.year; break; }
             }
             addMatch(c.position, c.position + c.raw.length, bm, c.raw, bmYear);
@@ -1079,7 +1079,7 @@
           // awal SESUNGGUHNYA dari `authors` yang sudah bersih itu di dalam teks.
           var narrativeAuthorTokens = c.authors.split(/\s*(?:&|,|\band\b|\bdan\b|\bet\s+al\.?)\s*/i).filter(Boolean);
           var firstTok = narrativeAuthorTokens[0];
-          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap, refTargets, styleId, safeMode);
+          var bm2 = resolveBookmarkForPart(firstTok, narrativeAuthorTokens, c.year, refIndex, acronymMap, refTargets, styleId, safeMode, /et\s+al/i.test(c.authors));
           var authorIdx = articleText.indexOf(c.authors, c.position);
           var realStart = authorIdx >= 0 && authorIdx <= c.position + c.raw.length ? authorIdx : c.position;
           // Grouped multi-year citation for the SAME author, e.g. "BSP (2020, 2024, 2025,

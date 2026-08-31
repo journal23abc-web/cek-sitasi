@@ -1382,6 +1382,8 @@ function citationAuthorKeyCandidates(firstAuthor, allAuthorNames, acronymMap) {
 //   nomatch   no plausible result
 var AUTHOR_DATE_MATCH_REASONS = {
   'exact-personal': 'Nama belakang dan tahun sama persis',
+  'exact-personal-initial': 'Nama belakang, inisial, dan tahun sama persis',
+  'exact-author-prefix': 'Urutan nama penulis yang disebut dan tahun sama persis',
   'exact-institution': 'Nama institusi dan tahun sama persis',
   'explicit-acronym': 'Akronim institusi dipetakan secara eksplisit',
   'derived-acronym': 'Akronim institusi diturunkan dari nama lengkap',
@@ -1391,7 +1393,210 @@ var AUTHOR_DATE_MATCH_REASONS = {
   'no-match': 'Tidak ada referensi yang cukup cocok'
 };
 
-function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acronymMap) {
+function personalCitationAuthorKeys(allAuthorNames) {
+  return (allAuthorNames || []).map(function(name) {
+    return normalizeKeyName(surnameFromCitationToken(name), false);
+  }).filter(Boolean);
+}
+
+function personalReferenceAuthorKeys(ref, styleId) {
+  return ((ref && ref.authors) || []).map(function(name) {
+    return normalizeKeyName(surnameOf(name, styleId), false);
+  }).filter(Boolean);
+}
+
+function personalReferenceAuthorIdentityKeys(ref) {
+  return ((ref && ref.authors) || []).map(function(name) {
+    // Unlike the in-text matching key, keep initials/given-name letters here. Year suffixes are
+    // valid only for the SAME people in the same order, not merely the same sequence of surnames.
+    return normalizeKeyName(name, false);
+  }).filter(Boolean);
+}
+
+function longestCommonAuthorPrefix(a, b) {
+  var max = Math.min(a.length, b.length);
+  var i = 0;
+  while (i < max && a[i] === b[i]) i++;
+  return i;
+}
+
+function alphabeticSuffix(index) {
+  var value = index + 1;
+  var out = '';
+  while (value > 0) {
+    value--;
+    out = String.fromCharCode(97 + (value % 26)) + out;
+    value = Math.floor(value / 26);
+  }
+  return out;
+}
+
+function apaTitleSortKey(ref) {
+  return normalizeTitle((ref && ref.title) || '').replace(/^(?:a|an|the)\s+/i, '');
+}
+
+// APA 7 uses three different mechanisms for an author/year collision:
+//   1. different first authors who merely share a surname -> add their initials;
+//   2. the same first author/year but different later authors -> name authors up to the first
+//      position that distinguishes the works (and keep "et al." only when it still represents
+//      at least TWO omitted authors);
+//   3. an identical complete author list/year -> add a/b/c to the year, ordered by title.
+//
+// The returned Map is keyed by the parsed reference object, so the validator, converter and
+// linker can all use the exact same calculation without guessing from only author #2.
+function buildApa7DisambiguationPlan(references, styleId) {
+  var byFirstAndYear = new Map();
+  (references || []).forEach(function(ref) {
+    if (!ref || ref.isInstitutional || !ref.firstAuthor || !ref.year) return;
+    var firstKey = normalizeKeyName(surnameOf(ref.firstAuthor, styleId), false);
+    var key = firstKey + '_' + String(ref.year).toLowerCase();
+    if (!byFirstAndYear.has(key)) byFirstAndYear.set(key, []);
+    byFirstAndYear.get(key).push(ref);
+  });
+
+  var planByRef = new Map();
+  var nameGroups = [];
+  var suffixGroups = [];
+
+  byFirstAndYear.forEach(function(group) {
+    if (group.length < 2) return;
+
+    // If every first author has an initial and those initials differ, APA treats them as
+    // different people. Analyse each same-initial subgroup separately; initials themselves are
+    // handled by the resolver/collision warning.
+    var initials = group.map(function(ref) { return initialFromRefAuthor(ref.firstAuthor, styleId); });
+    var allHaveInitial = initials.every(Boolean);
+    var distinctInitials = initials.filter(function(v, i) { return initials.indexOf(v) === i; });
+    var identityGroups = [];
+    if (allHaveInitial && distinctInitials.length > 1) {
+      distinctInitials.forEach(function(initial) {
+        identityGroups.push(group.filter(function(ref) {
+          return initialFromRefAuthor(ref.firstAuthor, styleId) === initial;
+        }));
+      });
+    } else {
+      identityGroups.push(group);
+    }
+
+    identityGroups.forEach(function(identityGroup) {
+      if (identityGroup.length < 2) return;
+      var entries = identityGroup.map(function(ref) {
+        return {
+          ref: ref,
+          keys: personalReferenceAuthorKeys(ref, styleId),
+          identityKeys: personalReferenceAuthorIdentityKeys(ref),
+        };
+      });
+      var signatureGroups = new Map();
+      entries.forEach(function(entry) {
+        var signature = entry.identityKeys.join('\u001f');
+        if (!signatureGroups.has(signature)) signatureGroups.set(signature, []);
+        signatureGroups.get(signature).push(entry.ref);
+      });
+
+      if (signatureGroups.size > 1) {
+        var plans = [];
+        entries.forEach(function(entry) {
+          var requiredNames = 1;
+          var initialPositions = new Set();
+          entries.forEach(function(other) {
+            if (other.ref === entry.ref || other.identityKeys.join('\u001f') === entry.identityKeys.join('\u001f')) return;
+            var surnamePrefix = longestCommonAuthorPrefix(entry.keys, other.keys);
+            requiredNames = Math.max(requiredNames, surnamePrefix + 1);
+            // Rare but real: two different people at the distinguishing position can share the
+            // same surname. Record that position so the suggested citation includes their initial
+            // instead of falsely treating the complete author lists as identical and assigning a/b.
+            var identityLimit = Math.min(entry.identityKeys.length, other.identityKeys.length);
+            for (var identityIndex = 0; identityIndex < identityLimit; identityIndex++) {
+              if (entry.identityKeys[identityIndex] !== other.identityKeys[identityIndex] && entry.keys[identityIndex] === other.keys[identityIndex]) {
+                initialPositions.add(identityIndex);
+                requiredNames = Math.max(requiredNames, identityIndex + 1);
+                break;
+              }
+            }
+          });
+          requiredNames = Math.min(requiredNames, entry.keys.length);
+          var omitted = Math.max(0, entry.keys.length - requiredNames);
+          var plan = {
+            ref: entry.ref,
+            requiredNames: requiredNames,
+            expectedNamedCount: omitted >= 2 ? requiredNames : entry.keys.length,
+            useEtAl: omitted >= 2,
+            initialPositions: Array.from(initialPositions),
+            reason: 'different-author-sequence',
+          };
+          planByRef.set(entry.ref, plan);
+          plans.push(plan);
+        });
+        nameGroups.push({ refs: identityGroup.slice(), plans: plans });
+      }
+
+      // Only works whose COMPLETE author sequence is identical receive year suffixes. Different
+      // coauthor sequences are distinguished by names, never by inventing a/b for the whole group.
+      signatureGroups.forEach(function(sameAuthors) {
+        if (sameAuthors.length < 2) return;
+        var ordered = sameAuthors.slice().sort(function(a, b) {
+          var cmp = apaTitleSortKey(a).localeCompare(apaTitleSortKey(b), 'en', { sensitivity: 'base' });
+          if (cmp !== 0) return cmp;
+          return String(a.raw || '').localeCompare(String(b.raw || ''), 'en', { sensitivity: 'base' });
+        });
+        ordered.forEach(function(ref, index) {
+          var current = planByRef.get(ref) || {
+            ref: ref,
+            requiredNames: ref.authorCount >= 3 ? 1 : ref.authorCount,
+            expectedNamedCount: ref.authorCount >= 3 ? 1 : ref.authorCount,
+            useEtAl: ref.authorCount >= 3,
+          };
+          current.assignedYear = String(ref.year).replace(/[a-z]$/i, '') + alphabeticSuffix(index);
+          current.reason = current.reason ? current.reason + '+identical-author-sequence' : 'identical-author-sequence';
+          planByRef.set(ref, current);
+        });
+        suffixGroups.push({ refs: ordered });
+      });
+    });
+  });
+
+  return { planByRef: planByRef, nameGroups: nameGroups, suffixGroups: suffixGroups };
+}
+
+function formatApa7CitationForReference(ref, styleId, plan, narrative, pageInfo, firstAuthorOverride) {
+  if (!ref || ref.isInstitutional) return null;
+  var names = (ref.authors || []).map(function(author) { return surnameOf(author, styleId); });
+  if (!names.length) return null;
+  if (plan && plan.initialPositions) {
+    plan.initialPositions.forEach(function(index) {
+      if (index < 0 || index >= names.length) return;
+      var initial = initialFromRefAuthor(ref.authors[index], styleId);
+      if (initial) names[index] = initial + '. ' + names[index];
+    });
+  }
+  if (firstAuthorOverride) names[0] = firstAuthorOverride;
+
+  var required = plan && plan.requiredNames != null
+    ? plan.requiredNames
+    : (names.length >= 3 ? 1 : names.length);
+  var omitted = Math.max(0, names.length - required);
+  var useEtAl = plan && typeof plan.useEtAl === 'boolean' ? plan.useEtAl : (omitted >= 2);
+  var shown = useEtAl ? names.slice(0, required) : names.slice();
+  var authorText;
+  if (useEtAl) {
+    authorText = shown.join(', ') + (shown.length > 1 ? ', et al.' : ' et al.');
+  } else if (shown.length === 1) {
+    authorText = shown[0];
+  } else if (shown.length === 2) {
+    authorText = shown[0] + (narrative ? ' and ' : ' & ') + shown[1];
+  } else {
+    authorText = shown.slice(0, -1).join(', ') + (narrative ? ', and ' : ', & ') + shown[shown.length - 1];
+  }
+
+  var year = plan && plan.assignedYear ? plan.assignedYear : ref.year;
+  if (narrative) return authorText + ' (' + year + ')';
+  var locator = pageInfo ? ', ' + (/^pp?\./i.test(pageInfo) ? pageInfo : 'p. ' + pageInfo) : '';
+  return '(' + authorText + ', ' + year + locator + ')';
+}
+
+function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acronymMap, options) {
+  options = options || {};
   if (!firstAuthor || !ref || !ref.firstAuthor) return null;
   var citeInstitutional = isInstitutionalAuthor(firstAuthor);
   if (citeInstitutional !== !!ref.isInstitutional) return null;
@@ -1400,6 +1605,26 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
     var citeSurname = normalizeKeyName(surnameFromCitationToken(firstAuthor), false);
     var refSurname = normalizeKeyName(surnameOf(ref.firstAuthor, styleId), false);
     if (citeSurname && citeSurname === refSurname) {
+      var citeInitial = initialFromCitationToken(firstAuthor);
+      var refInitial = initialFromRefAuthor(ref.firstAuthor, styleId);
+      if (citeInitial && refInitial && citeInitial !== refInitial) return null;
+
+      var citationKeys = personalCitationAuthorKeys(allAuthorNames && allAuthorNames.length ? allAuthorNames : [firstAuthor]);
+      var referenceKeys = personalReferenceAuthorKeys(ref, styleId);
+      if (citationKeys.length > referenceKeys.length) return null;
+      for (var authorIndex = 0; authorIndex < citationKeys.length; authorIndex++) {
+        if (citationKeys[authorIndex] !== referenceKeys[authorIndex]) return null;
+        var citedAuthorInitial = initialFromCitationToken((allAuthorNames || [])[authorIndex]);
+        var referenceAuthorInitial = initialFromRefAuthor((ref.authors || [])[authorIndex], styleId);
+        if (citedAuthorInitial && referenceAuthorInitial && citedAuthorInitial !== referenceAuthorInitial) return null;
+      }
+
+      // Without "et al.", an explicitly listed multi-author sequence represents the COMPLETE
+      // author list. This matters when one work's author list is a prefix of another's.
+      if (options.hasEtAl === false && citationKeys.length > 1 && citationKeys.length !== referenceKeys.length) return null;
+
+      if (citationKeys.length > 1) return { score: 1.04, confidence: 1, reason: 'exact-author-prefix' };
+      if (citeInitial) return { score: 1.03, confidence: 1, reason: 'exact-personal-initial' };
       return { score: 1, confidence: 1, reason: 'exact-personal' };
     }
     if (citeSurname.length > 3 && refSurname.length > 3 &&
@@ -1455,7 +1680,7 @@ function resolveAuthorDateReference(firstAuthor, allAuthorNames, year, reference
   (references || []).forEach(function(ref) {
     // Keep APA/Harvard disambiguation suffixes significant: 2020a != 2020b.
     if (!ref || String(ref.year || '').toLowerCase() !== wantedYear) return;
-    var match = authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acronymMap);
+    var match = authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acronymMap, options);
     if (match) scored.push({ ref: ref, score: match.score, confidence: match.confidence, reason: match.reason, reviewOnly: !!match.reviewOnly });
   });
 
@@ -1663,12 +1888,16 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
   });
   this.refMap = refMap;
 
-  // ----- Same-surname + same-year collisions (e.g. "H. Zhang, 2023" vs "F. Zhang, 2023") -----
-  // Two different keys can still legitimately collide once we key only by surname+year.
-  // Figure out, per colliding group, whether it looks like the SAME author with two works
-  // (same/no initial, different titles -> suggest 2023a/2023b) or DIFFERENT people who just
-  // share a surname (different initials -> citations need the initial to disambiguate).
+  // ----- APA7 author/year collisions -----
+  // Keep a reusable per-reference plan. It distinguishes different first-author initials,
+  // later-coauthor collisions at ANY position, and genuinely identical author lists that need
+  // a/b/c year suffixes. The old implementation only inspected author #2 and incorrectly told
+  // every same-first-author/year group to add a/b.
   var matchedRefs = new Set(); // resolved specific reference objects (used for collision groups)
+  var apaDisambiguation = self.styleId === 'apa7'
+    ? buildApa7DisambiguationPlan(this.references, self.styleId)
+    : { planByRef: new Map(), nameGroups: [], suffixGroups: [] };
+  var apaPlanByRef = apaDisambiguation.planByRef;
   var collisionGroups = [];
   refMap.forEach(function(refs, key) {
     if (refs.length < 2) return;
@@ -1677,7 +1906,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     var distinctInitials = initials.filter(function(v, i) { return initials.indexOf(v) === i; });
     var differentPeople = distinctInitials.length >= 2 && distinctInitials.length === initials.length;
     collisionGroups.push({ key: key, refs: refs, differentPeople: differentPeople, firstInitial: withInitial[0].initial });
-    if (!differentPeople) {
+    if (!differentPeople && self.styleId !== 'apa7') {
       // same/missing initials -> likely the same author with 2+ works published the same year.
       // This is a reference-list formatting issue independent of how citations turn out, so
       // it's reported unconditionally (unlike the "different people" case below).
@@ -1690,6 +1919,24 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         code: refs.map(function(r){return r.raw.substring(0,100);}).join(' | '),
       });
     }
+  });
+
+  // APA7 year suffixes apply ONLY when the complete author sequence is identical. Order the
+  // suffixes by title (ignoring A/An/The), matching the ordering rule used in the reference list.
+  apaDisambiguation.suffixGroups.forEach(function(group) {
+    var assignments = group.refs.map(function(ref) {
+      var plan = apaPlanByRef.get(ref);
+      return (ref.title || ref.firstAuthor || '-') + ' -> ' + (plan ? plan.assignedYear : ref.year);
+    });
+    self.errors.push({
+      title: 'Nama belakang & tahun sama, kemungkinan penulis sama',
+      severity: 'error',
+      description: 'APA 7 memakai suffix tahun hanya karena daftar penulis lengkapnya identik. Urutan suffix ditentukan alfabetis berdasarkan judul: ' + assignments.join('; ') + '. Terapkan tahun yang sama pada referensi dan semua sitasinya.',
+      code: group.refs.map(function(r) { return r.raw.substring(0, 100); }).join(' | '),
+      correction: group.refs.map(function(ref) {
+        return formatApa7CitationForReference(ref, self.styleId, apaPlanByRef.get(ref), false);
+      }).join(' / '),
+    });
   });
 
   var citedKeys = new Set();
@@ -1709,7 +1956,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
             self.errors.push({ title: 'Pemisah dua penulis salah', description: 'Gaya ' + style.name + ' memakai "and" untuk dua penulis, bukan "&".', code: '(' + p.raw + ')', correction: '(' + p.authors[0] + ' and ' + p.authors[1] + ', ' + p.year + ')', severity: 'error' });
           }
         }
-        if (p.authorCount >= style.etAlThreshold && !p.hasEtAl) {
+        if (self.styleId !== 'apa7' && p.authorCount >= style.etAlThreshold && !p.hasEtAl) {
           self.errors.push({ title: style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi menulis ' + p.authorCount + ' nama, padahal ' + style.name + ' mengharuskan "et al." mulai ' + style.etAlThreshold + ' penulis.', code: '(' + p.raw + ')', correction: '(' + p.firstAuthor + ' et al., ' + p.year + ')', severity: 'error' });
         }
       } else {
@@ -1741,7 +1988,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
             altKey = self.keyFromCitationToken(p.authors.join(' & ')) + '_' + p.year;
             citedKeys.add(altKey);
           }
-          citationDetails.push({ key: key, altKey: altKey, part: p, allAuthorNames: p.authors || [p.firstAuthor], raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, initial: initialFromCitationToken(p.firstAuthor), secondAuthor: (p.authors && p.authors.length > 1) ? p.authors[1] : null, position: c.position });
+          citationDetails.push({ key: key, altKey: altKey, part: p, allAuthorNames: p.authors || [p.firstAuthor], raw: p.raw, groupRaw: c.raw, isMultiPart: c.parts.length > 1, isNarrative: false, initial: initialFromCitationToken(p.firstAuthor), position: c.position });
         }
       });
     } else {
@@ -1763,8 +2010,8 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
           altKey2 = self.keyFromCitationToken(authors.join(' & ')) + '_' + c.year;
           citedKeys.add(altKey2);
         }
-        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authors: authors, authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, allAuthorNames: authors, raw: c.raw, groupRaw: c.raw, isMultiPart: false, initial: initialFromCitationToken(authors[0]), secondAuthor: authors.length > 1 ? authors[1] : null, position: c.position });
-        if (authors.length >= style.etAlThreshold && !hasEtAl) {
+        citationDetails.push({ key: key2, altKey: altKey2, part: { firstAuthor: authors[0], authors: authors, authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, hasEtAl: hasEtAl, year: c.year }, allAuthorNames: authors, raw: c.raw, groupRaw: c.raw, isMultiPart: false, isNarrative: true, initial: initialFromCitationToken(authors[0]), position: c.position });
+        if (self.styleId !== 'apa7' && authors.length >= style.etAlThreshold && !hasEtAl) {
           self.errors.push({ title: 'Sitasi naratif ' + style.etAlThreshold + '+ penulis tanpa "et al."', description: 'Sitasi naratif "' + c.raw + '" menulis ' + authors.length + ' nama.', code: c.raw, correction: authors[0] + ' et al. (' + c.year + ')', severity: 'error' });
         }
       }
@@ -1781,9 +2028,87 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     citedKeys.add(self.keyFromRefAuthor(ref) + '_' + (ref.year || ''));
   }
 
+  function validateResolvedAuthorForm(ref, detail) {
+    if (!ref || ref.isInstitutional) return;
+
+    if (self.styleId !== 'apa7') {
+      if (ref.authorCount <= 2 && detail.part.hasEtAl) {
+        self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: detail.raw, severity: 'error' });
+      }
+      return;
+    }
+
+    var plan = apaPlanByRef.get(ref) || {
+      ref: ref,
+      requiredNames: ref.authorCount >= 3 ? 1 : ref.authorCount,
+      expectedNamedCount: ref.authorCount >= 3 ? 1 : ref.authorCount,
+      useEtAl: ref.authorCount >= 3,
+      reason: 'normal-apa7-form',
+    };
+    var actualNamedCount = (detail.allAuthorNames || []).length;
+    var correct = actualNamedCount === plan.expectedNamedCount && !!detail.part.hasEtAl === !!plan.useEtAl;
+    if (correct) return;
+
+    var collisionSpecific = /different-author-sequence/.test(plan.reason || '');
+    var correction = formatApa7CitationForReference(ref, self.styleId, plan, detail.isNarrative, detail.part.pageInfo);
+    var multipleBeforeEtAl = !collisionSpecific && detail.part.hasEtAl && actualNamedCount > 1;
+    self.errors.push({
+      title: collisionSpecific
+        ? 'Disambiguasi penulis belum sesuai APA 7'
+        : (multipleBeforeEtAl ? '"et al." mengikuti lebih dari satu nama penulis' : 'Bentuk nama penulis/"et al." sitasi belum sesuai APA 7'),
+      description: collisionSpecific
+        ? 'Sitasi "' + detail.raw + '" harus menampilkan nama sampai posisi pertama yang membedakan karya ini dari karya lain dengan penulis pertama dan tahun yang sama. "et al." hanya dipertahankan jika masih mewakili sedikitnya dua penulis yang dihilangkan.'
+        : 'Sitasi "' + detail.raw + '" tidak memakai jumlah nama penulis/"et al." yang sesuai dengan jumlah penulis pada referensinya.',
+      code: detail.raw,
+      correction: correction,
+      severity: 'error',
+    });
+  }
+
+  function ambiguousCitationGuidance(refs, detail) {
+    var allAssignedYears = refs.length > 1 && refs.every(function(ref) {
+      var p = apaPlanByRef.get(ref);
+      return p && p.assignedYear;
+    });
+    var needsAuthorExpansion = refs.some(function(ref) {
+      var p = apaPlanByRef.get(ref);
+      return p && /different-author-sequence/.test(p.reason || '') && p.expectedNamedCount > 1;
+    });
+    var candidateInitials = refs.map(function(ref) { return initialFromRefAuthor(ref.firstAuthor, self.styleId); });
+    var distinctInitials = candidateInitials.filter(Boolean).filter(function(v, i, arr) { return arr.indexOf(v) === i; });
+    var useInitials = distinctInitials.length > 1;
+    var forms = refs.map(function(ref) {
+      var initial = initialFromRefAuthor(ref.firstAuthor, self.styleId);
+      var firstOverride = useInitials && initial ? initial + '. ' + surnameOf(ref.firstAuthor, self.styleId) : null;
+      return formatApa7CitationForReference(ref, self.styleId, apaPlanByRef.get(ref), detail.isNarrative, detail.part.pageInfo, firstOverride);
+    }).filter(Boolean);
+
+    if (self.styleId === 'apa7' && allAssignedYears) {
+      return {
+        title: 'Sitasi ambigu — perlu suffix tahun a/b',
+        description: 'Daftar penulis lengkap dan tahunnya identik. APA 7 membedakannya dengan suffix tahun yang mengikuti urutan alfabetis judul, bukan dengan menambah nama penulis.',
+        correction: forms.join(' / '),
+      };
+    }
+    if (self.styleId === 'apa7' && needsAuthorExpansion) {
+      return {
+        title: 'Sitasi ambigu — perlu perluas daftar penulis',
+        description: 'Penulis pertama dan tahun sama, tetapi urutan penulis berikutnya berbeda. APA 7 meminta nama ditampilkan sampai posisi pertama yang membedakan setiap karya; gunakan "et al." hanya jika sedikitnya dua nama masih dihilangkan. Jangan menambahkan suffix a/b jika daftar penulis lengkapnya berbeda.',
+        correction: forms.join(' / '),
+      };
+    }
+    return {
+      title: 'Sitasi ambigu',
+      description: useInitials
+        ? 'Beberapa penulis pertama yang berbeda memiliki nama belakang dan tahun yang sama. Tambahkan inisial penulis pertama pada setiap sitasi.'
+        : 'Sitasi ini masih cocok dengan lebih dari satu referensi; tambahkan unsur pembeda sesuai daftar penulis dan tahun.',
+      correction: forms.join(' / '),
+    };
+  }
+
   // cross-reference
   citationDetails.forEach(function(d) {
-    var decision = resolveAuthorDateReference(d.part.firstAuthor, d.allAuthorNames, d.part.year, self.references, self.styleId, self.acronymMap);
+    var decision = resolveAuthorDateReference(d.part.firstAuthor, d.allAuthorNames, d.part.year, self.references, self.styleId, self.acronymMap, { hasEtAl: !!d.part.hasEtAl });
     d.matchDecision = decision;
     var resolvedRefs = decision.candidates;
     var isPartOfGroup = !!d.isMultiPart;
@@ -1796,44 +2121,12 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     } else {
       var refs = resolvedRefs;
       if (refs.length > 1) {
-        // Collision group: try to resolve to ONE specific reference via the citation's initial.
-        var candidates = refs.filter(function(ref) {
-          var ri = initialFromRefAuthor(ref.firstAuthor, self.styleId);
-          return d.initial && ri ? ri === d.initial : true;
-        });
-        if (d.initial && candidates.length === 1) {
-          rememberResolvedReference(candidates[0], d);
-          if (candidates[0].authorCount <= 2 && d.part.hasEtAl) {
-            self.errors.push({ title: '"et al." untuk sumber hanya ' + candidates[0].authorCount + ' penulis', description: 'Referensi "' + candidates[0].firstAuthor + ' (' + candidates[0].year + ')" hanya punya ' + candidates[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
-          }
-        } else if (d.secondAuthor && (function () {
-          // Kalau inisial tidak cukup (sama di semua kandidat, atau memang tidak ada inisial),
-          // coba disambiguasi lewat penulis KEDUA yang disebut di sitasi — pola APA7 yang sah
-          // untuk kasus penulis pertama & inisialnya SAMA persis di kedua referensi (mis.
-          // "Abercrombie, S." muncul di 2 karya beda tahun yang sama), di mana satu-satunya
-          // cara membedakan di teks adalah menyebut penulis kedua yang berbeda.
-          var secondKey = normalizeKeyName(surnameFromCitationToken(d.secondAuthor), false);
-          var narrowed = candidates.filter(function(ref) {
-            if (!ref.authors || ref.authors.length < 2) return false;
-            return normalizeKeyName(surnameOf(ref.authors[1], self.styleId), false) === secondKey;
-          });
-          if (narrowed.length !== 1) return false;
-          rememberResolvedReference(narrowed[0], d);
-          if (narrowed[0].authorCount <= 2 && d.part.hasEtAl) {
-            self.errors.push({ title: '"et al." untuk sumber hanya ' + narrowed[0].authorCount + ' penulis', description: 'Referensi "' + narrowed[0].firstAuthor + ' (' + narrowed[0].year + ')" hanya punya ' + narrowed[0].authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
-          }
-          return true;
-        })()) {
-          // resolved via second-author disambiguation, nothing more to do here
-        } else {
-          self.errors.push({ title: 'Sitasi ambigu', description: 'Sitasi "' + d.raw + '" bisa merujuk ke ' + refs.length + ' referensi berbeda yang nama belakang & tahunnya sama (' + refs.map(function(r){return r.firstAuthor;}).join(' / ') + '). Tambahkan inisial pada sitasi untuk memperjelas.', code: d.raw, severity: 'error' });
-        }
+        var guidance = ambiguousCitationGuidance(refs, d);
+        self.errors.push({ title: guidance.title, description: 'Sitasi "' + d.raw + '" bisa merujuk ke ' + refs.length + ' referensi. ' + guidance.description, code: d.raw, correction: guidance.correction || undefined, severity: 'error' });
       } else {
         refs.forEach(function(ref) {
           rememberResolvedReference(ref, d);
-          if (ref.authorCount <= 2 && d.part.hasEtAl) {
-            self.errors.push({ title: '"et al." untuk sumber hanya ' + ref.authorCount + ' penulis', description: 'Referensi "' + ref.firstAuthor + ' (' + ref.year + ')" hanya punya ' + ref.authorCount + ' penulis tercatat, tidak perlu "et al."', code: d.raw, severity: 'error' });
-          }
+          validateResolvedAuthorForm(ref, d);
         });
       }
     }
@@ -1844,7 +2137,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
     var refs = refMap.get(key) || [];
     if (refs.length > 1) {
       // Collision group: this specific reference counts as cited only if a citation resolved to it.
-      if (!matchedRefs.has(r)) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak ada sitasi yang jelas merujuk ke sini (perlu inisial untuk memastikan).', code: r.raw.substring(0, 120), severity: 'error' });
+      if (!matchedRefs.has(r)) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak ada sitasi yang dapat dibedakan secara unik. Periksa inisial penulis pertama, perluasan urutan penulis, atau suffix tahun a/b sesuai kasusnya.', code: r.raw.substring(0, 120), severity: 'error' });
       return;
     }
     if (!citedKeys.has(key)) self.errors.push({ title: 'Referensi tidak disitasi dalam teks', description: '"' + r.firstAuthor + ' (' + r.year + ')" ada di daftar referensi tapi tidak disitasi.', code: r.raw.substring(0, 120), severity: 'error' });
@@ -2433,7 +2726,14 @@ MultiFormatValidator.prototype.validateCitationFormat = function() {
   };
   var introHeading2 = findIntroductionHeading(this.articleText);
   var introOffset2 = introHeading2 ? introHeading2.offset + introHeading2.lineLength : 0;
-  var issues = detectMalformedCitations(this.articleText).filter(function(issue) { return issue.position >= introOffset2; });
+  var issues = detectMalformedCitations(this.articleText).filter(function(issue) {
+    if (issue.position < introOffset2) return false;
+    // In APA7, more than one explicit surname before "et al." can be REQUIRED to distinguish
+    // colliding works. validateAuthorDate() checks that form against the actual full author lists,
+    // so this context-free typography detector must not issue a contradictory generic error.
+    if (self.styleId === 'apa7' && issue.type === 'multiple_authors_before_et_al') return false;
+    return true;
+  });
   issues.forEach(function(issue) {
     self.errors.push({
       title: TITLES[issue.type] || 'Format sitasi bermasalah',
@@ -3113,6 +3413,8 @@ var CitationEngine = {
   deriveInstitutionalAcronym: deriveInstitutionalAcronym,
   institutionalNamesCompatible: institutionalNamesCompatible,
   resolveAuthorDateReference: resolveAuthorDateReference,
+  buildApa7DisambiguationPlan: buildApa7DisambiguationPlan,
+  formatApa7CitationForReference: formatApa7CitationForReference,
   AUTHOR_DATE_MATCH_REASONS: AUTHOR_DATE_MATCH_REASONS,
   findAuthorDateReferenceMatches: findAuthorDateReferenceMatches,
   looksLikeFullCalendarDate: looksLikeFullCalendarDate,

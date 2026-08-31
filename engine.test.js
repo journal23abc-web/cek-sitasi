@@ -1192,11 +1192,125 @@ test('a genuine "et al. follows two names" mistake ("Smith, Jones et al., 2020")
 
 test('both halves of the "Abercrombie, Bang/Carbonneau, et al., 2022" disambiguated citation group correctly match their own distinct reference — not flagged as ambiguous, and both references count as cited', () => {
   const article = 'Findings (Abercrombie, Bang, et al., 2022; Abercrombie, Carbonneau, et al., 2022) support this claim across the sample studied here overall.';
-  const refs = 'Abercrombie, S., Bang, H., & Vaughan, A. (2022). Motivational and disciplinary differences. Educational Psychology, 1(1), 1-10.\n' +
-    'Abercrombie, S., Carbonneau, K. J., & Hushman, C. J. (2022). Re-examining academic risk taking. Journal, 2(2), 5-15.';
+  // Four authors are intentional: after naming two, "et al." still represents TWO omitted
+  // authors. With only three total authors APA7 requires listing all three instead.
+  const refs = 'Abercrombie, S., Bang, H., Vaughan, A., & Smith, T. (2022). Motivational and disciplinary differences. Educational Psychology, 1(1), 1-10.\n' +
+    'Abercrombie, S., Carbonneau, K. J., Hushman, C. J., & Lee, P. (2022). Re-examining academic risk taking. Journal, 2(2), 5-15.';
   const r = validate(article, refs);
   assert.strictEqual(r.errors.filter((e) => e.title === 'Sitasi ambigu').length, 0);
   assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Disambiguasi penulis belum sesuai APA 7').length, 0);
+});
+
+console.log('\n=== APA7 general author-sequence disambiguation (author #2, #3, #4, prefix lists, and year suffixes) ===');
+
+test('same first author/year with DIFFERENT second authors and exactly two authors per work resolves from both explicitly named authors — no a/b suffix', () => {
+  const article = '(Smith & Jones, 2020; Smith & Brown, 2020)';
+  const refs = [
+    'Smith, A., & Jones, B. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., & Brown, C. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.some((e) => /Sitasi ambigu|suffix a\/b|Referensi tidak disitasi/.test(e.title)), false, JSON.stringify(r.errors));
+});
+
+test('when author #1 and #2 match but author #3 differs, APA7 names through author #3 and keeps et al. when two authors remain omitted', () => {
+  const article = '(Smith, Jones, Clark, et al., 2020; Smith, Jones, Brown, et al., 2020)';
+  const refs = [
+    'Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Brown, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.some((e) => /Sitasi ambigu|Disambiguasi penulis|Referensi tidak disitasi/.test(e.title)), false, JSON.stringify(r.errors));
+});
+
+test('when the first difference is author #4 of five, APA7 lists ALL five because et al. would represent only one omitted author', () => {
+  const article = '(Smith, Jones, Clark, White, & Green, 2020; Smith, Jones, Clark, Black, & Gray, 2020)';
+  const refs = [
+    'Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Clark, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.some((e) => /Sitasi ambigu|Disambiguasi penulis|Bentuk nama penulis|Referensi tidak disitasi/.test(e.title)), false, JSON.stringify(r.errors));
+});
+
+test('the algorithm is not capped at author #3: a difference at author #4 of six keeps four names plus et al.', () => {
+  const article = '(Smith, Jones, Clark, White, et al., 2020; Smith, Jones, Clark, Black, et al., 2020)';
+  const refs = [
+    'Smith, A., Jones, B., Clark, C., White, D., Green, E., & Blue, F. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Clark, C., Black, D., Gray, E., & Red, F. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.some((e) => /Sitasi ambigu|Disambiguasi penulis|Referensi tidak disitasi/.test(e.title)), false, JSON.stringify(r.errors));
+});
+
+test('an under-specified short citation is rejected with both exact APA7 expanded alternatives, not guessed', () => {
+  const refs = [
+    'Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Brown, C., Black, D., & Gray, E. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate('(Smith et al., 2020)', refs);
+  const issue = r.errors.find((e) => e.title === 'Sitasi ambigu — perlu perluas daftar penulis');
+  assert.ok(issue, JSON.stringify(r.errors));
+  assert.strictEqual(issue.correction, '(Smith, Jones, Clark, et al., 2020) / (Smith, Jones, Brown, et al., 2020)');
+  assert.ok(issue.description.includes('Jangan menambahkan suffix a/b'));
+});
+
+test('et al. is rejected when it would replace only one author; correction lists the complete author sequence', () => {
+  const refs = [
+    'Smith, A., Jones, B., Clark, C., & White, D. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Brown, C., & Black, D. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate('(Smith, Jones, Clark, et al., 2020; Smith, Jones, Brown, et al., 2020)', refs);
+  const issues = r.errors.filter((e) => e.title === 'Disambiguasi penulis belum sesuai APA 7');
+  assert.strictEqual(issues.length, 2, JSON.stringify(r.errors));
+  assert.deepStrictEqual(issues.map((e) => e.correction), [
+    '(Smith, Jones, Clark, & White, 2020)',
+    '(Smith, Jones, Brown, & Black, 2020)',
+  ]);
+});
+
+test('if one complete author list is a prefix of another, each work is still resolved safely without first-hit guessing', () => {
+  const refs = [
+    'Smith, A., Jones, B., & Clark, C. (2020). Short team. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., Clark, C., White, D., & Green, E. (2020). Long team. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate('(Smith, Jones, & Clark, 2020; Smith, Jones, Clark, White, & Green, 2020)', refs);
+  assert.strictEqual(r.errors.some((e) => /Sitasi ambigu|Referensi tidak disitasi/.test(e.title)), false, JSON.stringify(r.errors));
+});
+
+test('a/b suffixes are assigned only for IDENTICAL full author lists, alphabetically by title', () => {
+  const refs = [
+    'Smith, A., Jones, B., & Clark, C. (2020). Zebra study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., & Clark, C. (2020). Alpha study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate('(Smith et al., 2020)', refs);
+  const suffixIssue = r.errors.find((e) => e.title === 'Nama belakang & tahun sama, kemungkinan penulis sama');
+  assert.ok(suffixIssue, JSON.stringify(r.errors));
+  assert.ok(suffixIssue.description.includes('Alpha study -> 2020a; Zebra study -> 2020b'), suffixIssue.description);
+  assert.strictEqual(r.errors.some((e) => e.title === 'Sitasi ambigu — perlu perluas daftar penulis'), false);
+});
+
+test('same surname sequence but different coauthor initials is NOT mistaken for an identical author list that needs a/b', () => {
+  const refs = [
+    'Smith, A., Jones, B., & Clark, C. (2020). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, D., & Clark, C. (2020). Beta study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate('(Smith et al., 2020)', refs);
+  const issue = r.errors.find((e) => e.title === 'Sitasi ambigu — perlu perluas daftar penulis');
+  assert.ok(issue, JSON.stringify(r.errors));
+  assert.ok(issue.correction.includes('(Smith, B. Jones, & Clark, 2020)'), issue.correction);
+  assert.ok(issue.correction.includes('(Smith, D. Jones, & Clark, 2020)'), issue.correction);
+  assert.strictEqual(r.errors.some((e) => e.title === 'Nama belakang & tahun sama, kemungkinan penulis sama'), false);
+});
+
+test('references and citations already carrying distinct a/b suffixes resolve cleanly', () => {
+  const refs = [
+    'Smith, A., Jones, B., & Clark, C. (2020a). Alpha study. Journal, 1(1), 1-10.',
+    'Smith, A., Jones, B., & Clark, C. (2020b). Zebra study. Journal, 2(1), 11-20.',
+  ].join('\n');
+  const r = validate('(Smith et al., 2020a; Smith et al., 2020b)', refs);
+  assert.strictEqual(r.errors.some((e) => /Sitasi ambigu|Referensi tidak disitasi|suffix a\/b/.test(e.title)), false, JSON.stringify(r.errors));
 });
 
 console.log('\n=== Regression: surnames with a DOUBLE leading particle ("van der Kleij", "von der Leyen", "de la Cruz") were completely invisible to citation extraction — the optional particle prefix only consumed ONE particle word, leaving the second lowercase particle unable to match the required capitalized base-word segment ===');
