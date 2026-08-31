@@ -601,8 +601,14 @@
       var lastA = canon[n - 1];
       return head.join(', ') + ', . . . ' + renderAuthorForStyle(lastA.last, lastA.given, targetStyleId, 'other');
     }
+    // The SOURCE reference itself may already be a truncated "et al." list (e.g. IEEE's "A. R.
+    // Malik et al."). canonicalAuthorsFromRef strips that marker fragment out (it's not a real
+    // name), so `canon` only holds the names that were actually spelled out — but we still need
+    // to carry the "there were more" signal through to the rendered line, or a 1-name truncated
+    // source silently turns into what looks like a genuine single-author work.
+    var sourceTruncated = (ref.authors || []).length > 0 && isEtAlFragment(ref.authors[ref.authors.length - 1]);
     var threshold = style.refListFullUpTo;
-    var list = canon, truncated = false;
+    var list = canon, truncated = sourceTruncated;
     if (threshold && n > threshold) { list = canon.slice(0, threshold); truncated = true; }
     var rendered = list.map(function(a, i) { return renderAuthorForStyle(a.last, a.given, targetStyleId, i === 0 ? 'first' : 'other'); });
     if (truncated) return rendered.join(', ') + ', et al.';

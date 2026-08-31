@@ -762,7 +762,22 @@ var AuthorParsers = {
   // "F. M. Last" never inverted (IEEE)
   nonInverted: function(str) {
     var cleaned = str.replace(/\.\s*$/, '').trim();
+    // A truncated author list may end in "et al." directly after the last given name, with NO
+    // comma before it ("A. R. Malik et al.") — the more common real-world form. Without this,
+    // the trailing "et al" gets swallowed into the last author's own tokens by splitOnSeparators
+    // (nothing here splits on bare whitespace), and the non-inverted last-token-is-surname rule
+    // then reads "al" as the surname (e.g. "A. R. Malik et al" -> last="al"). Split it off into
+    // its own "et al." fragment here so it matches the shape already produced for the comma-led
+    // form ("A. R. Malik, et al." -> ["A. R. Malik", "et al."]), which downstream consumers
+    // (isEtAlFragment filters) already know how to handle.
+    var etAlSuffix = null;
+    var etAlMatch = cleaned.match(/^(.*\S)(?:,)?\s+et\s+al\.?$/i);
+    if (etAlMatch && etAlMatch[1].trim()) {
+      cleaned = etAlMatch[1].trim();
+      etAlSuffix = 'et al.';
+    }
     var arr = splitOnSeparators(cleaned);
+    if (etAlSuffix) arr.push(etAlSuffix);
     return arr.filter(Boolean);
   },
   // "Last FM" comma separated, no 'and' (Vancouver / ICMJE)
@@ -934,6 +949,15 @@ function extractYear(line, style) {
   }
   var m2 = line.match(/\((\d{4}[a-z]?|n\.d\.)\)/);
   if (m2) return m2[1];
+  // Numeric-family (IEEE/Vancouver) references state the year as bare text near the END of the
+  // citation info, e.g. "..., pp. 1944-1958, 2025. doi: ...". Taking the FIRST 19xx/20xx-looking
+  // number in the line risks matching a page number, volume, or article number that happens to
+  // look like a year (e.g. "pp. 1944-1958" would wrongly read as year 1944). The true year is
+  // reliably the LAST such match before the DOI (or before the end of the line, if there's no
+  // DOI) — IEEE/Vancouver both always place it last, right before the closing period.
+  var scope = line.split(/\bdoi\s*:/i)[0];
+  var matches = scope.match(/\b(19|20)\d{2}[a-z]?\b/g);
+  if (matches && matches.length) return matches[matches.length - 1];
   var m3 = line.match(/\b(19|20)\d{2}[a-z]?\b/);
   return m3 ? m3[0] : null;
 }
@@ -1185,9 +1209,18 @@ function parseReferenceLine(line, styleId) {
     var title = extractTitle(rest, style, titleStart);
     var doi = extractDOI(raw);
     var bibFields = extractBibliographicFields(raw, title);
+    // A trailing "et al." fragment (see AuthorParsers.nonInverted) marks the listed authors as
+    // an intentionally incomplete prefix of a longer, truncated list — per ICMJE/APA convention
+    // that always means 3+ total authors, regardless of how many names were actually spelled
+    // out before it. Counting the "et al." marker itself as one more "author" (the naive
+    // authors.length) would both mis-state the count and, for short prefixes, fail to clear an
+    // et-al-threshold check downstream that exists specifically to catch this case.
+    var authorsListForCount = parsedAuthors.authors;
+    var lastIsEtAl = authorsListForCount.length > 0 && /^et\s+al\.?$/i.test(authorsListForCount[authorsListForCount.length - 1]);
+    var numericAuthorCount = lastIsEtAl ? Math.max(authorsListForCount.length - 1, 3) : authorsListForCount.length;
     return {
       raw: raw, numLabel: numLabel, authors: parsedAuthors.authors, isInstitutional: parsedAuthors.isInstitutional,
-      authorCount: parsedAuthors.authors.length, firstAuthor: parsedAuthors.authors[0] || null,
+      authorCount: numericAuthorCount, firstAuthor: parsedAuthors.authors[0] || null,
       year: year, title: title, journal: bibFields.journal, issn: bibFields.issn, eissn: bibFields.eissn,
       volume: bibFields.volume, issue: bibFields.issue, pages: bibFields.pages, articleNumber: bibFields.articleNumber, publisher: bibFields.publisher,
       doi: doi, styleId: styleId, sourceType: detectSourceType(raw),

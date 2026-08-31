@@ -258,6 +258,52 @@ test('converter resolves APA7 collisions from an arbitrary-length explicit autho
   assert.ok(r.convertedArticle.includes('[1], [2]') || r.convertedArticle.includes('[1]\u2013[2]'), r.convertedArticle);
 });
 
+console.log('\n=== IEEE reference with un-comma\'d "et al." (real-world regression) ===');
+
+test('IEEE source author list "F. Last et al." (no comma) resolves surname correctly, not "al"', () => {
+  // Reproduces a real bug: "A. R. Malik et al." was parsed with "al" as the surname because
+  // nothing split "et al" off before the non-inverted last-token-is-surname rule ran.
+  const article = 'Prior work found positive effects [1].';
+  const refs = '[1] A. R. Malik et al., "Exploring AI in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.convertedArticle.includes('(Malik et al., 2023)'), r.convertedArticle);
+  assert.ok(!r.convertedArticle.includes('(al, 2023)'), r.convertedArticle);
+});
+
+test('IEEE source author list "et al." truncation is preserved in the converted reference-list line too', () => {
+  const article = 'Prior work found positive effects [1].';
+  const refs = '[1] A. R. Malik et al., "Exploring AI in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.referenceLines[0].line.startsWith('Malik, A. R., et al.,'), r.referenceLines[0].line);
+});
+
+test('narrative "Wang et al." citation with un-comma\'d source "et al." also resolves (not left unmatched)', () => {
+  const article = 'Wang et al. [1] reported similar findings.';
+  const refs = '[1] S. Wang et al., "Artificial intelligence in education," Expert Systems with Applications, vol. 235, p. 124167, 2024. doi: 10.1016/j.eswa.2024.124167.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.convertedArticle.includes('Wang et al. (2024)'), r.convertedArticle);
+  assert.strictEqual(r.unmatched.length, 0, JSON.stringify(r.unmatched));
+});
+
+console.log('\n=== Reference year vs. a page-range number that looks like a year (real-world regression) ===');
+
+test('year is read from the end of the reference (after the page range), not the page range itself', () => {
+  // Reproduces a real bug: "pp. 1944-1958, 2025" was parsed as year 1944 (the first 19xx/20xx-
+  // shaped number in the line) instead of the actual publication year, 2025, stated afterward.
+  const article = 'This gender gap was previously documented [1].';
+  const refs = '[1] H. Al-Samarraie, S. M. Sarsam, A. I. Alzahrani, A. Chatterjee, and B. J. Swinnerton, "Gender perceptions of generative AI in higher education," Journal of Applied Research in Higher Education, vol. 17, no. 5, pp. 1944-1958, 2025. doi: 10.1108/JARHE-02-2024-0109.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.convertedArticle.includes('(Al-Samarraie et al., 2025)'), r.convertedArticle);
+  assert.ok(!r.convertedArticle.includes('1944'), r.convertedArticle);
+});
+
+test('year extraction still works normally for references with no page range at all', () => {
+  const article = 'This was noted in an earlier review [1].';
+  const refs = '[1] O. A. Ilie, "The ethics of AI-assisted academic writing," in Proceedings of the International Conference Knowledge-Based Organization, vol. 31, no. 2, pp. 155-158, 2025.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.convertedArticle.includes('(Ilie, 2025)'), r.convertedArticle);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));
