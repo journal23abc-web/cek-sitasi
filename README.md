@@ -12,6 +12,7 @@ validator-upload.html  Validator sitasi via upload .docx — ekspor laporan PDF 
 preliminary-check.html Preliminary check naskah (upload .docx) — dashboard IMRAD & checklist
 link-upload.html       Tautkan sitasi in-text ke entri referensi (hyperlink internal) di .docx
 citation-converter.html Konversi sitasi in-text (parenthetical & naratif) antar gaya, mis. APA7 → IEEE — tempel/upload .docx/isi manual, pratinjau, edit manual, ekspor .docx/.txt
+term-consistency.html Cek konsistensi istilah — review alias, kamus khusus, definisi & graph konsep
 shared.css              Design tokens, watermark & komponen yang identik di semua halaman
 theme.js                 Toggle dark/light mode, dipakai semua halaman
 engine.js                Mesin inti validator sitasi: parsing referensi, deteksi gaya, matching
@@ -23,8 +24,12 @@ upload.js                 UI logic untuk validator-upload.html (JSZip + Mammoth.
 preliminary.js            UI logic untuk preliminary-check.html (JSZip)
 link-upload.js            UI logic untuk link-upload.html (JSZip + Mammoth.js)
 convert-ui.js             UI logic untuk citation-converter.html
+term-consistency-engine.js Mesin deteksi konsep konservatif; tidak melakukan heuristic auto-merge
+term-consistency.js        UI review istilah, kamus khusus, validasi DOCX, dan ekspor JSON
+term-consistency-worker.js Web Worker untuk analisis istilah tanpa membekukan tab
 validator-worker.js     Web Worker — menjalankan validasi berat di background thread
-engine.test.js, docstats-engine.test.js, journal-rules-engine.test.js, converter-engine.test.js
+engine.test.js, docstats-engine.test.js, journal-rules-engine.test.js, converter-engine.test.js,
+term-consistency-engine.test.js
                         Automated test suite (Node, tanpa dependency) — lihat catatan di bawah
 ```
 
@@ -71,6 +76,12 @@ Auto-detect gaya tersedia, tapi untuk dokumen ambigu selalu ada opsi pilih manua
   nama/ID bookmark dicek agar tidak bertabrakan, teks terlihat tidak boleh berubah, dan struktur
   OOXML diperiksa sebelum file keluaran ditawarkan. Content-control Zotero/Mendeley/EndNote
   tetap dipertahankan; hyperlink disisipkan di dalam kontennya tanpa melepas metadata sitasi.
+- **Konsistensi istilah dengan review manusia**: perbedaan kapitalisasi biasa dan bentuk
+  tunggal/jamak tidak otomatis dituduh salah; bagian referensi dikeluarkan dari analisis;
+  istilah lowercase dapat ditemukan dari definisi/relasi eksplisit; dan pasangan yang mungkin
+  alias tidak pernah digabung berdasarkan skor saja. Pengguna dapat memilih istilah utama,
+  menetapkan dua konsep sebagai berbeda, atau memasukkan kamus khusus per naskah dengan format
+  `Istilah Utama = alias 1 | alias 2`. Analisis berat dijalankan melalui Web Worker.
 
 ## Tingkat keyakinan pencocokan author-date
 

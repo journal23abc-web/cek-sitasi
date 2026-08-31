@@ -69,17 +69,44 @@
   .disclaimer{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:14px; padding-top:12px; border-top:1px dashed var(--hairline); }
 
   .dropzone{ border:1.5px dashed var(--hairline); border-radius:10px; padding:24px 20px; text-align:center; cursor:pointer; transition:all .15s ease; background:var(--input-bg); margin-bottom:14px; }
-  .dropzone:hover, .dropzone.drag{ border-color:var(--cyan); background:rgba(79,227,232,.05); }
+  .dropzone:hover, .dropzone.drag, .dropzone:focus-visible{ border-color:var(--cyan); background:rgba(79,227,232,.05); outline:none; box-shadow:0 0 0 3px rgba(79,227,232,.12); }
   .dropzone .icon{ font-size:26px; margin-bottom:8px; }
   .dropzone .main{ font-size:13px; color:var(--text); margin-bottom:4px; }
   .dropzone .sub{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-faint); }
   .file-chip{ display:none; align-items:center; gap:10px; margin-bottom:14px; background:var(--input-bg); border:1px solid var(--hairline); border-radius:8px; padding:10px 14px; font-family:var(--font-mono); font-size:12px; }
   .file-chip.show{ display:flex; }
-  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); }
+  .file-chip .x{ margin-left:auto; cursor:pointer; color:var(--text-dim); border:0; background:transparent; font:inherit; padding:4px 7px; border-radius:4px; }
   .file-chip .x:hover{ color:var(--red); }
   .input-mode-toggle{ display:flex; gap:8px; margin-bottom:16px; }
   .input-mode-toggle button{ flex:1; font-family:var(--font-mono); font-size:11.5px; letter-spacing:.04em; padding:9px 14px; border-radius:6px; border:1px solid var(--hairline); background:var(--input-bg); color:var(--text-dim); cursor:pointer; transition:all .15s ease; }
   .input-mode-toggle button.active{ border-color:var(--cyan); color:var(--cyan); background:rgba(79,227,232,.08); }
+  .glossary-box{ margin-top:16px; padding-top:14px; border-top:1px dashed var(--hairline); }
+  .glossary-box summary{ cursor:pointer; font-family:var(--font-mono); font-size:11.5px; color:var(--text-dim); }
+  .glossary-box textarea{ min-height:92px; margin-top:10px; }
+  .glossary-help,.section-note{ font-size:11.5px; line-height:1.6; color:var(--text-dim); margin:8px 0 12px; }
+  .analysis-meta{ display:flex; flex-wrap:wrap; gap:8px 14px; padding:10px 12px; border-radius:7px; background:var(--input-bg); font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); }
+  .secondary-action{ font-family:var(--font-mono); font-size:11px; padding:10px 14px; border:1px solid var(--hairline); background:var(--input-bg); color:var(--text-dim); border-radius:6px; cursor:pointer; }
+  .secondary-action:hover:not(:disabled){ border-color:var(--cyan); color:var(--cyan); }
+  .secondary-action:disabled{ opacity:.4; cursor:not-allowed; }
+  .alias-head{ display:flex; gap:12px; align-items:flex-start; justify-content:space-between; }
+  .decision-badge{ max-width:260px; font-family:var(--font-mono); font-size:10px; color:var(--green); border:1px solid rgba(62,217,143,.35); border-radius:999px; padding:4px 8px; }
+  .tc-issue.decided{ border-left-color:var(--green); }
+  .evidence-grid{ display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:10px; font-family:var(--font-mono); font-size:10px; color:var(--text-dim); }
+  .context-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+  .context-grid>div{ border:1px solid var(--hairline); border-radius:6px; padding:9px; font-size:10.5px; color:var(--text-dim); }
+  .context-grid p{ margin:5px 0 0; line-height:1.5; }
+  .review-actions{ display:flex; flex-wrap:wrap; gap:7px; margin-top:11px; }
+  .review-actions button{ border:1px solid var(--hairline); background:var(--panel); color:var(--text-dim); border-radius:5px; padding:6px 9px; font-family:var(--font-mono); font-size:10px; cursor:pointer; }
+  .review-actions button:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .tc-context{ margin-top:8px; padding:8px; border-radius:5px; background:var(--panel); font-size:10.5px; line-height:1.5; color:var(--text-dim); }
+  .muted{ color:var(--text-faint); font-size:10px; font-family:var(--font-mono); }
+  .table-scroll{ overflow:auto; }
+  .definition{ margin-bottom:5px; min-width:200px; line-height:1.45; }
+  .tc-issue.relation{ border-left-color:var(--cyan); }
+  .tc-type.OBSERVED_VARIABLE,.tc-type.CONSTRUCT_VARIABLE{ background:rgba(62,217,143,.12); color:var(--green); }
+  .tc-type.INSTRUMENT,.tc-type.INDICATOR{ background:rgba(79,227,232,.12); color:var(--cyan); }
+  .tc-type.EXAMPLE{ background:rgba(150,150,150,.12); color:var(--text-dim); }
+  @media(max-width:700px){ .context-grid{ grid-template-columns:1fr; } .alias-head{ flex-direction:column; } }
 </style>
 </head>
 <body>
@@ -111,7 +138,7 @@
     </div>
 
     <div id="uploadModePanel" style="display:none;">
-      <div class="dropzone" id="dropzone">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Pilih file DOCX untuk pemeriksaan konsistensi istilah">
         <div class="icon">📄</div>
         <div class="main">Klik atau seret file .docx ke sini</div>
         <div class="sub">Upload memungkinkan pembacaan tabel (loading/CR/AVE) sebagai bukti tambahan — tidak tersedia lewat tempel teks biasa.</div>
@@ -120,12 +147,20 @@
       <div class="file-chip" id="fileChip">
         <span id="fileName"></span>
         <span id="fileSize" style="color:var(--text-faint);"></span>
-        <span class="x" id="fileRemove">✕</span>
+        <button type="button" class="x" id="fileRemove" aria-label="Hapus file terpilih">✕</button>
       </div>
     </div>
 
-    <div class="row" style="margin-top:18px;display:flex;gap:14px;">
+    <details class="glossary-box">
+      <summary>⚙️ Kamus khusus naskah (opsional, disarankan untuk bidang khusus)</summary>
+      <p class="glossary-help">Satu aturan per baris: <code>Istilah Utama = alias 1 | alias 2</code>. Karena ini keputusan Anda, alias dalam kamus akan digabung langsung ke istilah utama.</p>
+      <textarea id="glossaryInput" aria-label="Kamus istilah khusus" placeholder="Contoh:\nSystem Use = penggunaan sistem | system usage\nUser Satisfaction = kepuasan pengguna"></textarea>
+    </details>
+
+    <div class="row" style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <button class="primary" id="processBtn">🔎 Cek Konsistensi Istilah</button>
+      <button type="button" class="secondary-action" id="exportBtn" disabled>⬇ Unduh JSON</button>
+      <button type="button" class="secondary-action" id="clearReviewsBtn" disabled>↺ Reset Review</button>
       <span class="status info" id="statusMsg" role="status" aria-live="polite"></span>
     </div>
 
@@ -133,8 +168,10 @@
       🔒 Semua pemrosesan berjalan di browser Anda — tidak ada teks yang dikirim ke server.<br><br>
       ⚠️ <b>Ini alat bantu heuristik (aturan pola + kemiripan kata terkurasi), bukan model AI/semantik sungguhan.</b> Tidak ada akses ke model embedding di browser tanpa memuat model ML besar. Sebagai gantinya, "kemiripan makna" didekati dari kamus sinonim akademik terkurasi (mis. "dishonesty"~"misconduct") — akurat untuk pasangan yang ada di kamus, tapi tidak bisa menggeneralisasi ke pasangan sinonim yang belum dikenal. Karena itu:
       <ul style="margin:6px 0 0 18px; padding:0;">
-        <li>Penggabungan otomatis <b>hanya</b> terjadi untuk variasi penulisan yang jelas aman (huruf besar/kecil, tanda hubung, tunggal/jamak), pasangan akronim eksplisit "Istilah Lengkap (SINGKATAN)", dan pasangan bersimilaritas sangat tinggi (≥0.90) yang punya bukti struktural pendukung (instrumen sama atau posisi graph relasi sama) — tidak pernah hanya dari kemiripan kata.</li>
-        <li>Istilah yang mirip tapi <b>berpotensi konsep berbeda</b> hanya <b>ditandai untuk Anda tinjau sendiri</b>.</li>
+        <li>Variasi penulisan yang normalisasinya identik dan pasangan akronim eksplisit "Istilah Lengkap (SINGKATAN)" dapat dikenali sebagai satu istilah. <b>Pasangan konsep berbeda tidak pernah digabung hanya karena skor.</b></li>
+        <li>Istilah yang mungkin alias selalu masuk antrean review. Penggabungan hanya terjadi setelah Anda memilih istilah utama, atau melalui kamus khusus yang Anda tulis sendiri.</li>
+        <li>Kapitalisasi awal kalimat dan bentuk tunggal/jamak tidak otomatis dianggap inkonsisten. Sistem memprioritaskan perbedaan tanda hubung dan tanda baca yang benar-benar perlu diseragamkan.</li>
+        <li>Bagian References/Daftar Pustaka dikeluarkan otomatis agar judul artikel dan nama sumber tidak dianggap konsep naskah.</li>
         <li><b>Upload .docx</b> (bukan tempel teks) memungkinkan sistem membaca tabel loading/CR/AVE/koefisien sebagai bukti tambahan — teks tempel tidak punya struktur tabel sama sekali.</li>
         <li>Bukti statistik (koefisien, p-value) di luar tabel tetap perlu menyebut nama istilah dalam kalimat yang sama untuk terhitung.</li>
         <li>Hasil ini <b>bukan</b> pengganti pembacaan manual, tapi bisa membantu menemukan istilah yang ditulis tidak konsisten atau tidak pernah didefinisikan.</li>
@@ -146,6 +183,7 @@
     <div class="panel">
       <div class="field-label">Ringkasan</div>
       <div class="summary-grid" id="summaryGrid"></div>
+      <div class="analysis-meta" id="analysisMetaPanel"></div>
     </div>
 
     <details class="collapsible" id="inconsistentDetails" open>
@@ -178,8 +216,8 @@
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
-<script src="term-consistency-engine.js?v=2"></script>
+<script src="term-consistency-engine.js?v=3"></script>
 <script src="shared-file.js?v=1"></script>
-<script src="term-consistency.js?v=2"></script>
+<script src="term-consistency.js?v=3"></script>
 </body>
 </html>

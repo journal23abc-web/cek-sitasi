@@ -34,6 +34,11 @@ test('genuinely different terms do not collide', () => {
   assert.notStrictEqual(TCE.normalizeTermSurface('Fear of Failure'), TCE.normalizeTermSurface('Emotion Regulation Difficulties'));
 });
 
+test('Indonesian/Latin words ending in s are not damaged by English plural folding', () => {
+  assert.strictEqual(TCE.normalizeTermSurface('Kualitas Sistem'), 'kualitas sistem');
+  assert.strictEqual(TCE.normalizeTermSurface('Status Analisis'), 'status analisis');
+});
+
 console.log('\n=== Acronym/alias pairing (Level 2, safe & automatic) ===');
 
 test('standard acronym pattern is detected', () => {
@@ -52,6 +57,16 @@ test('mixed-case acronym derived from a connector word ("Fear of Failure" -> "Fo
 test('a plain parenthetical word that is not a real acronym is not falsely paired', () => {
   const r = TCE.findAcronymAliases('The results (see Table 1) show that...');
   assert.strictEqual(r.length, 0);
+});
+
+test('an unrelated uppercase token in parentheses is not accepted as an acronym', () => {
+  const r = TCE.findAcronymAliases('Customer Satisfaction (XYZ) is measured using a scale.');
+  assert.strictEqual(r.length, 0);
+});
+
+test('reverse acronym pattern is accepted only when initials agree', () => {
+  assert.strictEqual(TCE.findAcronymAliases('SVA (Short Video Addiction) predicts outcomes.').length, 1);
+  assert.strictEqual(TCE.findAcronymAliases('SVA (Customer Service Quality) predicts outcomes.').length, 0);
 });
 
 console.log('\n=== Definition detection (Section 1) ===');
@@ -285,9 +300,9 @@ test('two concepts with entirely non-overlapping indicator sets are not flagged 
   assert.strictEqual(pair, undefined);
 });
 
-console.log('\n=== Auto-merge at score >= 0.90 (highest-stakes feature — must never misfire on genuinely different concepts) ===');
+console.log('\n=== No heuristic auto-merge (all non-explicit aliases require a user decision) ===');
 
-test('near-identical wording with a genuinely shared measurement instrument auto-merges', () => {
+test('near-identical wording with a shared instrument still returns an empty legacy autoMerged field', () => {
   const text = `
     Short Video Addiction (SVA) is measured using the Short-Video Dependence Scale.
     Short-video Addictions is measured using the Short-Video Dependence Scale as well, confirming prior findings.
@@ -295,10 +310,7 @@ test('near-identical wording with a genuinely shared measurement instrument auto
   `;
   const result = TCE.buildConceptDictionary(text);
   // These two should already collide at Level 1 (surface-form normalization) in most cases —
-  // this test exists mainly to confirm the auto-merge path doesn't crash and, if two distinct
-  // concept keys somehow survive to Level 3, requires them to actually be corroborated before
-  // merging (not just lexical resemblance).
-  assert.ok(Array.isArray(result.autoMerged));
+  assert.deepStrictEqual(result.autoMerged, []);
 });
 
 test('KNOWN-DIFFERENT constructs (Emotion Regulation Difficulties vs Fear of Failure) are NEVER auto-merged, even under adversarial phrasing', () => {
@@ -441,6 +453,122 @@ test('passing tableRows is a complete no-op when empty (plain paste-text pathway
   Object.keys(result1.concepts).forEach((k) => {
     assert.strictEqual(result1.concepts[k].variableScore, result2.concepts[k].variableScore);
   });
+});
+
+console.log('\n=== General-case hardening: references, lowercase terms, composition, and review decisions ===');
+
+test('case-only variation is recorded but not reported as an actionable inconsistency', () => {
+  const text = 'System Use is measured using a validated scale. system use predicts outcomes. System Use is discussed again.';
+  const result = TCE.buildConceptDictionary(text);
+  const concept = result.concepts['system use'];
+  assert.ok(concept);
+  assert.strictEqual(concept.consistencyIssue, false);
+  assert.ok(concept.consistency.informational.includes('CASE_ONLY'));
+  assert.strictEqual(result.inconsistentTerms.length, 0);
+});
+
+test('singular/plural grammatical variation is not automatically called inconsistent', () => {
+  const text = 'Digital Skills are measured using a validated scale. Digital Skill refers to an individual capability. Digital Skills predict outcomes.';
+  const result = TCE.buildConceptDictionary(text);
+  assert.ok(result.concepts['digital skill']);
+  assert.strictEqual(result.concepts['digital skill'].consistencyIssue, false);
+});
+
+test('hyphen-versus-space variation remains an actionable consistency issue', () => {
+  const text = 'Short-Video Addiction is measured using a scale. Short Video Addiction predicts outcomes. Short-Video Addiction is discussed again.';
+  const result = TCE.buildConceptDictionary(text);
+  assert.strictEqual(result.concepts['short video addiction'].consistencyIssue, true);
+  assert.ok(result.concepts['short video addiction'].consistency.issueTypes.includes('HYPHENATION'));
+});
+
+test('reference-list text is excluded from concept detection by default', () => {
+  const text = `Customer Trust is measured using a validated scale. Customer Trust predicts Purchase Intention. Purchase Intention is measured using a scale.\n\nREFERENCES\n\nCustomer Satisfaction and Digital Service Quality. Customer Satisfaction and Digital Service Quality.`;
+  const result = TCE.buildConceptDictionary(text);
+  assert.strictEqual(result.analysisMeta.referenceSectionFound, true);
+  assert.strictEqual(result.concepts['customer satisfaction'], undefined);
+  assert.ok(result.concepts['customer trust']);
+});
+
+test('explicit lowercase definitions and relations can seed concept candidates', () => {
+  const text = 'perceived usefulness is defined as the degree to which a system improves work. perceived usefulness predicts adoption intention. adoption intention is measured using a validated scale.';
+  const result = TCE.buildConceptDictionary(text);
+  assert.ok(result.concepts['perceived usefulness']);
+  assert.ok(result.concepts['adoption intention']);
+  assert.ok(result.concepts['perceived usefulness'].definitions.length >= 1);
+});
+
+test('compositional definitions using comprises/consists of are recognized', () => {
+  const text = 'System Use comprises Frequency of Use and Extent of Use. System Use predicts Net Benefits. Net Benefits is measured using a validated scale.';
+  const result = TCE.buildConceptDictionary(text);
+  assert.ok(result.concepts['system use'].definitions.some((d) => d.type === 'conceptual'));
+  assert.strictEqual(result.undefinedImportantTerms.includes('System Use'), false);
+});
+
+const REVIEW_SAMPLE = `
+  Academic Dishonesty refers to dishonest behavior such as cheating and plagiarism among students. Academic Dishonesty is measured using the ADS. Emotion Regulation Difficulties predicts Academic Dishonesty.
+  Emotion Regulation Difficulties is measured using the DERS. Emotion Regulation Difficulties predicts negative behaviors.
+  Academic Misconduct refers to dishonest behavior such as cheating and plagiarism among students too. Academic Misconduct is measured using the ADS. Emotion Regulation Difficulties predicts Academic Misconduct.
+`;
+
+test('a high-evidence alias suggestion never merges before a user decision', () => {
+  const result = TCE.buildConceptDictionary(REVIEW_SAMPLE);
+  assert.ok(result.possibleAliases.length >= 1);
+  assert.ok(result.concepts['academic dishonesty']);
+  assert.ok(result.concepts['academic misconduct']);
+  assert.deepStrictEqual(result.autoMerged, []);
+});
+
+test('applyReviewDecisions merges only the explicitly approved pair and preserves the chosen label', () => {
+  const result = TCE.buildConceptDictionary(REVIEW_SAMPLE);
+  const pair = result.possibleAliases.find((p) => p.normA.includes('academic') && p.normB.includes('academic'));
+  assert.ok(pair);
+  const decisions = {};
+  decisions[pair.pairKey] = { action: 'same', preferred: pair.normB };
+  const reviewed = TCE.applyReviewDecisions(result, decisions);
+  assert.strictEqual(Object.keys(reviewed.concepts).length, Object.keys(result.concepts).length - 1);
+  assert.ok(reviewed.concepts[pair.normB]);
+  assert.strictEqual(reviewed.reviewSummary.mergedByUser, 1);
+});
+
+test('a "different" review decision keeps both concepts separate', () => {
+  const result = TCE.buildConceptDictionary(REVIEW_SAMPLE);
+  const pair = result.possibleAliases[0];
+  const decisions = {};
+  decisions[pair.pairKey] = { action: 'different' };
+  const reviewed = TCE.applyReviewDecisions(result, decisions);
+  assert.ok(reviewed.concepts[pair.normA]);
+  assert.ok(reviewed.concepts[pair.normB]);
+  assert.strictEqual(reviewed.reviewSummary.mergedByUser, 0);
+});
+
+test('a user glossary explicitly unifies cross-language aliases under the preferred term', () => {
+  const text = 'system usage is measured using a validated scale. penggunaan sistem memprediksi kinerja. system usage is discussed again.';
+  const result = TCE.buildConceptDictionary(text, { glossary: 'System Use = system usage | penggunaan sistem' });
+  const concept = result.concepts['system use'];
+  assert.ok(concept);
+  assert.strictEqual(concept.canonicalSurface, 'System Use');
+  assert.deepStrictEqual(concept.userAliases.sort(), ['penggunaan sistem', 'system usage'].sort());
+  assert.strictEqual(result.concepts['system usage'], undefined);
+  assert.strictEqual(result.analysisMeta.glossaryGroupsApplied, 1);
+});
+
+test('generic labels such as Appendix B and Model A are not promoted to concepts', () => {
+  const text = 'System Use is measured using a scale. System Use predicts outcomes. Appendix B reports Model A. Appendix B compares Model A and Model B. Model A reports coefficients.';
+  const result = TCE.buildConceptDictionary(text);
+  assert.strictEqual(result.concepts['appendix b'], undefined);
+  assert.strictEqual(result.concepts['model a'], undefined);
+  assert.strictEqual(result.undefinedImportantTerms.includes('Appendix B'), false);
+});
+
+test('candidate blocking scores fewer pairs than the full Cartesian pair set', () => {
+  const result = TCE.buildConceptDictionary(SAMPLE);
+  assert.ok(result.reviewMetrics.possiblePairs > 0);
+  assert.ok(result.reviewMetrics.candidatePairs < result.reviewMetrics.possiblePairs);
+});
+
+test('text fingerprint is deterministic and changes with the content', () => {
+  assert.strictEqual(TCE.fingerprintText('abc'), TCE.fingerprintText('abc'));
+  assert.notStrictEqual(TCE.fingerprintText('abc'), TCE.fingerprintText('abd'));
 });
 
 console.log('\n' + '='.repeat(50));

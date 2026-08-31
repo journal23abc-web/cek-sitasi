@@ -14,7 +14,9 @@
    memuat model ML besar. "Kemiripan semantik" di sini didekati dengan kemiripan leksikal
    (kata-kata penting yang sama) — SELALU lebih lemah dari makna sesungguhnya, karena itu hasil
    Tingkat-3 (alias leksikal) tidak pernah digabung otomatis, hanya ditandai untuk tinjauan
-   manusia. Ini konsisten dengan filosofi di spesifikasi: "kemiripan tinggi bukan bukti identitas".
+   manusia. Bahkan skor 1.00 bukan izin untuk menyatukan konsep. Penyatuan pasangan yang tidak
+   eksplisit ditulis sebagai "Istilah Lengkap (AKRONIM)" hanya boleh dilakukan melalui keputusan
+   pengguna atau kamus khusus yang dimasukkan pengguna sendiri.
    ============================================================ */
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) module.exports = factory();
@@ -62,10 +64,21 @@
     'be', 'been', 'being', 'this', 'that', 'these', 'those', 'as', 'by', 'with', 'from', 'their',
     'its', 'it', 'which', 'who', 'whom', 'has', 'have', 'had', 'will', 'would', 'can', 'could',
     'may', 'might', 'must', 'should', 'not', 'no', 'yes', 'do', 'does', 'did', 'such', 'into',
-    'between', 'among', 'both', 'each', 'per', 'via', 'also', 'than', 'then',
+    'between', 'among', 'both', 'each', 'per', 'via', 'also', 'than', 'then', 'although',
+    'however', 'whereas', 'while', 'when', 'because', 'therefore', 'thus',
     'yang', 'dan', 'atau', 'adalah', 'merupakan', 'ini', 'itu', 'pada', 'dari', 'ke', 'di',
     'dengan', 'oleh', 'untuk', 'sebagai', 'juga', 'akan', 'telah', 'sudah', 'dapat', 'bisa',
+    'dalam', 'antara', 'terhadap', 'melalui', 'secara', 'namun', 'karena', 'maupun', 'serta',
+    'kami', 'penelitian', 'studi', 'hasil', 'berdasarkan', 'menunjukkan', 'bahwa',
   ]);
+
+  var GENERIC_NON_CONCEPT_RE = /^(?:appendix|lampiran|table|tabel|figure|gambar|model)\s+[a-z0-9ivx]+$/i;
+
+  function isGenericNonConceptCandidate(term) {
+    var norm = normalizeTermSurface(term);
+    return !norm || GENERIC_NON_CONCEPT_RE.test(norm) ||
+      /^(?:respondent profile|profil responden|author contribution statement|ai disclosure statement|acknowledgment|acknowledgement)$/.test(norm);
+  }
 
   // ---------- Level 1: surface-form normalization (safe, automatic) ----------
   function normalizeTermSurface(term) {
@@ -79,10 +92,98 @@
     // need to be: it only has to make identical-meaning surface variants collide.
     var words = t.split(' ').map(function (w) {
       if (w.length > 4 && /ies$/.test(w)) return w.slice(0, -3) + 'y';
-      if (w.length > 3 && /s$/.test(w) && !/ss$/.test(w)) return w.slice(0, -1);
+      // Hindari merusak kata Indonesia/Latin seperti "kualitas", "status", dan "analisis".
+      // Fold jamak Inggris hanya diterapkan bila akhiran tidak menyerupai akhiran kata tersebut.
+      if (w.length > 3 && /s$/.test(w) && !/(ss|us|is|as|os|ics)$/.test(w)) return w.slice(0, -1);
       return w;
     });
     return words.join(' ');
+  }
+
+  // References/bibliography are not manuscript claims. Including them creates large numbers of
+  // fake concepts from article titles and author names. Appendices after the reference list are
+  // retained because they often contain instruments or operational definitions.
+  var REFERENCE_HEADING_RE = /^(?:references?|bibliography|works cited|daftar pustaka|referensi)$/i;
+  var APPENDIX_HEADING_RE = /^(?:appendix|appendices|lampiran)(?:\s+[a-z0-9ivx]+)?$/i;
+
+  function prepareAnalysisText(rawText, options) {
+    options = options || {};
+    var raw = String(rawText || '').replace(/\r\n?/g, '\n');
+    if (options.excludeReferences === false) {
+      return { text: raw, excludedReferenceCharacters: 0, referenceSectionFound: false };
+    }
+    var lines = raw.split('\n');
+    var kept = [], excludedChars = 0, inReferences = false, found = false, seenContentChars = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = normalizeWhitespace(lines[i]);
+      if (!inReferences && seenContentChars >= 40 && REFERENCE_HEADING_RE.test(trimmed)) {
+        inReferences = true;
+        found = true;
+        excludedChars += lines[i].length + 1;
+        continue;
+      }
+      if (inReferences && APPENDIX_HEADING_RE.test(trimmed)) {
+        inReferences = false;
+      }
+      if (inReferences) excludedChars += lines[i].length + 1;
+      else {
+        kept.push(lines[i]);
+        seenContentChars += trimmed.length;
+      }
+    }
+    return {
+      text: kept.join('\n'),
+      excludedReferenceCharacters: excludedChars,
+      referenceSectionFound: found,
+    };
+  }
+
+  // Format: "Preferred Term = alias one | alias two". The glossary is an explicit user
+  // decision, so unlike heuristic alias scoring it is allowed to unify terms automatically.
+  function parseGlossary(input) {
+    if (Array.isArray(input)) return input;
+    var groups = [];
+    String(input || '').split(/\r?\n/).forEach(function (line, index) {
+      var clean = line.trim();
+      if (!clean || clean[0] === '#') return;
+      var eq = clean.indexOf('=');
+      if (eq <= 0) return;
+      var preferred = normalizeWhitespace(clean.slice(0, eq));
+      var aliases = clean.slice(eq + 1).split('|').map(normalizeWhitespace).filter(Boolean);
+      if (!preferred || !aliases.length) return;
+      var seen = {};
+      aliases = aliases.filter(function (alias) {
+        var norm = normalizeTermSurface(alias);
+        if (!norm || norm === normalizeTermSurface(preferred) || seen[norm]) return false;
+        seen[norm] = true;
+        return true;
+      });
+      if (aliases.length) groups.push({ preferred: preferred, aliases: aliases, line: index + 1 });
+    });
+    return groups;
+  }
+
+  function buildGlossaryIndex(input) {
+    var groups = parseGlossary(input);
+    var byPreferred = {}, redirect = {};
+    groups.forEach(function (group) {
+      var preferredNorm = normalizeTermSurface(group.preferred);
+      if (!preferredNorm) return;
+      var normalized = {
+        preferred: group.preferred,
+        preferredNorm: preferredNorm,
+        aliases: group.aliases.slice(),
+        memberNorms: [preferredNorm],
+      };
+      group.aliases.forEach(function (alias) {
+        var aliasNorm = normalizeTermSurface(alias);
+        if (!aliasNorm || normalized.memberNorms.indexOf(aliasNorm) !== -1) return;
+        normalized.memberNorms.push(aliasNorm);
+        redirect[aliasNorm] = preferredNorm;
+      });
+      byPreferred[preferredNorm] = normalized;
+    });
+    return { groups: groups, byPreferred: byPreferred, redirect: redirect };
   }
 
   // ---------- candidate term extraction ----------
@@ -92,6 +193,59 @@
   // permissive extractor here is fine as long as the downstream scoring is conservative.
   var TITLECASE_PHRASE_RE = /\b(?:[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?)(?:[ \t]+(?:of|for|the|in|on|to|a|an)?[ \t]*[A-Z][a-zA-Z]*(?:[-\u2010-\u2015][A-Z][a-zA-Z]*)?){1,4}\b/g;
   var ACRONYM_TOKEN_RE = /\b[A-Z]{2,6}\d{0,2}\b|\b[A-Z][a-z]?[A-Z][a-zA-Z]*\d{1,2}\b/g;
+
+  var TERM_CUE_RE = /\b(?:is|are|was|were)\s+(?:defined\s+as|measured\s+(?:using|by|with|through)|assessed\s+(?:using|through|via)|operationalized\s+as|comprised?\s+of|comprises?|consists?\s+of|includes?|composed\s+of)\b|\b(?:merupakan|adalah|merujuk\s+pada|didefinisikan\s+sebagai|diukur\s+menggunakan|dinilai\s+melalui|dioperasionalkan\s+sebagai|terdiri\s+dari|mencakup|meliputi)\b/i;
+  var RELATION_CUE_RE = /\b(?:predicts?|influences|affects|is\s+associated\s+with|are\s+associated\s+with|memprediksi|memengaruhi|mempengaruhi|berhubungan\s+dengan)\b/i;
+
+  function cleanCueCandidate(raw, takeFromEnd) {
+    var s = String(raw || '').split(PARA_BOUNDARY).pop();
+    s = s.split(/[.;:!?]/).pop().split(',').pop();
+    s = s.replace(/\s*\([A-Za-z]{2,8}\)\s*$/, '');
+    s = s.replace(/^\s*(?:H\d+[a-z]?\s*[:.)-]?\s*)/i, '')
+      .replace(/^\s*(?:in\s+this\s+study|this\s+study|the\s+present\s+study|dalam\s+penelitian\s+ini|penelitian\s+ini)\s*,?\s*/i, '')
+      .replace(/^\s*(?:the|a|an|suatu|sebuah)\s+(?:construct|concept|variable|term|konstruk|konsep|variabel|istilah)\s+/i, '')
+      .replace(/^\s*(?:the|a|an|suatu|sebuah)\s+/i, '')
+      .trim();
+    var tokens = s.match(/[\p{L}\p{N}]+(?:[-\u2010-\u2015][\p{L}\p{N}]+)*/gu) || [];
+    while (tokens.length && STOPWORDS.has(tokens[0].toLowerCase())) tokens.shift();
+    while (tokens.length && STOPWORDS.has(tokens[tokens.length - 1].toLowerCase())) tokens.pop();
+    if (tokens.length > 6) tokens = takeFromEnd ? tokens.slice(-6) : tokens.slice(0, 6);
+    var candidate = tokens.join(' ');
+    if (!candidate || isGenericNonConceptCandidate(candidate)) return '';
+    if (tokens.length === 1 && (tokens[0].length < 4 || STOPWORDS.has(tokens[0].toLowerCase()))) return '';
+    return candidate;
+  }
+
+  function extractCueBackedTerms(text) {
+    var occurrences = {}, cueNorms = {};
+    function add(surface, absoluteStart) {
+      var norm = normalizeTermSurface(surface);
+      if (!norm || isGenericNonConceptCandidate(norm)) return;
+      if (!occurrences[norm]) occurrences[norm] = [];
+      occurrences[norm].push({ surface: surface, start: absoluteStart, end: absoluteStart + surface.length, cueBacked: true });
+      cueNorms[norm] = true;
+    }
+    splitSentences(text).forEach(function (sentence) {
+      var cue = TERM_CUE_RE.exec(sentence.text);
+      if (cue) {
+        var before = sentence.text.slice(0, cue.index);
+        var subject = cleanCueCandidate(before, true);
+        if (subject) add(subject, sentence.start + Math.max(0, before.lastIndexOf(subject)));
+      }
+      var relation = RELATION_CUE_RE.exec(sentence.text);
+      if (!relation) return;
+      var left = sentence.text.slice(0, relation.index);
+      var right = sentence.text.slice(relation.index + relation[0].length).split(/\b(?:and|dan|serta|but|tetapi)\b|[.;]/i)[0];
+      var subject2 = cleanCueCandidate(left, true);
+      var object2 = cleanCueCandidate(right, false);
+      if (subject2) add(subject2, sentence.start + Math.max(0, left.lastIndexOf(subject2)));
+      if (object2) {
+        var objectOffset = sentence.text.indexOf(object2, relation.index + relation[0].length);
+        add(object2, sentence.start + Math.max(relation.index + relation[0].length, objectOffset));
+      }
+    });
+    return { occurrences: occurrences, cueNorms: cueNorms };
+  }
 
   function extractCandidateTerms(text) {
     var occurrences = {}; // normalizedForm -> [{surface, start, end}]
@@ -131,14 +285,23 @@
       if (!acronymOccurrences[acr]) acronymOccurrences[acr] = [];
       acronymOccurrences[acr].push({ surface: acr, start: m.index, end: m.index + acr.length });
     }
-    return { phraseOccurrences: occurrences, acronymOccurrences: acronymOccurrences };
+    var cueBacked = extractCueBackedTerms(text);
+    Object.keys(cueBacked.occurrences).forEach(function (norm) {
+      if (!occurrences[norm]) occurrences[norm] = [];
+      cueBacked.occurrences[norm].forEach(function (occ) {
+        if (!occurrences[norm].some(function (existing) { return existing.start === occ.start && existing.end === occ.end; })) {
+          occurrences[norm].push(occ);
+        }
+      });
+    });
+    return { phraseOccurrences: occurrences, acronymOccurrences: acronymOccurrences, cueNorms: cueBacked.cueNorms };
   }
 
   // ---------- acronym/alias pairing (Level 2: safe, automatic) ----------
   // "Full Term (ABC)" or "ABC (Full Term)" — very low false-positive risk, since the acronym's
   // letters are checked against the full term's initials.
   function initialsOf(phrase) {
-    return phrase.split(/\s+/)
+    return phrase.split(/[\s\-\u2010-\u2015]+/)
       .filter(function (w) { return w && !/^(of|for|the|and|in|on|to|a|an|dan|di|ke|dari)$/i.test(w); })
       .map(function (w) { return w[0].toUpperCase(); })
       .join('');
@@ -157,14 +320,14 @@
       var fullTerm = m[1].trim().replace(/\s+$/, '');
       var acr = m[2];
       if (acr !== acr.toUpperCase() && !/^[A-Z][a-z]?[A-Z]+$|^[A-Z]+[a-z]?[A-Z]$/.test(acr)) continue; // reject plain lowercase words in parens
-      var wordsAll = fullTerm.split(/\s+/).map(function (w) { return w[0].toUpperCase(); }).join('');
+      var wordsAll = fullTerm.split(/[\s\-\u2010-\u2015]+/).map(function (w) { return w[0].toUpperCase(); }).join('');
       var initials = initialsOf(fullTerm);
       // Accept if the acronym's letters plausibly come from the full term: either from the
       // content-word initials (standard case, e.g. "Emotion Regulation Difficulties" -> "ERD"),
       // or from EVERY word's first letter including connectors (covers "Fear of Failure" -> "FoF",
       // where the lowercase "o" comes from "of").
       var acrUpper = acr.toUpperCase();
-      var initialsMatch = initials.length >= acrUpper.length - 1 && initials.slice(0, acrUpper.length).indexOf(acrUpper[0]) !== -1;
+      var initialsMatch = initials === acrUpper;
       var allWordsMatch = wordsAll === acrUpper;
       if (initialsMatch || allWordsMatch) {
         aliases.push({ fullTerm: fullTerm, acronym: acr, position: m.index });
@@ -174,14 +337,18 @@
     while ((m = re2.exec(text)) !== null) {
       var acr2 = m[1];
       var fullTerm2 = m[2].trim();
-      aliases.push({ fullTerm: fullTerm2, acronym: acr2, position: m.index });
+      var reverseInitials = initialsOf(fullTerm2);
+      var reverseAllWords = fullTerm2.split(/[\s\-\u2010-\u2015]+/).map(function (w) { return w[0].toUpperCase(); }).join('');
+      if (reverseInitials === acr2 || reverseAllWords === acr2) {
+        aliases.push({ fullTerm: fullTerm2, acronym: acr2, position: m.index });
+      }
     }
     return aliases;
   }
 
   // ---------- Section 1: definition detection ----------
   var DEFINITION_PATTERNS = {
-    conceptual: /\b(is|are|was|were)\s+defined\s+as\b|\brefers?\s+to\b|\bis\s+the\b|\bmeans?\b|\b(?:proposes?|posits?|suggests?|argues?|states?|explains?|assumes?)\s+that\b|\bmerupakan\b|\badalah\b|\bmerujuk\s+pada\b|\bdidefinisikan\s+sebagai\b|\bmencakup\b|\bditandai\s+dengan\b/i,
+    conceptual: /\b(is|are|was|were)\s+defined\s+as\b|\brefers?\s+to\b|\bis\s+the\b|\bmeans?\b|\b(?:comprises?|comprised\s+of|consists?\s+of|includes?|is\s+composed\s+of)\b|\b(?:proposes?|posits?|suggests?|argues?|states?|explains?|assumes?)\s+that\b|\bmerupakan\b|\badalah\b|\bmerujuk\s+pada\b|\bdidefinisikan\s+sebagai\b|\b(?:terdiri\s+dari|mencakup|meliputi)\b|\bditandai\s+dengan\b/i,
     operational: /\bmeasured\s+(?:using|by|with|through)\b|\bassessed\s+(?:using|through|via)\b|\boperationalized\s+as\b|\bdiukur\s+menggunakan\b|\bdinilai\s+melalui\b|\bdioperasionalkan\s+sebagai\b|\bindicator[s]?\s+(?:of|for)\b/i,
     role: /\b(?:acts?|serves?|functions?)\s+as\s+(?:a|an)?\s*(?:mediator|moderator|predictor|antecedent|outcome|independent|dependent|exogenous|endogenous)\b|\b(?:is|are)\s+(?:a|an)?\s*(?:mediating|moderating|predictor|independent|dependent|exogenous|endogenous)\s+variable\b|\bberfungsi\s+sebagai\s+variabel\b|\bbertindak\s+sebagai\b|\bmenjadi\s+variabel\b/i,
   };
@@ -254,12 +421,12 @@
 
   // ---------- Section 3: variable-candidate evidence ----------
   var MEASUREMENT_RE = /\bmeasured\s+(?:using|by|with)\b|\bscale\b|\bdiukur\s+menggunakan\b|\binstrument\b/i;
-  var HYPOTHESIS_RE = /\bH\d+\s*[:.]|\bhypothesiz(?:e|ed|es)\b|\bpredicts?\b|\beffect\s+of\b|\binfluence[s]?\b|\brelationship\s+between\b|\bpengaruh\b|\bhubungan\s+antara\b|\bmemprediksi\b/i;
+  var HYPOTHESIS_RE = /\bH\d+[a-z]?\s*[:.]|\bhypothesiz(?:e|ed|es)\b|\bpredicts?\b|\b(?:is|are)\s+associated\s+with\b|\beffect\s+of\b|\binfluences\b|\brelationship\s+between\b|\bpengaruh\b|\bhubungan\s+antara\b|\b(?:memprediksi|memengaruhi|mempengaruhi|berhubungan\s+dengan)\b/i;
   var STATS_RE = /\bcoefficient\b|\bloading\b|\bR\s*[²2]\b|\bp\s*[<>=]\s*0?\.\d+\b|\bβ\s*=|\bpath\s+coefficient\b/i;
   var MODEL_SECTION_RE = /\b(hypothes[ie]s|conceptual\s+framework|instrumentation|structural\s+model|sem\b|regression)\b/i;
   var ROLE_LANGUAGE_RE = /\b(?:mediat(?:or|es|ing)|moderat(?:or|es|ing)|predictor|antecedent|exogenous|endogenous|independent\s+variable|dependent\s+variable|outcome\s+variable)\b|\bvariabel\s+(?:mediasi|moderasi|independen|dependen)\b/i;
 
-  function scoreVariableEvidence(text, occurrences, sentences, hasTableStatEvidence) {
+  function evaluateVariableEvidence(text, occurrences, sentences, hasTableStatEvidence) {
     var measurementHit = 0, hypothesisHit = 0, modelRelHit = 0, statsHit = 0, sectionHit = 0, roleHit = 0;
     occurrences.forEach(function (occ) {
       for (var i = 0; i < sentences.length; i++) {
@@ -283,7 +450,10 @@
     // an explicit structural role (mediator/predictor/...) — both count as the same dimension
     // from the spec's Section 3 evidence list ("menjadi mediator/moderator", "muncul dalam
     // hipotesis").
-    var modelRel = (modelRelHit > 0 || roleHit > 0) ? 1 : 0;
+    // Berada di kalimat yang menyebut "model"/"SEM" hanyalah konteks bagian, bukan bukti bahwa
+    // istilah tersebut benar-benar memiliki relasi struktural. Relasi butuh verba hipotesis atau
+    // peran eksplisit; ini mencegah label seperti "Model A" menjadi calon variabel.
+    var modelRel = (hypothesisHit > 0 || roleHit > 0) ? 1 : 0;
     // Statistical evidence: an in-sentence coefficient/loading/p-value mention, OR (when the
     // caller supplies it — see extractDocxTableRows for the DOCX-upload pathway) this term's row
     // in an actual loadings/path-coefficient TABLE, which sentence-level scanning alone can never
@@ -292,7 +462,21 @@
     var section = sectionHit > 0 ? 1 : 0;
     var repetition = Math.min(1, occurrences.length / 5);
     var score = 0.25 * measurement + 0.20 * hypothesis + 0.20 * modelRel + 0.15 * stats + 0.10 * section + 0.10 * repetition;
-    return Math.round(score * 100) / 100;
+    return {
+      score: Math.round(score * 100) / 100,
+      measurement: measurement,
+      hypothesis: hypothesis,
+      modelRelation: modelRel,
+      statistics: stats,
+      sectionContext: section,
+      roleLanguage: roleHit > 0 ? 1 : 0,
+      repetition: Math.round(repetition * 100) / 100,
+      directEvidenceCount: measurement + hypothesis + modelRel + stats + (roleHit > 0 ? 1 : 0),
+    };
+  }
+
+  function scoreVariableEvidence(text, occurrences, sentences, hasTableStatEvidence) {
+    return evaluateVariableEvidence(text, occurrences, sentences, hasTableStatEvidence).score;
   }
 
   function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -319,6 +503,56 @@
         out.push({ surface: m[0], start: m.index, end: m.index + m[0].length });
       }
     }
+    return out;
+  }
+
+  function chooseCanonicalSurface(occurrences, preferred) {
+    if (preferred) return preferred;
+    var counts = {};
+    (occurrences || []).forEach(function (occ) {
+      counts[occ.surface] = (counts[occ.surface] || 0) + 1;
+    });
+    var forms = Object.keys(counts);
+    if (!forms.length) return '';
+    forms.sort(function (a, b) {
+      if (counts[b] !== counts[a]) return counts[b] - counts[a];
+      var aTitle = /^(?:[A-Z][\p{L}\p{N}'’]*)(?:[ \-\u2010-\u2015]+(?:of|for|the|and|in|on|to|a|an|dan|di|ke|dari)?[ \-\u2010-\u2015]*[A-Z][\p{L}\p{N}'’]*)+$/u.test(a);
+      var bTitle = /^(?:[A-Z][\p{L}\p{N}'’]*)(?:[ \-\u2010-\u2015]+(?:of|for|the|and|in|on|to|a|an|dan|di|ke|dari)?[ \-\u2010-\u2015]*[A-Z][\p{L}\p{N}'’]*)+$/u.test(b);
+      if (aTitle !== bTitle) return bTitle ? 1 : -1;
+      return a.length - b.length;
+    });
+    return forms[0];
+  }
+
+  // Kapitalisasi karena posisi di awal kalimat dan bentuk tunggal/jamak sering sah secara
+  // gramatikal. Keduanya tetap dicatat sebagai variasi informatif, tetapi hanya perbedaan tanda
+  // hubung/tanda baca yang masuk daftar masalah yang perlu tindakan.
+  function analyzeSurfaceConsistency(surfaceVariants) {
+    var forms = surfaceVariants.map(function (v) { return normalizeWhitespace(v.text); }).filter(Boolean);
+    var lower = Array.from(new Set(forms.map(function (s) { return s.toLowerCase(); })));
+    var hyphenStates = Array.from(new Set(forms.map(function (s) { return /[\u2010-\u2015-]/.test(s); })));
+    var punctuationForms = Array.from(new Set(forms.map(function (s) {
+      return (s.match(/[^\p{L}\p{N}\s\u2010-\u2015-]/gu) || []).join('');
+    })));
+    var issueTypes = [];
+    if (hyphenStates.length > 1) issueTypes.push('HYPHENATION');
+    if (punctuationForms.length > 1 && hyphenStates.length === 1) issueTypes.push('PUNCTUATION');
+    var informational = [];
+    if (lower.length === 1 && forms.length > 1) informational.push('CASE_ONLY');
+    else if (!issueTypes.length && forms.length > 1) informational.push('GRAMMATICAL_VARIANT');
+    return { actionable: issueTypes.length > 0, issueTypes: issueTypes, informational: informational };
+  }
+
+  function contextSnippets(text, occurrences, limit) {
+    var seen = {}, out = [];
+    (occurrences || []).some(function (occ) {
+      var start = Math.max(0, occ.start - 90), end = Math.min(text.length, occ.end + 110);
+      var snippet = normalizeWhitespace(text.slice(start, end).split(PARA_BOUNDARY).join(' '));
+      if (!snippet || seen[snippet]) return false;
+      seen[snippet] = true;
+      out.push({ text: snippet, start: occ.start });
+      return out.length >= (limit || 3);
+    });
     return out;
   }
 
@@ -365,7 +599,7 @@
   // sentence, and infers direction from their relative position. That means relation extraction
   // can only ever connect concepts the earlier stages already found — which is the right
   // trade-off here: a missed relation is a smaller problem than a hallucinated one.
-  var PREDICTS_VERB_RE = /\b(?:predicts?|influences?|affects?)\b/i;
+  var PREDICTS_VERB_RE = /\b(?:predicts?|influences|affects)\b/i;
   var EFFECT_OF_RE = /\beffect\s+of\b|\bpengaruh\b/i;
   var MEDIATES_BETWEEN_RE = /\bmediat(?:es|ed|ing)\s+the\s+relationship\s+between\b/i;
   var RELATIONSHIP_BETWEEN_RE = /\brelationship\s+between\b|\bhubungan\s+antara\b/i;
@@ -519,25 +753,25 @@
     ['addiction', 'dependence', 'dependency', 'compulsion'],
     ['difficulty', 'difficulties', 'problem', 'problems', 'issue', 'issues', 'struggle', 'struggles'],
     ['regulation', 'control', 'management', 'regulating'],
-    ['skill', 'skills', 'ability', 'abilities', 'competence', 'competency', 'competencies', 'proficiency'],
-    ['behavior', 'behaviour', 'behaviors', 'behaviours', 'conduct'],
-    ['intention', 'intentions', 'intent', 'willingness', 'readiness'],
+    ['skill', 'skills', 'ability', 'abilities', 'competence', 'competency', 'competencies', 'proficiency', 'kemampuan', 'kompetensi'],
+    ['behavior', 'behaviour', 'behaviors', 'behaviours', 'conduct', 'perilaku'],
+    ['intention', 'intentions', 'intent', 'willingness', 'readiness', 'niat', 'minat'],
     ['perception', 'perceptions', 'perceived', 'attitude', 'attitudes', 'view', 'views'],
     ['failure', 'failures', 'setback', 'setbacks', 'shortcoming', 'shortcomings'],
     ['fear', 'anxiety', 'worry', 'apprehension', 'dread'],
-    ['satisfaction', 'contentment', 'fulfillment', 'fulfilment'],
+    ['satisfaction', 'contentment', 'fulfillment', 'fulfilment', 'kepuasan'],
     ['engagement', 'involvement', 'participation', 'engagment'],
     ['motivation', 'drive', 'incentive'],
-    ['performance', 'achievement', 'attainment'],
+    ['performance', 'achievement', 'attainment', 'kinerja', 'pencapaian'],
     ['effectiveness', 'efficacy', 'effectivenes'],
     ['awareness', 'consciousness', 'mindfulness'],
     ['norm', 'norms', 'standard', 'standards', 'expectation', 'expectations'],
-    ['influence', 'impact', 'effect', 'effects'],
+    ['influence', 'impact', 'effect', 'effects', 'pengaruh', 'dampak'],
     ['stress', 'strain', 'pressure', 'tension'],
     ['wellbeing', 'wellness', 'welfare'],
     ['commitment', 'dedication', 'devotion'],
-    ['trust', 'confidence', 'reliance'],
-    ['support', 'assistance', 'help', 'aid'],
+    ['trust', 'confidence', 'reliance', 'kepercayaan'],
+    ['support', 'assistance', 'help', 'aid', 'dukungan', 'bantuan'],
     ['communication', 'interaction', 'exchange'],
     ['knowledge', 'understanding', 'comprehension'],
     ['perception', 'awareness', 'recognition'],
@@ -548,8 +782,12 @@
     ['self-esteem', 'self esteem', 'self-worth', 'self worth'],
     ['self-efficacy', 'self efficacy', 'self-confidence', 'self confidence'],
     ['adoption', 'acceptance', 'uptake'],
-    ['usage', 'use', 'utilization', 'utilisation'],
+    ['usage', 'use', 'utilization', 'utilisation', 'penggunaan', 'pemakaian'],
     ['dependency', 'reliance', 'overreliance'],
+    ['quality', 'qualities', 'kualitas', 'mutu'],
+    ['system', 'systems', 'sistem'],
+    ['factor', 'factors', 'faktor'],
+    ['characteristic', 'characteristics', 'karakteristik'],
     ['disorder', 'condition', 'syndrome'],
     ['symptom', 'symptoms', 'indication', 'indications'],
     ['intervention', 'treatment', 'therapy'],
@@ -734,21 +972,49 @@
   function flagPossibleAliases(text, concepts, relations) {
     relations = relations || [];
     var flagged = [];
-    var autoMerged = [];
     var keys = Object.keys(concepts);
-    for (var i = 0; i < keys.length; i++) {
-      for (var j = i + 1; j < keys.length; j++) {
-        var normA = keys[i], normB = keys[j];
+    var blocks = {}, pairSet = {};
+
+    function addBlock(block, norm) {
+      if (!blocks[block]) blocks[block] = [];
+      if (blocks[block].indexOf(norm) === -1) blocks[block].push(norm);
+    }
+
+    // Candidate blocking avoids a full O(n²) comparison. Pairs are scored only when their names
+    // share a meaningful token/synonym bucket, a spelling-shape bucket, or an instrument.
+    keys.forEach(function (norm) {
+      var words = Array.from(wordSet(norm));
+      words.forEach(function (word) {
+        addBlock('w:' + word, norm);
+        if (SYNONYM_CLUSTER_INDEX[word] !== undefined) addBlock('s:' + SYNONYM_CLUSTER_INDEX[word], norm);
+      });
+      if (norm.length >= 6) addBlock('p:' + norm.slice(0, 4) + ':' + Math.round(norm.length / 5), norm);
+      if (concepts[norm].measuredBy) addBlock('m:' + concepts[norm].measuredBy, norm);
+    });
+    Object.keys(blocks).forEach(function (block) {
+      var bucket = blocks[block];
+      if (bucket.length > 40) return; // extremely common token: not useful evidence, costly noise
+      for (var bi = 0; bi < bucket.length; bi++) {
+        for (var bj = bi + 1; bj < bucket.length; bj++) {
+          var ordered = [bucket[bi], bucket[bj]].sort();
+          pairSet[ordered[0] + '||' + ordered[1]] = ordered;
+        }
+      }
+    });
+
+    var candidatePairs = Object.keys(pairSet).map(function (key) { return pairSet[key]; });
+    candidatePairs.forEach(function (pair) {
+        var normA = pair[0], normB = pair[1];
         var a = concepts[normA], b = concepts[normB];
-        if (a.acronymOf || b.acronymOf) continue; // already resolved via Level 2
+        if (a.acronymOf || b.acronymOf) return; // already resolved via Level 2
         // Hard vetos: no similarity score can override these regardless of how high it scores.
-        if (hasCausalEdge(relations, normA, normB)) continue;
-        if (isIndicatorOfEachOther(a, b)) continue;
+        if (hasCausalEdge(relations, normA, normB)) return;
+        if (isIndicatorOfEachOther(a, b)) return;
         var wsA = wordSet(normA), wsB = wordSet(normB);
         var lexSim = jaccard(wsA, wsB);
         var editSim = levenshteinRatio(normA, normB);
         var semanticSim = synonymAwareSimilarity(wsA, wsB);
-        if (lexSim < 0.15 && editSim < 0.5 && semanticSim < 0.4) continue; // clearly unrelated, skip the pair entirely
+        if (lexSim < 0.15 && editSim < 0.55 && semanticSim < 0.4) return; // clearly unrelated
         var measurementSim = (a.measuredBy && b.measuredBy && a.measuredBy === b.measuredBy) ? 1 : 0;
         var defSim = definitionSimilarity(a, b);
         var relSim = relationNeighborhoodSimilarity(relations, normA, normB);
@@ -756,11 +1022,10 @@
         var discriminant = hasDiscriminantValidityMention(text, a.canonicalSurface, b.canonicalSurface);
         var diffIndicators = hasDifferentIndicatorSets(a, b);
 
-        // Spec's 5-component formula, 0.20 each: lexical (exact word overlap), semantic (curated
-        // academic synonym clusters — see synonymAwareSimilarity's header comment for the honest
-        // limitation this carries vs a real embedding model), same definition, same measurement,
-        // same relation-graph neighborhood.
-        var score = 0.20 * lexSim + 0.20 * semanticSim + 0.20 * defSim + 0.20 * measurementSim + 0.20 * relSim;
+        // Multi-evidence score. Edit similarity is deliberately weak; definitions, measurement,
+        // and graph neighborhood carry more decision value than spelling resemblance.
+        var score = 0.22 * lexSim + 0.18 * semanticSim + 0.20 * defSim +
+          0.18 * measurementSim + 0.15 * relSim + 0.07 * editSim;
         var contradictionPenalty = 0;
         if (contrast) contradictionPenalty += 0.5;
         if (discriminant) contradictionPenalty += 0.5;
@@ -768,21 +1033,48 @@
         score = Math.max(0, Math.min(1, Math.round((score - contradictionPenalty) * 100) / 100));
 
         var hasNegativeEvidence = contrast || discriminant || diffIndicators;
-        if (hasNegativeEvidence) continue; // never flag OR merge — matches spec's "bukti negatif yang membatalkan penyatuan"
+        if (hasNegativeEvidence) return;
 
-        // Auto-merge is the highest-stakes decision this engine makes, so on top of the score
-        // threshold it also requires at least one STRUCTURAL corroborating signal (shared
-        // instrument or shared graph neighborhood) — never merges on lexical/edit-distance
-        // resemblance alone, which is exactly the mistake the spec warns against ("kemiripan
-        // tinggi bukan bukti identitas").
-        if (score >= 0.90 && (measurementSim >= 1 || relSim >= 0.5)) {
-          autoMerged.push({ normA: normA, normB: normB, score: score });
-        } else if (score >= 0.75) {
-          flagged.push({ termA: a.canonicalSurface, termB: b.canonicalSurface, score: score, reason: 'lexical/definition/measurement/relation overlap' });
+        if (score >= 0.55) {
+          var reasons = [];
+          if (lexSim >= 0.45) reasons.push('kata penting tumpang tindih');
+          if (semanticSim >= 0.65) reasons.push('sinonim terkurasi');
+          if (defSim >= 0.45) reasons.push('definisi mirip');
+          if (measurementSim) reasons.push('instrumen sama');
+          if (relSim >= 0.5) reasons.push('tetangga relasi sama');
+          if (editSim >= 0.82) reasons.push('ejaan sangat mirip');
+          flagged.push({
+            pairKey: normA + '||' + normB,
+            normA: normA,
+            normB: normB,
+            termA: a.canonicalSurface,
+            termB: b.canonicalSurface,
+            score: score,
+            priority: score >= 0.78 ? 'high' : (score >= 0.65 ? 'medium' : 'low'),
+            reason: reasons.length ? reasons.join(', ') : 'beberapa bukti lemah saling mendukung',
+            evidence: {
+              lexical: Math.round(lexSim * 100) / 100,
+              semantic: Math.round(semanticSim * 100) / 100,
+              definition: Math.round(defSim * 100) / 100,
+              measurement: measurementSim,
+              relation: Math.round(relSim * 100) / 100,
+              spelling: Math.round(editSim * 100) / 100,
+            },
+            contexts: {
+              termA: (a.contexts || []).slice(0, 2),
+              termB: (b.contexts || []).slice(0, 2),
+            },
+          });
         }
-      }
-    }
-    return { flagged: flagged.sort(function (x, y) { return y.score - x.score; }), autoMerged: autoMerged };
+    });
+    return {
+      flagged: flagged.sort(function (x, y) { return y.score - x.score; }),
+      autoMerged: [],
+      metrics: {
+        possiblePairs: keys.length * (keys.length - 1) / 2,
+        candidatePairs: candidatePairs.length,
+      },
+    };
   }
 
   function dedupeAcronymAliases(pairs) {
@@ -804,6 +1096,9 @@
   function buildConceptDictionary(text, options) {
     options = options || {};
     var tableRows = options.tableRows || [];
+    var prepared = prepareAnalysisText(text, options);
+    var glossaryIndex = buildGlossaryIndex(options.glossary || []);
+    text = prepared.text;
     // Mark paragraph/table-cell boundaries BEFORE normalizeWhitespace flattens all newlines to
     // plain spaces — otherwise adjacent table cells (e.g. a "CR" / "AVE" / "Short Video
     // Addiction (SVA)" row in a loadings table, which mammoth renders as separate blank-line-
@@ -816,44 +1111,87 @@
     var extracted = extractCandidateTerms(text);
     var acronymAliases = findAcronymAliases(text);
 
+    // Canonicalize explicit glossary members before concept construction. This is the only
+    // non-acronym path that may unify terms automatically because the instruction came directly
+    // from the user, not from a similarity score.
+    Object.keys(glossaryIndex.byPreferred).forEach(function (preferredNorm) {
+      var group = glossaryIndex.byPreferred[preferredNorm];
+      if (!extracted.phraseOccurrences[preferredNorm]) extracted.phraseOccurrences[preferredNorm] = [];
+      group.memberNorms.forEach(function (memberNorm) {
+        var memberOccs = findAllSurfaceOccurrences(text, memberNorm);
+        memberOccs.forEach(function (occ) {
+          if (!extracted.phraseOccurrences[preferredNorm].some(function (existing) { return existing.start === occ.start && existing.end === occ.end; })) {
+            extracted.phraseOccurrences[preferredNorm].push(occ);
+          }
+        });
+        if (memberNorm !== preferredNorm) delete extracted.phraseOccurrences[memberNorm];
+      });
+      extracted.cueNorms[preferredNorm] = true;
+    });
+
     // Only keep candidate phrase-terms that repeat at least twice (single-mention capitalized
     // phrases are usually just normal sentence-start capitalization noise, not real constructs).
     var concepts = {};
     Object.keys(extracted.phraseOccurrences).forEach(function (norm) {
-      var titleCaseOccs = extracted.phraseOccurrences[norm];
-      if (titleCaseOccs.length < 2) return;
+      if (glossaryIndex.redirect[norm]) return;
+      var candidateOccs = extracted.phraseOccurrences[norm];
+      var glossaryGroup = glossaryIndex.byPreferred[norm];
+      var cueBacked = !!extracted.cueNorms[norm];
+      if (candidateOccs.length < 2 && !cueBacked && !glossaryGroup) return;
+      if (isGenericNonConceptCandidate(norm)) return;
       // Re-scan the whole document case-insensitively for this normalized form, so lowercase/
       // mixed-case mentions of the same concept are counted too (see findAllSurfaceOccurrences).
-      var occs = findAllSurfaceOccurrences(text, norm);
-      if (occs.length < 2) occs = titleCaseOccs;
-      var canonicalSurface = titleCaseOccs[0].surface; // prefer a Title-Case form as the display name
+      var occs = glossaryGroup
+        ? glossaryGroup.memberNorms.reduce(function (all, memberNorm) { return all.concat(findAllSurfaceOccurrences(text, memberNorm)); }, [])
+        : findAllSurfaceOccurrences(text, norm);
+      if (occs.length < candidateOccs.length) occs = candidateOccs;
+      var occurrenceSeen = {};
+      occs = occs.filter(function (occ) {
+        var key = occ.start + ':' + occ.end;
+        if (occurrenceSeen[key]) return false;
+        occurrenceSeen[key] = true;
+        return true;
+      }).sort(function (a, b) { return a.start - b.start; });
+      var canonicalSurface = chooseCanonicalSurface(occs, glossaryGroup && glossaryGroup.preferred);
       var defs = detectDefinitions(text, norm, occs, sectionHints);
-      var varScore = scoreVariableEvidence(text, occs, sentenceList);
+      var variableEvidence = evaluateVariableEvidence(text, occs, sentenceList);
       var surfaceVariants = {};
       occs.forEach(function (o) { surfaceVariants[o.surface] = (surfaceVariants[o.surface] || 0) + 1; });
+      var variantList = Object.keys(surfaceVariants).map(function (s) { return { text: s, count: surfaceVariants[s] }; });
+      var consistency = analyzeSurfaceConsistency(variantList);
       concepts[norm] = {
         canonicalSurface: canonicalSurface,
-        surfaceVariants: Object.keys(surfaceVariants).map(function (s) { return { text: s, count: surfaceVariants[s] }; }),
+        normalizedForm: norm,
+        surfaceVariants: variantList,
         occurrenceCount: occs.length,
         definitions: defs,
-        variableScore: varScore,
+        variableScore: variableEvidence.score,
+        variableEvidence: variableEvidence,
         measuredBy: null,
         acronymOf: null,
         aliasAcronyms: [],
+        userAliases: glossaryGroup ? glossaryGroup.aliases.slice() : [],
+        glossaryDefined: !!glossaryGroup,
+        contexts: contextSnippets(text, occs, 3),
+        consistency: consistency,
+        consistencyIssue: consistency.actionable,
       };
     });
 
     // link acronym aliases to their concept (Level 2, safe/automatic)
     acronymAliases.forEach(function (pair) {
       var norm = normalizeTermSurface(pair.fullTerm);
+      norm = glossaryIndex.redirect[norm] || norm;
       if (concepts[norm]) {
         if (concepts[norm].aliasAcronyms.indexOf(pair.acronym) === -1) concepts[norm].aliasAcronyms.push(pair.acronym);
       } else if (normalizeTermSurface(pair.fullTerm).split(' ').length >= 2) {
         // full term wasn't picked up as a repeating candidate on its own — still worth recording
         concepts[norm] = {
           canonicalSurface: pair.fullTerm, surfaceVariants: [{ text: pair.fullTerm, count: 1 }],
-          occurrenceCount: 1, definitions: [], variableScore: 0, measuredBy: null, acronymOf: null,
-          aliasAcronyms: [pair.acronym],
+          normalizedForm: norm, occurrenceCount: 1, definitions: [], variableScore: 0,
+          variableEvidence: evaluateVariableEvidence(text, [], sentenceList), measuredBy: null, acronymOf: null,
+          aliasAcronyms: [pair.acronym], userAliases: [], glossaryDefined: false,
+          contexts: [], consistency: analyzeSurfaceConsistency([{ text: pair.fullTerm, count: 1 }]), consistencyIssue: false,
         };
       }
     });
@@ -870,8 +1208,10 @@
       var occs = extracted.acronymOccurrences[acr];
       concepts[norm] = {
         canonicalSurface: acr, surfaceVariants: [{ text: acr, count: occs.length }],
-        occurrenceCount: occs.length, definitions: [], variableScore: 0, measuredBy: null,
-        acronymOf: null, aliasAcronyms: [],
+        normalizedForm: norm, occurrenceCount: occs.length, definitions: [], variableScore: 0,
+        variableEvidence: evaluateVariableEvidence(text, occs, sentenceList), measuredBy: null,
+        acronymOf: null, aliasAcronyms: [], userAliases: [], glossaryDefined: false,
+        contexts: contextSnippets(text, occs, 3), consistency: analyzeSurfaceConsistency([{ text: acr, count: occs.length }]), consistencyIssue: false,
       };
     });
 
@@ -889,6 +1229,9 @@
     Object.keys(concepts).forEach(function (norm) {
       var c = concepts[norm];
       var allOccs = findAllSurfaceOccurrences(text, norm);
+      (c.userAliases || []).forEach(function (alias) {
+        allOccs = allOccs.concat(findAllSurfaceOccurrences(text, normalizeTermSurface(alias)));
+      });
       c.aliasAcronyms.forEach(function (acr) {
         var acrRe = new RegExp('\\b' + escapeRegex(acr) + '\\b', 'g');
         var acrOccs = [];
@@ -902,11 +1245,19 @@
         });
         allOccs = allOccs.concat(acrOccs);
       });
+      var seenOcc = {};
+      allOccs = allOccs.filter(function (occ) {
+        var key = occ.start + ':' + occ.end;
+        if (seenOcc[key]) return false;
+        seenOcc[key] = true;
+        return true;
+      });
       var hasTableEvidence = tableRows.length > 0 && tableRows.some(function (row) { return conceptMatchesRowLabel(c, norm, row.rowLabel); });
       if (hasTableEvidence) c.hasTableStatEvidence = true;
       if (allOccs.length || hasTableEvidence) {
-        var recomputed = scoreVariableEvidence(text, allOccs.length ? allOccs : [{ start: -1, end: -1 }], sentenceList, hasTableEvidence);
-        c.variableScore = Math.max(c.variableScore, recomputed);
+        var recomputed = evaluateVariableEvidence(text, allOccs.length ? allOccs : [{ start: -1, end: -1 }], sentenceList, hasTableEvidence);
+        if (recomputed.score >= c.variableScore) c.variableEvidence = recomputed;
+        c.variableScore = Math.max(c.variableScore, recomputed.score);
       }
     });
 
@@ -937,10 +1288,15 @@
       if (!mbOccs.length) return;
       var surfaceVariants = {};
       mbOccs.forEach(function (o) { surfaceVariants[o.surface] = (surfaceVariants[o.surface] || 0) + 1; });
+      var instrumentVariants = Object.keys(surfaceVariants).map(function (s) { return { text: s, count: surfaceVariants[s] }; });
+      var instrumentConsistency = analyzeSurfaceConsistency(instrumentVariants);
       concepts[mb] = {
-        canonicalSurface: mbOccs[0].surface, surfaceVariants: Object.keys(surfaceVariants).map(function (s) { return { text: s, count: surfaceVariants[s] }; }),
-        occurrenceCount: mbOccs.length, definitions: [], variableScore: 0, measuredBy: null,
-        acronymOf: null, aliasAcronyms: [],
+        canonicalSurface: chooseCanonicalSurface(mbOccs), normalizedForm: mb, surfaceVariants: instrumentVariants,
+        occurrenceCount: mbOccs.length, definitions: [], variableScore: 0,
+        variableEvidence: evaluateVariableEvidence(text, mbOccs, sentenceList), measuredBy: null,
+        acronymOf: null, aliasAcronyms: [], userAliases: [], glossaryDefined: false,
+        contexts: contextSnippets(text, mbOccs, 3), consistency: instrumentConsistency,
+        consistencyIssue: instrumentConsistency.actionable,
       };
     });
 
@@ -950,7 +1306,8 @@
       var isDefined = c.definitions.length > 0;
       var isAcronymAlias = !!c.acronymOf;
       c.type = classifyType(norm, c.variableScore, false, isAcronymAlias, isDefined, false, false);
-      c.consistencyIssue = c.surfaceVariants.length >= 2; // written more than one way -> flag
+      c.consistency = c.consistency || analyzeSurfaceConsistency(c.surfaceVariants);
+      c.consistencyIssue = c.consistency.actionable;
     });
 
     // ---------- relation graph (PREDICTS / MEDIATES / RELATED_TO) ----------
@@ -1005,44 +1362,8 @@
 
     var aliasResult = flagPossibleAliases(text, concepts, relations);
 
-    // Execute auto-merges (score >= 0.90 + structural corroboration). Handled with a redirect
-    // map so a chain (A merges into B, then B merges into C) still resolves to one final survivor
-    // instead of silently dropping data if the pairs are processed in an inconvenient order.
-    var redirect = {};
-    function resolve(norm) { while (redirect[norm]) norm = redirect[norm]; return norm; }
-    var mergeLog = [];
-    aliasResult.autoMerged.forEach(function (m) {
-      var survivorNorm = resolve(m.normA), mergedNorm = resolve(m.normB);
-      if (survivorNorm === mergedNorm) return; // already merged via a chain
-      var survivor = concepts[survivorNorm], merged = concepts[mergedNorm];
-      if (!survivor || !merged) return;
-      // keep the more frequently-used surface form as canonical, merge everything else
-      if (merged.occurrenceCount > survivor.occurrenceCount) survivor.canonicalSurface = merged.canonicalSurface;
-      var variantMap = {};
-      survivor.surfaceVariants.concat(merged.surfaceVariants).forEach(function (v) {
-        variantMap[v.text] = (variantMap[v.text] || 0) + v.count;
-      });
-      survivor.surfaceVariants = Object.keys(variantMap).map(function (t) { return { text: t, count: variantMap[t] }; });
-      survivor.occurrenceCount += merged.occurrenceCount;
-      merged.definitions.forEach(function (d) {
-        if (!survivor.definitions.some(function (e) { return e.text === d.text; })) survivor.definitions.push(d);
-      });
-      merged.aliasAcronyms.forEach(function (acr) {
-        if (survivor.aliasAcronyms.indexOf(acr) === -1) survivor.aliasAcronyms.push(acr);
-      });
-      if (merged.indicators) {
-        survivor.indicators = survivor.indicators || [];
-        merged.indicators.forEach(function (ind) { if (survivor.indicators.indexOf(ind) === -1) survivor.indicators.push(ind); });
-      }
-      survivor.variableScore = Math.max(survivor.variableScore, merged.variableScore);
-      survivor.measuredBy = survivor.measuredBy || merged.measuredBy;
-      (merged.roles || []).forEach(function (r) { if (survivor.roles.indexOf(r) === -1) survivor.roles.push(r); });
-      survivor.consistencyIssue = survivor.surfaceVariants.length >= 2;
-      survivor.mergedFrom = (survivor.mergedFrom || []).concat([merged.canonicalSurface]);
-      mergeLog.push({ into: survivor.canonicalSurface, from: merged.canonicalSurface, score: m.score });
-      delete concepts[mergedNorm];
-      redirect[mergedNorm] = survivorNorm;
-    });
+    // Deliberately no heuristic merge here. flagPossibleAliases() only creates a review queue.
+    // Explicit decisions are applied later by applyReviewDecisions().
 
     // Assign a stable concept_id and attach a per-concept related_to list (derived from the
     // relation graph) — the spec's output shape wants both directly on each concept, not just
@@ -1071,7 +1392,11 @@
     // undefined-but-important terms: variable-like score but zero definitions found
     var undefinedImportantTerms = Object.keys(concepts)
       .map(function (norm) { return concepts[norm]; })
-      .filter(function (c) { return c.variableScore >= 0.5 && c.definitions.length === 0; })
+      .filter(function (c) {
+        return c.variableScore >= 0.5 && c.definitions.length === 0 &&
+          c.variableEvidence && c.variableEvidence.directEvidenceCount >= 1 &&
+          !isGenericNonConceptCandidate(c.canonicalSurface);
+      })
       .map(function (c) { return c.canonicalSurface; });
 
     var inconsistentTerms = Object.keys(concepts)
@@ -1081,20 +1406,161 @@
     return {
       concepts: concepts,
       possibleAliases: aliasResult.flagged,
-      autoMerged: mergeLog,
+      autoMerged: [], // backward-compatible field; heuristic auto-merge has been removed
       undefinedImportantTerms: undefinedImportantTerms,
       inconsistentTerms: inconsistentTerms,
       acronymAliases: dedupeAcronymAliases(acronymAliases),
       relations: relations,
+      reviewMetrics: aliasResult.metrics,
+      analysisMeta: {
+        referenceSectionFound: prepared.referenceSectionFound,
+        excludedReferenceCharacters: prepared.excludedReferenceCharacters,
+        analyzedCharacters: text.length,
+        glossaryGroupsApplied: glossaryIndex.groups.length,
+      },
     };
+  }
+
+  function applyReviewDecisions(result, decisions) {
+    decisions = decisions || {};
+    var out = JSON.parse(JSON.stringify(result || {}));
+    out.concepts = out.concepts || {};
+    out.relations = out.relations || [];
+    out.possibleAliases = out.possibleAliases || [];
+    var redirects = {}, applied = [];
+    function resolve(norm) {
+      var guard = 0;
+      while (redirects[norm] && guard++ < 100) norm = redirects[norm];
+      return norm;
+    }
+    function uniqueConcat(a, b, keyFn) {
+      var seen = {}, merged = [];
+      (a || []).concat(b || []).forEach(function (item) {
+        var key = keyFn ? keyFn(item) : String(item);
+        if (seen[key]) return;
+        seen[key] = true;
+        merged.push(item);
+      });
+      return merged;
+    }
+    function mergeConcepts(preferredNorm, otherNorm, preferredLabel) {
+      preferredNorm = resolve(preferredNorm);
+      otherNorm = resolve(otherNorm);
+      if (preferredNorm === otherNorm) return preferredNorm;
+      var target = out.concepts[preferredNorm], source = out.concepts[otherNorm];
+      if (!target || !source) return preferredNorm;
+      var variantCounts = {};
+      (target.surfaceVariants || []).concat(source.surfaceVariants || []).forEach(function (v) {
+        variantCounts[v.text] = (variantCounts[v.text] || 0) + v.count;
+      });
+      target.surfaceVariants = Object.keys(variantCounts).map(function (text) { return { text: text, count: variantCounts[text] }; });
+      target.canonicalSurface = preferredLabel || target.canonicalSurface;
+      target.occurrenceCount = (target.occurrenceCount || 0) + (source.occurrenceCount || 0);
+      target.definitions = uniqueConcat(target.definitions, source.definitions, function (d) { return d.type + '|' + d.text; });
+      target.aliasAcronyms = uniqueConcat(target.aliasAcronyms, source.aliasAcronyms);
+      target.userAliases = uniqueConcat(target.userAliases, (source.userAliases || []).concat([source.canonicalSurface]));
+      target.indicators = uniqueConcat(target.indicators, source.indicators);
+      target.roles = uniqueConcat(target.roles, source.roles);
+      target.contexts = uniqueConcat(target.contexts, source.contexts, function (c) { return c.text; }).slice(0, 6);
+      target.related_to = uniqueConcat(target.related_to, source.related_to, function (r) { return r.concept + '|' + r.relation; });
+      if ((source.variableScore || 0) > (target.variableScore || 0)) target.variableEvidence = source.variableEvidence;
+      target.variableScore = Math.max(target.variableScore || 0, source.variableScore || 0);
+      target.measuredBy = target.measuredBy || source.measuredBy;
+      target.hasTableStatEvidence = !!(target.hasTableStatEvidence || source.hasTableStatEvidence);
+      target.glossaryDefined = !!(target.glossaryDefined || source.glossaryDefined);
+      target.mergedFrom = uniqueConcat(target.mergedFrom, (source.mergedFrom || []).concat([source.canonicalSurface]));
+      target.consistency = analyzeSurfaceConsistency(target.surfaceVariants);
+      target.consistencyIssue = target.consistency.actionable;
+      redirects[otherNorm] = preferredNorm;
+      delete out.concepts[otherNorm];
+      return preferredNorm;
+    }
+
+    out.possibleAliases.forEach(function (pair) {
+      var decision = decisions[pair.pairKey];
+      if (!decision || decision.action !== 'same') return;
+      var preferredOriginal = decision.preferred === pair.normB ? pair.normB : pair.normA;
+      var otherOriginal = preferredOriginal === pair.normA ? pair.normB : pair.normA;
+      var labelConcept = result.concepts && result.concepts[preferredOriginal];
+      var mergedInto = mergeConcepts(preferredOriginal, otherOriginal, labelConcept && labelConcept.canonicalSurface);
+      applied.push({ pairKey: pair.pairKey, action: 'same', into: mergedInto, from: otherOriginal });
+    });
+
+    out.relations = out.relations.map(function (r) {
+      r.subject = resolve(r.subject);
+      if (r.object) r.object = resolve(r.object);
+      if (r.between) r.between = uniqueConcat(r.between.map(resolve), []);
+      return r;
+    }).filter(function (r) {
+      if (r.object && r.subject === r.object) return false;
+      if (r.between && (r.between.length < 2 || r.between.indexOf(r.subject) !== -1)) return false;
+      return true;
+    });
+    var relationSeen = {};
+    out.relations = out.relations.filter(function (r) {
+      var key = r.type + '|' + r.subject + '|' + (r.object || (r.between || []).join(','));
+      if (relationSeen[key]) return false;
+      relationSeen[key] = true;
+      return true;
+    });
+
+    var idCounter = 0;
+    Object.keys(out.concepts).sort().forEach(function (norm) {
+      var concept = out.concepts[norm];
+      concept.normalizedForm = norm;
+      concept.concept_id = 'C' + String(++idCounter).padStart(3, '0');
+      concept.related_to = out.relations.filter(function (r) {
+        return r.subject === norm || r.object === norm || (r.between && r.between.indexOf(norm) !== -1);
+      }).map(function (r) {
+        if (r.type === 'MEDIATES' && r.subject === norm) {
+          return { concept: r.between.map(function (n) { return out.concepts[n] ? out.concepts[n].canonicalSurface : n; }).join(' & '), relation: 'MEDIATES_BETWEEN' };
+        }
+        var other = r.subject === norm ? r.object : r.subject;
+        var otherLabel = out.concepts[other] ? out.concepts[other].canonicalSurface : other;
+        if (r.type === 'PREDICTS') return { concept: otherLabel, relation: r.subject === norm ? 'PREDICTS' : 'PREDICTED_BY' };
+        if (r.type === 'MEDIATES') return { concept: otherLabel, relation: 'MEDIATED_BY' };
+        return { concept: otherLabel, relation: r.type };
+      });
+    });
+    out.inconsistentTerms = Object.keys(out.concepts).map(function (k) { return out.concepts[k]; })
+      .filter(function (c) { return c.consistencyIssue; });
+    out.undefinedImportantTerms = Object.keys(out.concepts).map(function (k) { return out.concepts[k]; })
+      .filter(function (c) {
+        return c.variableScore >= 0.5 && (!c.definitions || !c.definitions.length) &&
+          c.variableEvidence && c.variableEvidence.directEvidenceCount >= 1 && !isGenericNonConceptCandidate(c.canonicalSurface);
+      }).map(function (c) { return c.canonicalSurface; });
+    out.possibleAliases = out.possibleAliases.map(function (pair) {
+      pair.decision = decisions[pair.pairKey] || null;
+      return pair;
+    });
+    out.reviewSummary = {
+      total: out.possibleAliases.length,
+      decided: out.possibleAliases.filter(function (p) { return !!p.decision; }).length,
+      mergedByUser: applied.length,
+      applied: applied,
+    };
+    return out;
+  }
+
+  function fingerprintText(text) {
+    var h = 2166136261;
+    var s = String(text || '');
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return ('00000000' + (h >>> 0).toString(16)).slice(-8) + '-' + s.length;
   }
 
   return {
     normalizeTermSurface: normalizeTermSurface,
+    prepareAnalysisText: prepareAnalysisText,
+    parseGlossary: parseGlossary,
     extractCandidateTerms: extractCandidateTerms,
     findAcronymAliases: findAcronymAliases,
     detectDefinitions: detectDefinitions,
     scoreVariableEvidence: scoreVariableEvidence,
+    evaluateVariableEvidence: evaluateVariableEvidence,
     flagPossibleAliases: flagPossibleAliases,
     synonymAwareSimilarity: synonymAwareSimilarity,
     extractDocxTableRows: extractDocxTableRows,
@@ -1102,7 +1568,10 @@
     deriveRoles: deriveRoles,
     hasCausalEdge: hasCausalEdge,
     findAllSurfaceOccurrences: findAllSurfaceOccurrences,
+    analyzeSurfaceConsistency: analyzeSurfaceConsistency,
     buildConceptDictionary: buildConceptDictionary,
+    applyReviewDecisions: applyReviewDecisions,
+    fingerprintText: fingerprintText,
     splitSentences: splitSentences,
   };
 });
