@@ -293,6 +293,42 @@
     return { start: position, end: closeIdx + 1, raw: raw };
   }
 
+  // Numeric styles (IEEE/Vancouver) don't structurally distinguish narrative from parenthetical
+  // citations the way author-date styles do ("Smith (2020)" is self-marking; "[7]" is not) —
+  // that distinction lives entirely in how the surrounding prose was written, e.g. "Chan and Hu
+  // [7] examined..." vs "...examined by prior work [7]". Converting the FIRST shape to an
+  // author-date target by blindly swapping "[7]" for "(Chan & Hu, 2023)" duplicates the name
+  // that's already sitting right there in the sentence ("Chan and Hu (Chan & Hu, 2023)"). This
+  // looks back from a numeric citation's own position for a plausible personal-name mention
+  // immediately before it, so that case can instead get a year-only parenthetical.
+  //
+  // Deliberately conservative: a MISSED narrative citation just produces slightly redundant
+  // (but still correct and complete) output; a FALSE positive would silently drop an author
+  // name from the sentence entirely. So this only fires on a tight, name-shaped pattern immediately
+  // adjacent to the bracket, and rejects common capitalized non-name words that could otherwise
+  // precede a bracket citation (section/figure/table references, etc.).
+  var NARRATIVE_LOOKBACK_SKIP_WORDS = new Set([
+    'table', 'fig', 'figure', 'figures', 'eq', 'eqs', 'equation', 'equations', 'section', 'sections',
+    'sec', 'secs', 'chapter', 'chapters', 'appendix', 'appendices', 'model', 'models', 'theorem',
+    'theorems', 'note', 'notes', 'item', 'items', 'step', 'steps', 'algorithm', 'algorithms',
+    'definition', 'definitions', 'lemma', 'lemmas', 'proof', 'proofs', 'example', 'examples',
+    'page', 'pages', 'vol', 'volume', 'no', 'part', 'parts', 'phase', 'phases', 'stage', 'stages',
+    'level', 'levels', 'type', 'types', 'group', 'groups', 'class', 'classes', 'category',
+    'categories', 'ref', 'refs', 'reference', 'references', 'rq', 'rqs', 'h', 'hypothesis',
+    'hypotheses', 'utaut', 'ai', 'chatgpt',
+  ]);
+  function precedingNarrativeName(text, position) {
+    var windowStart = Math.max(0, position - 60);
+    var before = text.slice(windowStart, position);
+    var m = before.match(/([\p{Lu}][\p{L}'\u2019\-]*(?:\s+(?:and|&)\s+[\p{Lu}][\p{L}'\u2019\-]*)?(?:\s+et\s+al\.?)?)\s*$/u);
+    if (!m) return null;
+    var candidate = m[1];
+    var firstToken = candidate.split(/\s+/)[0].toLowerCase();
+    if (NARRATIVE_LOOKBACK_SKIP_WORDS.has(firstToken)) return null;
+    if (firstToken.length < 2) return null; // single-letter tokens are never a surname on their own
+    return candidate;
+  }
+
   function convert(articleText, referenceText, sourceStyleId, targetStyleId) {
     if (!STYLES[sourceStyleId]) throw new Error('Gaya sumber tidak dikenal: ' + sourceStyleId);
     if (!STYLES[targetStyleId]) throw new Error('Gaya tujuan tidak dikenal: ' + targetStyleId);
@@ -502,7 +538,17 @@
         var numRes = resolveNumbers(c.numbers);
         if (numRes.status === 'ok') {
           numRes.refs.forEach(register);
-          replacement = renderForTarget(numRes.refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
+          // Single-number citation immediately preceded by a name already written in the
+          // prose ("Chan and Hu [7]") converting to an author-date target: don't duplicate
+          // that name — emit a year-only parenthetical instead (see precedingNarrativeName).
+          var targetFamily = STYLES[targetStyleId].family;
+          var narrativeName = c.numbers.length === 1 && targetFamily === 'author-date'
+            ? precedingNarrativeName(articleText, c.position) : null;
+          if (narrativeName) {
+            replacement = '(' + (numRes.refs[0].year || 'n.d.') + ')';
+          } else {
+            replacement = renderForTarget(numRes.refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
+          }
           matched = true;
         } else {
           note = mismatchNote + 'Nomor referensi ' + c.numbers.join(',') + ' tidak ditemukan di daftar referensi — tidak diubah.';
