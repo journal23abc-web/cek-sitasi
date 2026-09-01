@@ -424,36 +424,141 @@
     return newRun;
   }
 
+  function runIsItalic(runEl) {
+    var rPr = runEl.getElementsByTagName('w:rPr')[0];
+    return !!(rPr && rPr.getElementsByTagName('w:i').length > 0);
+  }
+
+  function directChildRuns(paraEl) {
+    var out = [];
+    for (var i = 0; i < paraEl.childNodes.length; i++) {
+      if (paraEl.childNodes[i].nodeType === 1 && paraEl.childNodes[i].tagName === 'w:r') out.push(paraEl.childNodes[i]);
+    }
+    return out;
+  }
+
+  function runText(runEl) {
+    var t = runEl.getElementsByTagName('w:t')[0];
+    return t ? (t.textContent || '') : '';
+  }
+
+  // Rewrites a numeric-source (IEEE/Vancouver) reference paragraph into a genuine APA7
+  // bibliographic entry — not just the author-name swap the rest of this file limits itself to:
+  // year moves into parentheses after the author(s), the quoted title loses its quote marks, the
+  // volume number becomes italic (newly — it never was in IEEE), and "vol./no./pp./doi:" become
+  // "16(1), 39" / "https://doi.org/...". This only fires for a specific, verified paragraph shape
+  // — author/quoted-title text, ONE italicized run (the journal or book title), then trailing
+  // vol/issue/pages/doi (or, for a book, "City: Publisher, Year") text — because that's the shape
+  // this can safely reformat without guessing at formatting it can't see. Anything else is left
+  // exactly as the older author-only rewrite already produces it, rather than risk corrupting a
+  // structure this hasn't verified.
+  function rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa) {
+    var allOriginalRuns = directChildRuns(paraEl); // numbering + tab + content, in document order
+    var runs = allOriginalRuns.slice();
+    function isNumberingOrEmptyRun(r) {
+      var txt = runText(r);
+      return /^\s*\[?\d+\]?\.?\s*$/.test(txt);
+    }
+    while (runs.length && isNumberingOrEmptyRun(runs[0])) runs.shift();
+
+    var italicIdx = -1, italicCount = 0;
+    for (var i = 0; i < runs.length; i++) {
+      if (runIsItalic(runs[i]) && runText(runs[i]).trim()) { italicCount++; if (italicIdx === -1) italicIdx = i; }
+    }
+    if (italicIdx === -1 || italicCount !== 1) return false; // shape not recognized — leave untouched
+
+    var beforeRuns = runs.slice(0, italicIdx);
+    var italicRun = runs[italicIdx];
+    var afterRuns = runs.slice(italicIdx + 1);
+    if (beforeRuns.length === 0 || afterRuns.length === 0) return false;
+    var tailText = afterRuns.map(runText).join('');
+
+    var isBook = !ref.volume && !ref.pages && !ref.articleNumber && !ref.doi;
+    var newNodes = [];
+    if (isBook) {
+      var publisher = CC._internal.deriveBookPublisher(tailText, ref.year);
+      newNodes.push(makeRun(xmlDoc, beforeRuns[0], authorApa + ' (' + (ref.year || 'n.d.') + '). '));
+      newNodes.push(italicRun.cloneNode(true)); // book title — already correct, untouched
+      newNodes.push(makeRun(xmlDoc, afterRuns[0], '. ' + publisher + '.'));
+    } else {
+      var tail = CC._internal.parseNumericReferenceTail(tailText);
+      var doiPart = tail.doi ? ('https://doi.org/' + tail.doi) : null;
+      if (!tail.volume && tail.pages) {
+        // conference proceedings with no volume of its own -> "In <Proceedings> (pp. X-Y)."
+        newNodes.push(makeRun(xmlDoc, beforeRuns[0], authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. In '));
+        newNodes.push(italicRun.cloneNode(true));
+        newNodes.push(makeRun(xmlDoc, afterRuns[0], ' (pp. ' + tail.pages + ')' + (doiPart ? '. ' + doiPart : '.')));
+      } else {
+        newNodes.push(makeRun(xmlDoc, beforeRuns[0], authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. '));
+        newNodes.push(italicRun.cloneNode(true));
+        if (tail.volume) {
+          var afterVol = '';
+          if (tail.issue) afterVol += '(' + tail.issue + ')';
+          if (tail.pages) afterVol += ', ' + tail.pages;
+          afterVol += doiPart ? '. ' + doiPart : '.';
+          newNodes.push(makeRun(xmlDoc, afterRuns[0], ', '));
+          newNodes.push(makeRun(xmlDoc, italicRun, tail.volume)); // clone italic formatting for the volume
+          newNodes.push(makeRun(xmlDoc, afterRuns[0], afterVol));
+        } else {
+          newNodes.push(makeRun(xmlDoc, afterRuns[0], doiPart ? '. ' + doiPart : '.'));
+        }
+      }
+    }
+
+    var anchor = allOriginalRuns[0];
+    newNodes.forEach(function(n) { if (n) paraEl.insertBefore(n, anchor); });
+    allOriginalRuns.forEach(function(r) { if (r.parentNode) r.parentNode.removeChild(r); });
+    return true;
+  }
+
   // Replaces each {start,end,text} span (in the index's coordinate space) directly in the live
   // XML DOM, splitting runs as needed so every OTHER run/formatting stays untouched. Matches
   // must be pre-sorted & non-overlapping (caller's responsibility).
+  //
+  // Grouped by which original segment (<w:t> node) each match falls in, and every match in a
+  // shared segment is applied together in one pass — NOT one match at a time against the same
+  // static segment list. A single run can legitimately contain more than one citation to replace
+  // (e.g. two adjacent bracket citations in one sentence, "Chan and Hu [7]" right after another
+  // citation earlier in the same paragraph-spanning run). Processing matches one at a time
+  // against that shared node breaks every match after the first: splicing the first one's
+  // replacement removes the original run from the tree entirely, so runEl.parentNode is null by
+  // the time the second match looks for it, and it's silently skipped — while `applied` still
+  // gets incremented for it regardless, since nothing here noticed the mutation didn't happen.
   function applyPlainReplacements(xmlDoc, index, matches) {
-    var applied = 0;
+    var segMatches = index.segments.map(function() { return []; });
     matches.forEach(function(m) {
-      var touched = index.segments.filter(function(seg) { return seg.start < m.end && seg.end > m.start; });
-      if (touched.length === 0) return;
-      var wroteReplacement = false;
-      touched.forEach(function(seg) {
-        var runEl = seg.node.parentNode;
-        if (!runEl || !runEl.parentNode) return;
-        var fullText = seg.node.textContent;
+      index.segments.forEach(function(seg, i) {
+        if (seg.start < m.end && seg.end > m.start) segMatches[i].push(m);
+      });
+    });
+
+    var appliedKeys = {};
+    index.segments.forEach(function(seg, i) {
+      var ms = segMatches[i];
+      if (ms.length === 0) return;
+      var runEl = seg.node.parentNode;
+      if (!runEl || !runEl.parentNode) return;
+      var fullText = seg.node.textContent;
+      ms.sort(function(a, b) { return a.start - b.start; });
+      var pieces = [];
+      var cursor = 0;
+      ms.forEach(function(m) {
         var s = Math.max(m.start, seg.start) - seg.start;
         var e = Math.min(m.end, seg.end) - seg.start;
-        var before = fullText.slice(0, s), after = fullText.slice(e);
-        var mid = wroteReplacement ? '' : m.text; // only insert the replacement once, on the first touched run
-        wroteReplacement = true;
-        var beforeRun = makeRun(xmlDoc, runEl, before);
-        var midRun = makeRun(xmlDoc, runEl, mid);
-        var afterRun = makeRun(xmlDoc, runEl, after);
-        var parent = runEl.parentNode;
-        if (beforeRun) parent.insertBefore(beforeRun, runEl);
-        if (midRun) parent.insertBefore(midRun, runEl);
-        if (afterRun) parent.insertBefore(afterRun, runEl);
-        parent.removeChild(runEl);
+        if (s > cursor) pieces.push(fullText.slice(cursor, s));
+        pieces.push(m.text);
+        cursor = e;
+        appliedKeys[m.start + ':' + m.end] = true;
       });
-      applied++;
+      if (cursor < fullText.length) pieces.push(fullText.slice(cursor));
+      var parent = runEl.parentNode;
+      pieces.forEach(function(piece) {
+        var r = makeRun(xmlDoc, runEl, piece);
+        if (r) parent.insertBefore(r, runEl);
+      });
+      parent.removeChild(runEl);
     });
-    return applied;
+    return Object.keys(appliedKeys).length;
   }
 
   // Date + time-of-day stamp (not just the date) so downloading more than once on the same day
@@ -509,38 +614,70 @@
           var index = buildDocxTextIndex(xmlDoc);
           var fullText = index.text;
 
-          // Citation spans were computed against `state.docxOriginalArticleText` (the ARTICLE
-          // portion only), but the XML index covers the WHOLE document — re-locate the
-          // article's offset within the full text so span coordinates line up.
-          var articleOffset = fullText.indexOf(state.docxOriginalArticleText.slice(0, 200));
+          // Recompute the conversion directly against THIS text (straight from the XML's own
+          // <w:t> runs via buildDocxTextIndex), rather than reusing the `result` from the earlier
+          // "Convert" step (computed against mammoth's separate text extraction) and trying to
+          // relocate its offsets into fullText by searching for a text prefix. That relocation is
+          // fragile — mammoth's extraction and the direct-XML extraction can differ in small ways
+          // (e.g. how a superscript affiliation marker next to the author's name gets spaced),
+          // and even a single-character mismatch anywhere before a citation silently drops every
+          // match after it. Splitting fullText itself sidesteps the mismatch entirely: every
+          // offset this produces is already correct in fullText's own coordinate space.
+          var headingInfo = CE.findReferencesHeading(fullText);
+          var xmlArticleText = headingInfo ? fullText.slice(0, headingInfo.offset) : fullText;
+          var xmlReferenceText = headingInfo ? fullText.slice(headingInfo.offset) : '';
+          var result = CC.convert(xmlArticleText, xmlReferenceText, sourceStyleId, targetStyleId);
+
           var matches = [];
-          if (articleOffset !== -1) {
-            result.citationSpans.forEach(function(s) {
-              if (!s.matched) return;
-              matches.push({ start: articleOffset + s.start, end: articleOffset + s.end, text: s.replacement });
-            });
-          }
+          result.citationSpans.forEach(function(s) {
+            if (!s.matched) return;
+            matches.push({ start: s.start, end: s.end, text: s.replacement });
+          });
 
           // Reference list: find each original reference line verbatim in the reference zone,
-          // swap in the converted line (numbering/author format), AND remember which <w:p> it
-          // lives in — captured BEFORE any text mutation, using the ORIGINAL positions, so the
-          // paragraph elements can be physically reordered afterward to match `referenceLines`'
-          // target order (numbering isn't just text — the printed order has to match it too).
-          var headingInfo = CE.findReferencesHeading(fullText);
-          var refZoneStart = headingInfo ? headingInfo.offset : (articleOffset !== -1 ? articleOffset + state.docxOriginalArticleText.length : 0);
+          // AND remember which <w:p> it lives in — captured BEFORE any text mutation, using the
+          // ORIGINAL positions, so the paragraph elements can be physically reordered afterward
+          // to match `referenceLines`' target order.
+          //
+          // From IEEE/Vancouver source TO apa7 specifically, each reference paragraph gets a
+          // full bibliographic reformat (year into parentheses, quotes off the title, volume
+          // number newly italicized, "vol./no./pp./doi:" -> "16(1), 39" / a doi.org URL) via
+          // rewriteReferenceParagraphToApa7 — not just the author-name swap used for every other
+          // style pair, because only for that specific pairing has this been taught to safely
+          // read and rebuild the run structure (author text, one italicized journal/book title,
+          // trailing volume/pages/doi) without guessing at formatting it can't see. If a given
+          // paragraph doesn't match that expected shape, it quietly falls back to the plain
+          // author-only swap below rather than being left half-edited.
+          var refZoneStart = headingInfo ? headingInfo.offset : xmlArticleText.length;
           var refParagraphsInTargetOrder = [];
+          var fullReformatAttempt = STYLES[sourceStyleId].family === 'numeric' && targetStyleId === 'apa7';
+          var fullReformatCount = 0, fullReformatEligible = 0;
           result.referenceLines.forEach(function(rl) {
             var idx = fullText.indexOf(rl.original, refZoneStart);
             if (idx === -1) { refParagraphsInTargetOrder.push(null); return; }
-            matches.push({ start: idx, end: idx + rl.original.length, text: rl.line });
-            refParagraphsInTargetOrder.push(paragraphAtOffset(index, idx));
+            var paraEl = paragraphAtOffset(index, idx);
+            refParagraphsInTargetOrder.push(paraEl);
+            var didFullRewrite = false;
+            if (fullReformatAttempt && paraEl) {
+              fullReformatEligible++;
+              var ref = CE.parseReferenceLine(rl.original, sourceStyleId);
+              if (ref) {
+                var authorApa = CC._internal.renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
+                didFullRewrite = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
+              }
+            }
+            if (didFullRewrite) {
+              fullReformatCount++;
+            } else {
+              matches.push({ start: idx, end: idx + rl.original.length, text: rl.line });
+            }
           });
 
           matches.sort(function(a, b) { return a.start - b.start; });
           var clean = [], lastEnd = -1;
           matches.forEach(function(m) { if (m.start >= lastEnd) { clean.push(m); lastEnd = m.end; } });
 
-          if (clean.length === 0) return { blob: null, count: 0, reordered: 0 };
+          if (clean.length === 0 && fullReformatCount === 0) return { blob: null, count: 0, reordered: 0 };
 
           var count = applyPlainReplacements(xmlDoc, index, clean);
           // Physically move the reference paragraphs into the new target order (harmless if
@@ -553,7 +690,7 @@
           if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
           zip.file(docPath, newXml);
           return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-            .then(function(blob) { return { blob: blob, count: count, reordered: reorderedCount, totalRefs: result.referenceLines.length }; });
+            .then(function(blob) { return { blob: blob, count: count, reordered: reorderedCount, totalRefs: result.referenceLines.length, fullReformatCount: fullReformatCount, fullReformatEligible: fullReformatEligible }; });
         });
       })
       .then(function(res) {
@@ -562,6 +699,10 @@
         var dateStr = fileTimestamp();
         triggerDownload(res.blob, (state.originalFile.name || 'naskah').replace(/\.docx$/i, '') + '-KONVERSI-' + dateStr + '.docx');
         var msg = '✅ Berhasil — ' + res.count + ' bagian diganti di dalam file asli (format tetap terjaga).';
+        if (res.fullReformatEligible > 0) {
+          msg += ' ' + res.fullReformatCount + '/' + res.fullReformatEligible + ' entri daftar pustaka diformat penuh ke APA7 (tahun, tanda kutip, cetak miring volume, DOI).';
+          if (res.fullReformatCount < res.fullReformatEligible) msg += ' Sisanya memakai format penulis-saja karena struktur paragrafnya tidak dikenali — cek manual.';
+        }
         if (res.reordered > 0) {
           msg += ' Urutan paragraf referensi disesuaikan (' + res.reordered + '/' + res.totalRefs + ' entri ditemukan & diurutkan ulang) supaya penomoran berurut dari 1 sesuai urutan tampil.';
           if (res.reordered < res.totalRefs) msg += ' Sisanya tidak ditemukan persis di teks aslinya — cek posisinya manual.';

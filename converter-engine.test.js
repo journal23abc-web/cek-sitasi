@@ -311,6 +311,22 @@ test('two-author reference-list entry uses a comma before "&" (APA7 rule), unlik
   assert.ok(r.referenceLines[0].line.startsWith('Alammar, A., & Amin, E. A. R.'), r.referenceLines[0].line);
 });
 
+test('parseNumericReferenceTail reads volume/issue/pages/doi from a typical IEEE tail', () => {
+  const r = CC._internal.parseNumericReferenceTail(', vol. 16, no. 1, p. 39, 2019. doi: 10.1186/s41239-019-0171-0.');
+  assert.deepStrictEqual(r, { volume: '16', issue: '1', pages: '39', doi: '10.1186/s41239-019-0171-0' });
+});
+
+test('parseNumericReferenceTail handles a conference tail with no volume at all', () => {
+  const r = CC._internal.parseNumericReferenceTail(', 2025, pp. 1\u201317. doi: 10.1145/3706598.3713393.');
+  assert.strictEqual(r.volume, null);
+  assert.strictEqual(r.pages, '1\u201317');
+});
+
+test('deriveBookPublisher strips the "City, Country:" prefix and trailing year', () => {
+  assert.strictEqual(CC._internal.deriveBookPublisher('. London, U.K.: Pearson, 2016.', '2016'), 'Pearson');
+  assert.strictEqual(CC._internal.deriveBookPublisher('. Cambridge, U.K.: Polity Press, 2019.', '2019'), 'Polity Press');
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));

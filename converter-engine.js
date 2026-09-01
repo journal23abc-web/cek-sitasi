@@ -329,6 +329,45 @@
     return candidate;
   }
 
+  // ---- Full-reference-body parsing (for a genuine APA7 bibliographic reformat, not just the
+  // author-name swap the rest of this file limits itself to) ----------------------------------
+  //
+  // These two are pure, DOM-free functions so they're unit-testable on their own; the DOM side
+  // (building italic runs for the docx export) lives in convert-ui.js, which has the actual XML
+  // and can tell which part of a reference was already italicized (the journal/book title) —
+  // these just need to be handed the plain-text "tail" that comes after that italic run.
+
+  // Extracts volume/issue/pages/doi from the text that trails a numeric (IEEE/Vancouver)
+  // reference's italicized journal-name segment, e.g. ", vol. 16, no. 1, p. 39, 2019. doi:
+  // 10.1186/s41239-019-0171-0." Deliberately independent of extractBibliographicFields (engine.js)
+  // — that function has known gaps here (e.g. a conference reference with no "vol." prefix at
+  // all, see converter-engine.test.js), and a full reference-list rewrite needs this to be right.
+  function parseNumericReferenceTail(text) {
+    var t = text || '';
+    var doiMatch = t.match(/doi:\s*(\S+?)\.?\s*$/i);
+    var volMatch = t.match(/vol\.\s*(\d+)/i);
+    var issueMatch = t.match(/no\.\s*(\d+)/i);
+    var pagesMatch = t.match(/pp?\.\s*(\d+)(?:[-\u2013](\d+))?/i);
+    return {
+      volume: volMatch ? volMatch[1] : null,
+      issue: issueMatch ? issueMatch[1] : null,
+      pages: pagesMatch ? (pagesMatch[1] + (pagesMatch[2] ? ('\u2013' + pagesMatch[2]) : '')) : null,
+      doi: doiMatch ? doiMatch[1] : null,
+    };
+  }
+
+  // Derives a book's publisher name from the text trailing its (italicized) title, e.g.
+  // ". London, U.K.: Pearson, 2016." -> "Pearson". IEEE book references conventionally end
+  // "City, Country: Publisher, Year." — APA7 no longer requires the location, just the
+  // publisher, so this takes the text after the LAST colon and strips the trailing ", Year.".
+  function deriveBookPublisher(tailText, year) {
+    var s = (tailText || '').trim().replace(/^\.\s*/, '');
+    if (year) s = s.replace(new RegExp(',?\\s*' + String(year).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.?\\s*$'), '');
+    var lastColon = s.lastIndexOf(':');
+    if (lastColon !== -1) s = s.slice(lastColon + 1);
+    return s.replace(/^[\s.,;:]+|[\s.,;:]+$/g, '');
+  }
+
   function convert(articleText, referenceText, sourceStyleId, targetStyleId) {
     if (!STYLES[sourceStyleId]) throw new Error('Gaya sumber tidak dikenal: ' + sourceStyleId);
     if (!STYLES[targetStyleId]) throw new Error('Gaya tujuan tidak dikenal: ' + targetStyleId);
@@ -724,6 +763,8 @@
       formatNumeric: formatNumeric,
       renderAuthorListForReference: renderAuthorListForReference,
       canonicalAuthorsFromRef: canonicalAuthorsFromRef,
+      parseNumericReferenceTail: parseNumericReferenceTail,
+      deriveBookPublisher: deriveBookPublisher,
     },
   };
 
