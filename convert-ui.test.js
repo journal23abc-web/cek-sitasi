@@ -192,6 +192,68 @@ test('unrecognized paragraph shape (no italic run) is left untouched, not crashe
   assert.ok(fullText.includes('[1]')); // untouched — caller is expected to fall back
 });
 
+test('journal name fragmented across several adjacent italic runs (Word splitting at abbreviation periods) is still treated as ONE title, not rejected', () => {
+  // Real-world case: "Comput. Educ.: Artif. Intell." got split into 4 separate italic runs by
+  // Word (likely spell-check breaking at each abbreviation period) — this used to fail the old
+  // "exactly one italic run" check entirely and fall back to the author-only rewrite.
+  const raw = '[14] T. K. F. Chiu, "Future research recommendations," Comput. Educ.: Artif. Intell., vol. 6, art. 100197, 2024, doi: 10.1016/j.caeai.2023.100197.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  const xmlDoc = parseDoc(referenceParagraph('[14] ',
+    'T. K. F. Chiu, \u201cFuture research recommendations,\u201d ',
+    'PLACEHOLDER', // overwritten below with 4 separate italic runs
+    ', vol. 6, art. 100197, 2024, doi: 10.1016/j.caeai.2023.100197.'));
+  // Rebuild with the italic journal name fragmented into 4 runs instead of the single run
+  // referenceParagraph() would normally produce.
+  const xmlDoc2 = parseDoc('<w:p>' + run('[14] ', false) + '<w:r><w:tab/></w:r>' +
+    run('T. K. F. Chiu, \u201cFuture research recommendations,\u201d ', false) +
+    run('Comput', true) + run('. Educ.: ', true) + run('Artif', true) + run('. Intell.', true) +
+    run(', vol. 6, art. 100197, 2024, doi: 10.1016/j.caeai.2023.100197.', false) + '</w:p>');
+  const paraEl = xmlDoc2.getElementsByTagName('w:p')[0];
+  const ok = rewriteReferenceParagraphToApa7(xmlDoc2, paraEl, ref, authorApa);
+  assert.strictEqual(ok, true);
+  const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  assert.ok(fullText.includes('Comput. Educ.: Artif. Intell.'), fullText); // fragments reassembled in reading order
+  const italicRuns = Array.from(paraEl.getElementsByTagName('w:r')).filter(runIsItalic);
+  assert.strictEqual(italicRuns.length, 5); // 4 original fragments + 1 new italic volume run
+});
+
+test('an italic run with a non-italic run sandwiched between two italic pieces is a genuinely different shape and is still rejected (not force-merged)', () => {
+  const raw = '[1] A. Author, "A title," Some Journal, vol. 1, p. 1, 2020, doi: 10.1/x.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  const xmlDoc = parseDoc('<w:p>' + run('[1] ', false) + '<w:r><w:tab/></w:r>' +
+    run('A. Author, \u201cA title,\u201d ', false) +
+    run('Some ', true) + run('unexpected plain text', false) + run('Journal', true) +
+    run(', vol. 1, p. 1, 2020, doi: 10.1/x.', false) + '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  const ok = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
+  assert.strictEqual(ok, false);
+});
+
+test('a book/report with its OWN DOI (e.g. an organizational report) does not duplicate its title and keeps the DOI', () => {
+  // Reproduces a real bug: a book-shaped reference (non-quoted title, no volume/pages) that also
+  // happens to carry a DOI used to be routed down the JOURNAL-article path instead (isBook used
+  // to require an absent DOI), which re-prepended ref.title into the author text while ALSO
+  // keeping the original italic run — whose content, for a report, already IS that same title —
+  // printing the title twice and losing the publisher/DOI entirely.
+  const raw = 'UNESCO, Guidance for Generative AI in Education and Research. Paris, France: UNESCO, 2023, doi: 10.54675/EWZM9535.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  const xmlDoc = parseDoc('<w:p>' +
+    run('UNESCO, ', false) +
+    run('Guidance for Generative AI in Education and Research', true) +
+    run('. Paris, France: UNESCO, 2023, doi: 10.54675/EWZM9535.', false) + '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  const ok = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
+  assert.strictEqual(ok, true);
+  const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  const titleOccurrences = fullText.split('Guidance for Generative AI in Education and Research').length - 1;
+  assert.strictEqual(titleOccurrences, 1, fullText); // title appears exactly once, not twice
+  assert.ok(fullText.includes('UNESCO.'), fullText); // publisher survives
+  assert.ok(fullText.includes('https://doi.org/10.54675/EWZM9535'), fullText); // DOI survives too
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   process.exitCode = 1;

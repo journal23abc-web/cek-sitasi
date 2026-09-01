@@ -294,7 +294,31 @@ test('narrative "Wang et al." citation with un-comma\'d source "et al." also res
   assert.strictEqual(r.unmatched.length, 0, JSON.stringify(r.unmatched));
 });
 
-console.log('\n=== Reference year vs. a page-range number that looks like a year (real-world regression) ===');
+console.log('\n=== findAuthorSegBoundary: reference-list rendering keeps the full title (real-world regression) ===');
+
+test('a non-quoted institutional/book reference does not lose its title when rebuilding the reference line', () => {
+  // Reproduces a real bug: findAuthorSegBoundary used to re-derive the author/title boundary
+  // from scratch (cutting at the FIRST period anywhere in the line), instead of using the title
+  // parseReferenceLine had already correctly extracted — so for "UNESCO, Guidance for Generative
+  // AI in Education and Research. Paris, France: UNESCO, 2023..." the entire title vanished
+  // (swallowed into a "boundary" that landed mid-title, both before AND after it were dropped).
+  const article = 'Guidance was published on this topic [30].';
+  const refs = 'UNESCO, Guidance for Generative AI in Education and Research. Paris, France: UNESCO, 2023, doi: 10.54675/EWZM9535.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.ok(r.referenceLines[0].line.includes('Guidance for Generative AI in Education and Research'), r.referenceLines[0].line);
+});
+
+test('an ordinary quoted-title reference still keeps its opening quote at the right spot (no regression from the title-based boundary)', () => {
+  const article = 'This was studied before [1].';
+  const refs = '[1] A. R. Malik, "Exploring artificial intelligence in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.';
+  const r = CC.convert(article, refs, 'ieee', 'apa7');
+  // convert()'s plain-text referenceLines only reformats the AUTHOR portion — the quoted title
+  // and everything after it is preserved verbatim, so the quote mark must survive right where
+  // it originally sat, immediately after the (now APA-formatted) author.
+  assert.ok(r.referenceLines[0].line.includes('Malik, A. R., "Exploring artificial intelligence in academic essay writing,"'), r.referenceLines[0].line);
+});
+
+
 
 test('year is read from the end of the reference (after the page range), not the page range itself', () => {
   // Reproduces a real bug: "pp. 1944-1958, 2025" was parsed as year 1944 (the first 19xx/20xx-

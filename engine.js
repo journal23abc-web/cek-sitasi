@@ -62,7 +62,12 @@ function looksLikePersonalName(str) {
 function looksLikeNonInvertedAuthorList(str) {
   var s = (str || '').trim();
   if (!s) return false;
-  var person = '(?:\\p{Lu}\\.\\s*){1,3}[\\p{Lu}\\p{Lo}][\\p{L}\'\\-]+';
+  // Surname allows up to 2 extra capitalized words after the first (e.g. "Owusu Ansah", "de la
+  // Cruz") — a single-word-only surname here used to make a perfectly ordinary 2-author list
+  // with a compound surname ("D. Baidoo-Anu and L. Owusu Ansah") fail this check, fall through
+  // to isInstitutionalAuthor()'s generic "capitalized words, no comma" catch-all, and come out
+  // misclassified as one institution instead of two people.
+  var person = '(?:\\p{Lu}\\.\\s*){1,3}[\\p{Lu}\\p{Lo}][\\p{L}\'\\-]+(?:\\s+[\\p{Lu}\\p{Lo}][\\p{L}\'\\-]+){0,2}';
   var re = new RegExp('^' + person + '(?:\\s*,?\\s*(?:and|&)\\s*' + person + '|\\s*,\\s*' + person + ')+$', 'u');
   return re.test(s);
 }
@@ -1277,6 +1282,7 @@ function parseReferenceLine(line, styleId) {
 }
 
 function parseReferenceListDetailed(referenceText, styleId) {
+  var style = STYLES[styleId];
   var rawLines = (referenceText || '').split('\n');
   var references = [];
   var failedLines = [];
@@ -1298,7 +1304,22 @@ function parseReferenceListDetailed(referenceText, styleId) {
     r.lineNumber = lineNumber;
     references.push(r);
   });
-  return { references: references, failedLines: failedLines, totalFound: totalFound, succeededCount: references.length, failedCount: failedLines.length };
+  // Numeric-family (IEEE/Vancouver) reference lists are SOMETIMES printed without repeating the
+  // bracket number on each entry — relying entirely on the list's own top-to-bottom order to
+  // match [1], [2], [3]... in the text (common with journal templates that number the list via
+  // Word's own numbered-list style rather than literal "[1] " text). Without a numLabel to key
+  // off, every single in-text citation would otherwise fail to match its reference — not a
+  // partial degradation, a total one. Only inferred when NONE of the entries carry an explicit
+  // number (a document that mixes explicit and un-numbered entries is a different, genuinely
+  // ambiguous problem this shouldn't guess its way through) — and always flagged back to the
+  // caller via numberingInferred, since it rests on an assumption (the list IS in citation
+  // order) this can't itself verify.
+  var numberingInferred = false;
+  if (style.family === 'numeric' && references.length > 0 && references.every(function(r) { return r.numLabel == null; })) {
+    numberingInferred = true;
+    references.forEach(function(r, i) { r.numLabel = i + 1; });
+  }
+  return { references: references, failedLines: failedLines, totalFound: totalFound, succeededCount: references.length, failedCount: failedLines.length, numberingInferred: numberingInferred };
 }
 
 function parseReferenceList(referenceText, styleId) {
@@ -1807,6 +1828,7 @@ MultiFormatValidator.prototype.validate = function() {
   this.references = parsed.references;
   this.parseStats = { totalFound: parsed.totalFound, succeededCount: parsed.succeededCount, failedCount: parsed.failedCount };
   this.failedLines = parsed.failedLines;
+  this.numberingInferred = parsed.numberingInferred;
   var family = this.style.family;
 
   // Apa pun yang berada SEBELUM heading "Introduction"/"Pendahuluan" (judul, metadata penulis,

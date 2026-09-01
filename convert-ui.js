@@ -489,11 +489,14 @@
   // year moves into parentheses after the author(s), the quoted title loses its quote marks, the
   // volume number becomes italic (newly — it never was in IEEE), and "vol./no./pp./doi:" become
   // "16(1), 39" / "https://doi.org/...". This only fires for a specific, verified paragraph shape
-  // — author/quoted-title text, ONE italicized run (the journal or book title), then trailing
-  // vol/issue/pages/doi (or, for a book, "City: Publisher, Year") text — because that's the shape
-  // this can safely reformat without guessing at formatting it can't see. Anything else is left
-  // exactly as the older author-only rewrite already produces it, rather than risk corrupting a
-  // structure this hasn't verified.
+  // — author/quoted-title text, one CONTIGUOUS block of one-or-more italicized runs (the journal
+  // or book title — Word frequently fragments this into several adjacent italic runs on its own,
+  // e.g. splitting at each abbreviation period in "Comput. Educ.: Artif. Intell.", which is still
+  // ONE italic title, just spread across several runs), then trailing vol/issue/pages/doi (or,
+  // for a book, "City: Publisher, Year") text. Anything else — no italic run at all, or italic
+  // runs with a non-italic run sandwiched between them (genuinely ambiguous, not just fragmented)
+  // — is left exactly as the older author-only rewrite already produces it, rather than risk
+  // corrupting a structure this hasn't verified.
   function rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa) {
     var allOriginalRuns = directChildRuns(paraEl); // numbering + tab + content, in document order
     var runs = allOriginalRuns.slice();
@@ -503,43 +506,59 @@
     }
     while (runs.length && isNumberingOrEmptyRun(runs[0])) runs.shift();
 
-    var italicIdx = -1, italicCount = 0;
+    var italicIndices = [];
     for (var i = 0; i < runs.length; i++) {
-      if (runIsItalic(runs[i]) && runText(runs[i]).trim()) { italicCount++; if (italicIdx === -1) italicIdx = i; }
+      if (runIsItalic(runs[i]) && runText(runs[i]).trim()) italicIndices.push(i);
     }
-    if (italicIdx === -1 || italicCount !== 1) return false; // shape not recognized — leave untouched
+    if (italicIndices.length === 0) return false; // no italic run at all — shape not recognized
+    var italicStart = italicIndices[0], italicEnd = italicIndices[italicIndices.length - 1];
+    for (var j = italicStart; j <= italicEnd; j++) {
+      if (!runIsItalic(runs[j])) return false; // a non-italic run breaks up the italic block — genuinely ambiguous, not just fragmented
+    }
 
-    var beforeRuns = runs.slice(0, italicIdx);
-    var italicRun = runs[italicIdx];
-    var afterRuns = runs.slice(italicIdx + 1);
+    var beforeRuns = runs.slice(0, italicStart);
+    var italicRuns = runs.slice(italicStart, italicEnd + 1); // the whole contiguous block, however fragmented
+    var italicTemplateRun = italicRuns[0]; // formatting template for the NEW italic volume run below
+    var afterRuns = runs.slice(italicEnd + 1);
     if (beforeRuns.length === 0 || afterRuns.length === 0) return false;
     var tailText = afterRuns.map(runText).join('');
 
-    var isBook = !ref.volume && !ref.pages && !ref.articleNumber && !ref.doi;
+    // "Book-like" (the italic run IS the title itself, not a separate journal/proceedings name
+    // after a quoted title) is decided by whether the raw reference has ANY quote marks at all —
+    // not by volume/pages/doi presence. Those can each be genuinely present OR absent on either
+    // kind of reference (a report can have a DOI, like UNESCO's does here; a conference paper's
+    // page range can fail to extract via ref.pages when there's no "vol." prefix before it — a
+    // separate, known gap in parseReferenceLine's own field extraction, which is exactly why
+    // parseNumericReferenceTail below re-derives volume/issue/pages/doi straight from the actual
+    // tail text instead of trusting ref's fields for this). Quote-mark presence is a clean
+    // structural signal neither of those gaps can confuse: IEEE always quotes an article's
+    // title and never quotes a book's.
+    var isBook = !/["“]/.test(ref.raw);
     var newNodes = [];
     if (isBook) {
       var publisher = CC._internal.deriveBookPublisher(tailText, ref.year);
+      var bookDoiPart = ref.doi ? ('https://doi.org/' + ref.doi) : null;
       newNodes.push(makeRun(xmlDoc, beforeRuns[0], authorApa + ' (' + (ref.year || 'n.d.') + '). '));
-      newNodes.push(italicRun.cloneNode(true)); // book title — already correct, untouched
-      newNodes.push(makeRun(xmlDoc, afterRuns[0], '. ' + publisher + '.'));
+      italicRuns.forEach(function(r) { newNodes.push(r.cloneNode(true)); }); // book title — already correct, untouched
+      newNodes.push(makeRun(xmlDoc, afterRuns[0], '. ' + publisher + (bookDoiPart ? '. ' + bookDoiPart : '.')));
     } else {
       var tail = CC._internal.parseNumericReferenceTail(tailText);
       var doiPart = tail.doi ? ('https://doi.org/' + tail.doi) : null;
       if (!tail.volume && tail.pages) {
         // conference proceedings with no volume of its own -> "In <Proceedings> (pp. X-Y)."
         newNodes.push(makeRun(xmlDoc, beforeRuns[0], authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. In '));
-        newNodes.push(italicRun.cloneNode(true));
+        italicRuns.forEach(function(r) { newNodes.push(r.cloneNode(true)); });
         newNodes.push(makeRun(xmlDoc, afterRuns[0], ' (pp. ' + tail.pages + ')' + (doiPart ? '. ' + doiPart : '.')));
       } else {
         newNodes.push(makeRun(xmlDoc, beforeRuns[0], authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. '));
-        newNodes.push(italicRun.cloneNode(true));
+        italicRuns.forEach(function(r) { newNodes.push(r.cloneNode(true)); });
         if (tail.volume) {
           var afterVol = '';
           if (tail.issue) afterVol += '(' + tail.issue + ')';
           if (tail.pages) afterVol += ', ' + tail.pages;
           afterVol += doiPart ? '. ' + doiPart : '.';
           newNodes.push(makeRun(xmlDoc, afterRuns[0], ', '));
-          newNodes.push(makeRun(xmlDoc, italicRun, tail.volume)); // clone italic formatting for the volume
+          newNodes.push(makeRun(xmlDoc, italicTemplateRun, tail.volume)); // clone italic formatting for the volume
           newNodes.push(makeRun(xmlDoc, afterRuns[0], afterVol));
         } else {
           newNodes.push(makeRun(xmlDoc, afterRuns[0], doiPart ? '. ' + doiPart : '.'));

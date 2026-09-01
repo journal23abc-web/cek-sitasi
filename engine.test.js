@@ -1507,6 +1507,58 @@ test('equally strong same-surname/year candidates cause abstention instead of fi
   assert.strictEqual(d.autoSafe, false);
 });
 
+console.log('\n=== Reference list with NO explicit bracket numbering — numeric family, order-inferred ===');
+
+test('a numeric-family reference list with zero "[N] " prefixes gets numLabel inferred from list order', () => {
+  const refs = [
+    'H. Crompton and D. Burke, "Artificial intelligence in higher education," Int. J. Educ. Technol. High. Educ., vol. 20, no. 1, 2023, doi: 10.1186/x.',
+    'O. Zawacki-Richter, V. I. Marín, M. Bond, and F. Gouverneur, "Systematic review," Int. J. Educ. Technol. High. Educ., vol. 16, no. 1, 2019, doi: 10.1186/y.',
+  ].join('\n');
+  const parsed = CE.parseReferenceListDetailed(refs, 'ieee');
+  assert.strictEqual(parsed.numberingInferred, true);
+  assert.strictEqual(parsed.references[0].numLabel, 1);
+  assert.strictEqual(parsed.references[1].numLabel, 2);
+});
+
+test('a numeric-family reference list where entries DO carry explicit "[N] " numbers is NOT touched by inference', () => {
+  const refs = [
+    '[1] H. Crompton and D. Burke, "Artificial intelligence in higher education," Int. J. Educ. Technol. High. Educ., vol. 20, no. 1, 2023, doi: 10.1186/x.',
+    '[2] O. Zawacki-Richter et al., "Systematic review," Int. J. Educ. Technol. High. Educ., vol. 16, no. 1, 2019, doi: 10.1186/y.',
+  ].join('\n');
+  const parsed = CE.parseReferenceListDetailed(refs, 'ieee');
+  assert.strictEqual(parsed.numberingInferred, false);
+  assert.strictEqual(parsed.references[0].numLabel, 1);
+  assert.strictEqual(parsed.references[1].numLabel, 2);
+});
+
+test('an author-date family reference list (no numbering concept at all) never gets numberingInferred set', () => {
+  const refs = 'Smith, J. (2020). A title. Journal A, 1(1), 1-10.';
+  const parsed = CE.parseReferenceListDetailed(refs, 'apa7');
+  assert.strictEqual(parsed.numberingInferred, false);
+});
+
+console.log('\n=== Multi-word surname in a non-inverted author list is not misclassified as institutional ===');
+
+test('"D. Baidoo-Anu and L. Owusu Ansah" (2-word second surname, no comma) parses as two personal authors, not one institution', () => {
+  const raw = 'D. Baidoo-Anu and L. Owusu Ansah, "Education in the era of generative artificial intelligence (AI)," J. AI, vol. 7, no. 1, pp. 52-62, 2023, doi: 10.61969/jai.1337500.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.isInstitutional, false);
+  assert.deepStrictEqual(ref.authors, ['D. Baidoo-Anu', 'L. Owusu Ansah']);
+});
+
+test('a genuine institution name is unaffected by the multi-word-surname allowance above', () => {
+  const raw = 'UNESCO, Guidance for Generative AI in Education and Research. Paris, France: UNESCO, 2023, doi: 10.54675/x.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.isInstitutional, true);
+});
+
+test('a 3-word-surname multi-author list still parses correctly (2 extra capitalized words allowed, not just 1)', () => {
+  const raw = 'A. Van Der Berg and B. Smith, "A title," Journal A, vol. 1, p. 1, 2020, doi: 10.1/x.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.isInstitutional, false);
+  assert.strictEqual(ref.authors.length, 2);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

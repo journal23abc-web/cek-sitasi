@@ -362,6 +362,11 @@
   // publisher, so this takes the text after the LAST colon and strips the trailing ", Year.".
   function deriveBookPublisher(tailText, year) {
     var s = (tailText || '').trim().replace(/^\.\s*/, '');
+    // Strip a trailing DOI clause FIRST — a book/report can legitimately carry a DOI (e.g. an
+    // organizational report), and "doi: 10.x/y" has its own colon, which would otherwise get
+    // mistaken by the colon-based extraction below for the "City: Publisher" separator, pulling
+    // out the DOI number itself instead of the actual publisher name.
+    s = s.replace(/,?\s*doi:\s*\S+\.?\s*$/i, '').replace(/,?\s*https?:\/\/(?:dx\.)?doi\.org\/\S+\.?\s*$/i, '');
     if (year) s = s.replace(new RegExp(',?\\s*' + String(year).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.?\\s*$'), '');
     var lastColon = s.lastIndexOf(':');
     if (lastColon !== -1) s = s.slice(lastColon + 1);
@@ -752,7 +757,7 @@
     var referenceLines = orderedRefs.map(function(ref, idx) {
       var authorPart = renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
       var trimmedRaw = ref.raw.trim();
-      var boundary = findAuthorSegBoundary(ref.raw, sourceStyleId);
+      var boundary = findAuthorSegBoundary(ref, sourceStyleId);
       var rest, connector;
       if (boundary != null) {
         connector = connectorBeforeBoundary(trimmedRaw, boundary);
@@ -777,6 +782,7 @@
       mixedStyleFoundCount: mixedStyleFound.length,
       mixedStyleFixedCount: mixedStyleFixed,
       mixedStyleUnresolvedCount: mixedStyleUnresolved,
+      numberingInferred: !!v.numberingInferred,
     };
   }
 
@@ -825,26 +831,38 @@
     return text.substring(start, boundary);
   }
 
-  // Finds where the author segment ends in a raw reference line, for a given style — mirrors
-  // the same boundary logic engine.js's parseReferenceLine already uses internally, so the
-  // "rest of the line" we preserve verbatim is exactly what parseReferenceLine considers
-  // non-author content (title onward).
-  function findAuthorSegBoundary(raw, styleId) {
+  // Finds where the author segment ends in a raw reference line, for a given style — i.e. where
+  // the connector + "rest of the line" (title onward) that gets preserved verbatim should start.
+  //
+  // Primary strategy: parseReferenceLine has ALREADY correctly extracted ref.title (it knows how
+  // to handle quoted titles, non-quoted book titles, institutional authors, etc. — see engine.js)
+  // — just locate that exact text in the raw line. This used to instead re-derive the boundary
+  // from scratch with its own narrower regex, which drifted out of sync with parseReferenceLine's
+  // own logic: a non-quoted book/institutional reference like "UNESCO, Guidance for Generative AI
+  // in Education and Research. Paris, France: UNESCO, ..." would have its ENTIRE title silently
+  // swallowed and lost (the old fallback cut at the first period anywhere in the line, which for
+  // an untitled institutional author lands mid-title, not at its start).
+  function findAuthorSegBoundary(ref, styleId) {
     var style = STYLES[styleId];
-    var text = (raw || '').trim();
+    var text = (ref.raw || '').trim();
+    if (ref.title) {
+      var titleIdx = text.indexOf(ref.title);
+      if (titleIdx !== -1) {
+        // If a quote mark immediately precedes the title (the common case for a journal
+        // article), the boundary belongs AT that quote mark, not just after it — the quote
+        // itself needs to survive as part of the preserved "rest", per the existing convention.
+        if (titleIdx > 0 && /["“]/.test(text[titleIdx - 1])) return titleIdx - 1;
+        return titleIdx;
+      }
+    }
+    // Fallback (title unavailable, or not found verbatim in raw) — narrower heuristics as a
+    // safety net; should rarely be reached given a successfully-parsed reference has a title.
     if (style.family === 'numeric') {
       var t = text, prefixLen = 0;
       if (style.refPrefix === 'bracket') { var bm = t.match(/^\[(\d+)\]\s*/); if (bm) { prefixLen = bm[0].length; t = t.slice(bm[0].length); } }
       else if (style.refPrefix === 'dot') { var dm = t.match(/^(\d+)\.\s*/); if (dm) { prefixLen = dm[0].length; t = t.slice(dm[0].length); } }
-      var authorLen;
-      if (style.authorForm === 'non-inverted') {
-        var qIdx = t.search(/["“]/);
-        authorLen = qIdx > -1 ? qIdx : Math.min(t.length, t.indexOf('.') + 1 || t.length);
-      } else {
-        var fp = t.indexOf('. ');
-        authorLen = fp > -1 ? fp : t.length;
-      }
-      return prefixLen + authorLen;
+      var qIdx = t.search(/["“]/);
+      return prefixLen + (qIdx > -1 ? qIdx : t.length);
     }
     if (style.yearInParens === false) {
       var ym = text.match(/^(.*?)\.\s*\d{4}[a-z]?\.\s/);
