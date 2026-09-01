@@ -3339,6 +3339,24 @@ var DOIChecker = {
       return Promise.resolve({ exists: false, status: 'network_error', data: null, message: err.message });
     }
   },
+  // Fetches a DOI's FULL author list from CrossRef — for completing a reference whose source
+  // manuscript already truncated it with "et al." (a real, fairly common submission defect:
+  // APA7 requires every author be listed, up to 20, with only 21+ getting the "first 19 . . .
+  // last author" ellipsis treatment — "et al." itself is never valid in a reference-LIST entry).
+  // Pure passthrough over validateViaCrossRef's already-tested network path, reshaping the
+  // author array into the plain {family, given} pairs a reference renderer needs. Returns
+  // authors: null (not []) on any failure, so callers can tell "fetched zero authors" apart
+  // from "the fetch didn't succeed" without a separate status check.
+  fetchAuthorList: function(doi) {
+    return DOIChecker.validateViaCrossRef(doi).then(function(result) {
+      if (!result.exists || !result.data) return { status: result.status, authors: null, title: null };
+      var crAuthors = (result.data.author || []).map(function(a) {
+        return { family: a.family || '', given: a.given || '' };
+      }).filter(function(a) { return a.family; });
+      var crTitle = (result.data.title && result.data.title[0]) ? result.data.title[0] : null;
+      return { status: 'ok', authors: crAuthors, title: crTitle };
+    });
+  },
   // Opt-in DOI lookup by bibliographic metadata (title/author/year). Returns ranked
   // candidates with a similarity score — the caller decides whether to use any of them.
   // NEVER writes a DOI into a reference automatically.

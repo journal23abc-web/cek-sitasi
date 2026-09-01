@@ -4,12 +4,21 @@
 const assert = require('assert');
 const path = require('path');
 const CC = require(path.join(__dirname, 'converter-engine.js'));
+const CE = require(path.join(__dirname, 'engine.js'));
 
 let pass = 0, fail = 0;
 const failures = [];
 function test(name, fn) {
   try { fn(); pass++; console.log('  PASS  ' + name); }
   catch (err) { fail++; failures.push({ name, err }); console.log('  FAIL  ' + name); console.log('        ' + err.message); }
+}
+// For tests whose fn returns a Promise (e.g. anything exercising completeTruncatedAuthorsAsync
+// with a mocked fetch) — queued and awaited in order at the very end, after every synchronous
+// test above has already run and printed, so a rejected assertion inside one is still caught and
+// counted instead of becoming an unhandled rejection that the plain `test()` helper can't see.
+const asyncTests = [];
+function testAsync(name, fn) {
+  asyncTests.push({ name, fn });
 }
 
 console.log('\n=== APA7 -> IEEE ===');
@@ -327,8 +336,158 @@ test('deriveBookPublisher strips the "City, Country:" prefix and trailing year',
   assert.strictEqual(CC._internal.deriveBookPublisher('. Cambridge, U.K.: Polity Press, 2019.', '2019'), 'Polity Press');
 });
 
-console.log(`\n${pass} passed, ${fail} failed.\n`);
-if (fail > 0) {
-  failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));
-  process.exit(1);
-}
+console.log('\n=== Completing a source reference already truncated with "et al." via CrossRef ===');
+
+test('formatCrossRefAuthorsForSourceStyle: IEEE (non-inverted) shape, 3 authors', () => {
+  const s = CC._internal.formatCrossRefAuthorsForSourceStyle(
+    [{ family: 'Malik', given: 'Abdul Rasyid' }, { family: 'Pratiwi', given: 'Yuni' }, { family: 'Andajani', given: 'Kadek' }],
+    'ieee'
+  );
+  assert.strictEqual(s, 'A. R. Malik, Y. Pratiwi, and K. Andajani');
+});
+
+test('formatCrossRefAuthorsForSourceStyle: 2 authors uses "and" without a Oxford comma (IEEE)', () => {
+  const s = CC._internal.formatCrossRefAuthorsForSourceStyle(
+    [{ family: 'Smith', given: 'John' }, { family: 'Jones', given: 'Kate' }], 'ieee');
+  assert.strictEqual(s, 'J. Smith and K. Jones');
+});
+
+test('evaluateAuthorCompletion: eligible when truncated + has DOI + CrossRef has more authors + title matches', () => {
+  const ref = CE.parseReferenceLine('[2] A. R. Malik et al., "Exploring artificial intelligence in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.', 'ieee');
+  const cr = { status: 'ok', authors: [{ family: 'Malik', given: 'A' }, { family: 'Pratiwi', given: 'Y' }, { family: 'X', given: 'Z' }], title: 'Exploring artificial intelligence in academic essay writing' };
+  const r = CC._internal.evaluateAuthorCompletion(ref, cr, 'ieee');
+  assert.strictEqual(r.eligible, true);
+  assert.strictEqual(r.authorCount, 3);
+});
+
+test('evaluateAuthorCompletion: not eligible when the reference was never truncated', () => {
+  const ref = CE.parseReferenceLine('[1] J. Smith, "A title," Journal A, vol. 1, p. 1, 2020. doi: 10.1/x.', 'ieee');
+  const r = CC._internal.evaluateAuthorCompletion(ref, { status: 'ok', authors: [{ family: 'Smith', given: 'J' }], title: 'A title' }, 'ieee');
+  assert.strictEqual(r.eligible, false);
+  assert.strictEqual(r.reason, 'not-truncated');
+});
+
+test('evaluateAuthorCompletion: not eligible without a DOI to look up', () => {
+  const ref = CE.parseReferenceLine('[2] A. R. Malik et al., "A title," Journal A, vol. 1, p. 1, 2023.', 'ieee');
+  const r = CC._internal.evaluateAuthorCompletion(ref, { status: 'ok', authors: [{ family: 'Malik', given: 'A' }, { family: 'X', given: 'Y' }], title: 'A title' }, 'ieee');
+  assert.strictEqual(r.eligible, false);
+  assert.strictEqual(r.reason, 'no-doi');
+});
+
+test('evaluateAuthorCompletion: not eligible when the CrossRef title looks like a different paper', () => {
+  const ref = CE.parseReferenceLine('[5] S. P. T. Utami et al., "AI in academic writing class," Contemporary Educational Technology, vol. 15, 2023. doi: 10.54855/paic.23413.', 'ieee');
+  // This mirrors a REAL case in the wild: that DOI actually belongs to a completely different
+  // paper (Tran, T.T.H., in AsiaCALL proceedings) — the title-similarity guard must catch it,
+  // even though CrossRef genuinely has more authors listed than the truncated source (so this
+  // isn't rejected earlier by the "not more complete" check).
+  const cr = { status: 'ok', authors: [{ family: 'Tran', given: 'T T H' }, { family: 'Someone', given: 'Else' }], title: 'AI Tools in Teaching and Learning English Academic Writing Skills' };
+  const r = CC._internal.evaluateAuthorCompletion(ref, cr, 'ieee');
+  assert.strictEqual(r.eligible, false);
+  assert.strictEqual(r.reason, 'title-mismatch');
+});
+
+test('evaluateAuthorCompletion: not eligible when CrossRef somehow has fewer authors than already listed', () => {
+  const ref = CE.parseReferenceLine('[2] A. R. Malik, Y. Pratiwi, K. Andajani et al., "A title," Journal A, vol. 1, p. 1, 2023. doi: 10.1000/xyz123.', 'ieee');
+  const cr = { status: 'ok', authors: [{ family: 'Malik', given: 'A' }], title: 'A title' };
+  const r = CC._internal.evaluateAuthorCompletion(ref, cr, 'ieee');
+  assert.strictEqual(r.eligible, false);
+  assert.strictEqual(r.reason, 'crossref-not-more-complete');
+});
+
+testAsync('completeTruncatedAuthorsAsync: end-to-end with a mocked fetch, numbering prefix survives, citation matching still works', async () => {
+  const realFetch = global.fetch;
+  global.fetch = () => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({
+      status: 'ok',
+      message: {
+        author: [
+          { family: 'Malik', given: 'Abdul Rasyid' }, { family: 'Pratiwi', given: 'Yuni' }, { family: 'Andajani', given: 'Kadek' },
+          { family: 'Numertayasa', given: 'I Wayan' }, { family: 'Suharti', given: 'Sri' }, { family: 'Darwis', given: 'Amrih' }, { family: 'Marzuki', given: '' },
+        ],
+        title: ['Exploring artificial intelligence in academic essay writing'],
+        issued: { 'date-parts': [[2023]] },
+      },
+    }),
+  });
+  try {
+    const refs = '[1] Someone Else, "Another paper," Journal X, vol. 1, p. 1, 2020. doi: 10.1/y.\n' +
+      '[2] A. R. Malik et al., "Exploring artificial intelligence in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.';
+    const report = await CC.completeTruncatedAuthorsAsync(refs, 'ieee');
+    assert.strictEqual(report.checked, 1);
+    assert.strictEqual(report.completed.length, 1);
+    assert.strictEqual(report.completed[0].authorCount, 7);
+    assert.ok(report.updatedReferenceText.startsWith('[1] Someone Else'), report.updatedReferenceText);
+    assert.ok(report.updatedReferenceText.includes('[2] A. R. Malik, Y. Pratiwi'), report.updatedReferenceText);
+
+    const article = 'Ini didukung oleh temuan sebelumnya [2].';
+    const result = CC.convert(article, report.updatedReferenceText, 'ieee', 'apa7');
+    assert.strictEqual(result.changedCount, 1);
+    assert.ok(result.convertedArticle.includes('(Malik et al., 2023)'), result.convertedArticle);
+    const ref2Line = result.referenceLines.find(r => r.line.startsWith('Malik'));
+    assert.ok(ref2Line.line.startsWith('Malik, A. R., Pratiwi, Y., Andajani, K., Numertayasa, I. W., Suharti, S., Darwis, A., & Marzuki,'), ref2Line.line);
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+testAsync('completeTruncatedAuthorsAsync: a document with no truncated references does nothing (no fetch called)', async () => {
+  const realFetch = global.fetch;
+  let fetchCalled = false;
+  global.fetch = () => { fetchCalled = true; return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ status: 'ok', message: {} }) }); };
+  try {
+    const refs = '[1] J. Smith, "A title," Journal A, vol. 1, p. 1, 2020. doi: 10.1/x.';
+    const report = await CC.completeTruncatedAuthorsAsync(refs, 'ieee');
+    assert.strictEqual(report.checked, 0);
+    assert.strictEqual(fetchCalled, false);
+    assert.strictEqual(report.updatedReferenceText, refs);
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+testAsync('completion result can override just one reference\'s ref.authors before rendering (docx-export integration shape)', async () => {
+  // Mirrors exactly how convert-ui.js's .docx export uses this: `result` (citationSpans,
+  // referenceLines, numbering) stays computed from the ORIGINAL uncompleted text so paragraph
+  // LOCATION in the actual XML keeps working, while the completion report is applied ONLY at
+  // the point where a specific reference's author data feeds the reference-list rewrite.
+  const realFetch = global.fetch;
+  global.fetch = () => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({
+      status: 'ok',
+      message: { author: [{ family: 'Malik', given: 'A R' }, { family: 'Pratiwi', given: 'Y' }, { family: 'Andajani', given: 'K' }], title: ['A title'], issued: { 'date-parts': [[2023]] } },
+    }),
+  });
+  try {
+    const refs = '[2] A. R. Malik et al., "A title," Journal A, vol. 1, p. 1, 2023. doi: 10.1000/xyz123.';
+    const report = await CC.completeTruncatedAuthorsAsync(refs, 'ieee');
+    const completedByNumLabel = {};
+    report.completed.forEach(c => { completedByNumLabel[c.numLabel] = c; });
+
+    // Simulate the export handler: result computed from the ORIGINAL (uncompleted) text...
+    const result = CC.convert('Ini didukung [2].', refs, 'ieee', 'apa7');
+    assert.strictEqual(result.referenceLines[0].original, '[2] A. R. Malik et al., "A title," Journal A, vol. 1, p. 1, 2023. doi: 10.1000/xyz123.'); // still findable verbatim in the real XML text
+    // ...but the ref object used for RENDERING gets the completed author list swapped in.
+    const ref = CE.parseReferenceLine(result.referenceLines[0].original, 'ieee');
+    const completion = completedByNumLabel[ref.numLabel];
+    assert.ok(completion);
+    ref.authors = CE.parseAuthorsForStyle(completion.after, 'ieee').authors;
+    const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+    assert.strictEqual(authorApa, 'Malik, A. R., Pratiwi, Y., & Andajani, K.');
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+(async () => {
+  for (const { name, fn } of asyncTests) {
+    try { await fn(); pass++; console.log('  PASS  ' + name); }
+    catch (err) { fail++; failures.push({ name, err }); console.log('  FAIL  ' + name); console.log('        ' + err.message); }
+  }
+  console.log(`\n${pass} passed, ${fail} failed.\n`);
+  if (fail > 0) {
+    failures.forEach(f => console.log('FAILED: ' + f.name + '\n' + f.err.stack + '\n'));
+    process.exit(1);
+  }
+})();

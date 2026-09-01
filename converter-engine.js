@@ -368,6 +368,110 @@
     return s.replace(/^[\s.,;:]+|[\s.,;:]+$/g, '');
   }
 
+  // ---- Completing a source reference that's already truncated with "et al." -----------------
+  //
+  // "et al." in a reference-LIST entry (as opposed to an in-text citation) is never valid in any
+  // of the styles this file targets — APA7 in particular requires every author be spelled out,
+  // up to 20, with only 21+ authors getting the "first 19, . . . , last author" ellipsis form.
+  // When the SOURCE manuscript already truncated a reference that way ("A. R. Malik et al."),
+  // this file has never had the missing names to work with — it correctly refuses to invent
+  // them, but that leaves the converted output non-compliant through no fault of the citation
+  // style conversion itself. If the reference has a DOI, CrossRef usually does have the full
+  // list, so this looks it up — opt-in and reported back for the caller to review, never
+  // silently applied, matching how DOIChecker.searchByMetadata already handles "never write a
+  // DOI in automatically" elsewhere in this codebase.
+
+  // Formats a CrossRef {family, given}[] author list as plain text in the SOURCE style's own
+  // shape (e.g. non-inverted "F. M. Last" for IEEE), so the result can be substituted straight
+  // back into the reference text and re-parsed by the normal pipeline — no special-casing needed
+  // anywhere else once this text is in place.
+  function formatCrossRefAuthorsForSourceStyle(crAuthors, sourceStyleId) {
+    var style = STYLES[sourceStyleId];
+    function initials(given) {
+      return (given || '').split(/[\s.\-]+/).filter(Boolean)
+        .map(function(p) { return p[0].toUpperCase() + '.'; }).join(' ');
+    }
+    var pieces = crAuthors.map(function(a) {
+      var init = initials(a.given);
+      if (style.authorForm === 'vancouver') {
+        var initLetters = (a.given || '').split(/[\s.\-]+/).filter(Boolean).map(function(p) { return p[0].toUpperCase(); }).join('');
+        return a.family + (initLetters ? ' ' + initLetters : '');
+      }
+      if (style.authorForm === 'non-inverted') return (init ? init + ' ' : '') + a.family;
+      return a.family + (init ? ', ' + init : ''); // inverted styles: "Last, F. M."
+    });
+    if (pieces.length === 1) return pieces[0];
+    var sep = style.sep === '&' ? '&' : 'and';
+    if (pieces.length === 2) return pieces[0] + ' ' + sep + ' ' + pieces[1];
+    return pieces.slice(0, -1).join(', ') + ', ' + sep + ' ' + pieces[pieces.length - 1];
+  }
+
+  // Pure decision logic (no network) — kept separate from the fetch itself so it's directly
+  // unit-testable: given a parsed reference and an already-fetched CrossRef result, decide
+  // whether completing it is warranted, and build the replacement text if so.
+  function evaluateAuthorCompletion(ref, crossRefResult, sourceStyleId) {
+    var authors = ref.authors || [];
+    var lastIsEtAl = authors.length > 0 && isEtAlFragment(authors[authors.length - 1]);
+    if (!lastIsEtAl) return { eligible: false, reason: 'not-truncated' };
+    if (!ref.doi) return { eligible: false, reason: 'no-doi' };
+    if (!crossRefResult || crossRefResult.status !== 'ok' || !crossRefResult.authors || crossRefResult.authors.length === 0) {
+      return { eligible: false, reason: 'crossref-lookup-failed' };
+    }
+    var realAuthorsListed = authors.length - 1; // minus the "et al." marker itself
+    if (crossRefResult.authors.length <= realAuthorsListed) {
+      return { eligible: false, reason: 'crossref-not-more-complete' };
+    }
+    if (ref.title && crossRefResult.title) {
+      var sim = CE.bigramSimilarity(ref.title, crossRefResult.title);
+      if (sim < 0.6) return { eligible: false, reason: 'title-mismatch', similarity: Math.round(sim * 100) };
+    }
+    return {
+      eligible: true,
+      replacementAuthorText: formatCrossRefAuthorsForSourceStyle(crossRefResult.authors, sourceStyleId),
+      authorCount: crossRefResult.authors.length,
+    };
+  }
+
+  // The async orchestrator: finds every "et al."-truncated, DOI-bearing reference in
+  // referenceText, looks each one up, and returns a report plus an updatedReferenceText with the
+  // eligible ones substituted in — which the caller can review and then hand to convert() as
+  // normal, exactly as if the source manuscript had listed the full names to begin with. Never
+  // mutates anything on its own; the caller decides whether/when to use updatedReferenceText.
+  function completeTruncatedAuthorsAsync(referenceText, sourceStyleId) {
+    var refs = CE.parseReferenceList(referenceText, sourceStyleId);
+    var candidates = refs.filter(function(r) {
+      var authors = r.authors || [];
+      return authors.length > 0 && isEtAlFragment(authors[authors.length - 1]) && r.doi;
+    });
+    if (candidates.length === 0) {
+      return Promise.resolve({ checked: 0, completed: [], skipped: [], updatedReferenceText: referenceText });
+    }
+    return Promise.all(candidates.map(function(ref) {
+      return CE.DOIChecker.fetchAuthorList(ref.doi).then(function(crResult) {
+        return { ref: ref, evalResult: evaluateAuthorCompletion(ref, crResult, sourceStyleId) };
+      });
+    })).then(function(results) {
+      var completed = [], skipped = [];
+      var updatedText = referenceText;
+      results.forEach(function(r) {
+        if (!r.evalResult.eligible) {
+          skipped.push({ numLabel: r.ref.numLabel, reason: r.evalResult.reason, similarity: r.evalResult.similarity });
+          return;
+        }
+        var m = r.ref.raw.match(/^(\[\d+\]\s*|\d+\.\s*)?(.*?\bet\s+al\.?)/i);
+        if (!m) {
+          skipped.push({ numLabel: r.ref.numLabel, reason: 'could-not-locate-truncation-in-raw-text' });
+          return;
+        }
+        var truncatedAuthorSeg = m[2]; // excludes any "[N] "/"N. " numbering prefix — that must
+        // survive untouched, since the citation-matching system keys off it.
+        updatedText = updatedText.replace(truncatedAuthorSeg, r.evalResult.replacementAuthorText);
+        completed.push({ numLabel: r.ref.numLabel, before: truncatedAuthorSeg, after: r.evalResult.replacementAuthorText, authorCount: r.evalResult.authorCount });
+      });
+      return { checked: candidates.length, completed: completed, skipped: skipped, updatedReferenceText: updatedText };
+    });
+  }
+
   function convert(articleText, referenceText, sourceStyleId, targetStyleId) {
     if (!STYLES[sourceStyleId]) throw new Error('Gaya sumber tidak dikenal: ' + sourceStyleId);
     if (!STYLES[targetStyleId]) throw new Error('Gaya tujuan tidak dikenal: ' + targetStyleId);
@@ -756,6 +860,7 @@
   var CitationConverter = {
     convert: convert,
     STYLES: STYLES,
+    completeTruncatedAuthorsAsync: completeTruncatedAuthorsAsync,
     _internal: { // exposed for tests
       splitAuthorFragment: splitAuthorFragment,
       renderAuthorForStyle: renderAuthorForStyle,
@@ -765,6 +870,8 @@
       canonicalAuthorsFromRef: canonicalAuthorsFromRef,
       parseNumericReferenceTail: parseNumericReferenceTail,
       deriveBookPublisher: deriveBookPublisher,
+      formatCrossRefAuthorsForSourceStyle: formatCrossRefAuthorsForSourceStyle,
+      evaluateAuthorCompletion: evaluateAuthorCompletion,
     },
   };
 

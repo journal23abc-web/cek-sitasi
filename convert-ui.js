@@ -17,6 +17,8 @@
     splitStatus: document.getElementById('splitStatus'),
     articleText: document.getElementById('articleText'),
     referenceText: document.getElementById('referenceText'),
+    btnCompleteEtAl: document.getElementById('btnCompleteEtAl'),
+    completeEtAlStatus: document.getElementById('completeEtAlStatus'),
     convertBtn: document.getElementById('convertBtn'),
     topStatus: document.getElementById('topStatus'),
     loading: document.getElementById('loading'),
@@ -250,6 +252,46 @@
 
       if (els.results.scrollIntoView) els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 10);
+  });
+
+  // ---------- "Lengkapi et al. via CrossRef" (completing a source reference the manuscript
+  // itself already truncated with "et al.", which is never valid in any target reference list —
+  // see completeTruncatedAuthorsAsync in converter-engine.js for why) ----------
+  els.btnCompleteEtAl.addEventListener('click', function() {
+    var referenceText = els.referenceText.value.trim();
+    if (!referenceText) {
+      els.completeEtAlStatus.textContent = '⚠️ Isi daftar referensi dulu.';
+      return;
+    }
+    var selected = els.sourceStyleSelect.value;
+    var sourceStyleId = selected === 'auto'
+      ? CE.FormatDetector.detect(els.articleText.value || '', referenceText).styleId
+      : selected;
+
+    els.btnCompleteEtAl.disabled = true;
+    els.completeEtAlStatus.textContent = 'Memeriksa CrossRef untuk referensi yang terpotong "et al."...';
+
+    CC.completeTruncatedAuthorsAsync(referenceText, sourceStyleId)
+      .then(function(report) {
+        els.btnCompleteEtAl.disabled = false;
+        if (report.checked === 0) {
+          els.completeEtAlStatus.textContent = 'Tidak ada referensi bergaya "et al." (dengan DOI) yang perlu dilengkapi.';
+          return;
+        }
+        if (report.completed.length > 0) {
+          els.referenceText.value = report.updatedReferenceText;
+        }
+        var msg = report.completed.length + '/' + report.checked + ' referensi berhasil dilengkapi via CrossRef.';
+        if (report.skipped.length > 0) {
+          var reasons = { 'crossref-lookup-failed': 'DOI tidak ditemukan/gagal diakses', 'crossref-not-more-complete': 'CrossRef tidak punya lebih banyak nama daripada yang sudah ada', 'title-mismatch': 'judul di CrossRef tidak cocok — kemungkinan DOI salah, periksa manual', 'could-not-locate-truncation-in-raw-text': 'tidak bisa menemukan lokasi "et al." di teks aslinya' };
+          msg += ' ' + report.skipped.length + ' dilewati: ' + report.skipped.map(function(s) { return '[' + s.numLabel + '] ' + (reasons[s.reason] || s.reason); }).join('; ') + '.';
+        }
+        els.completeEtAlStatus.textContent = (report.completed.length > 0 ? '✅ ' : '') + msg;
+      })
+      .catch(function(err) {
+        els.btnCompleteEtAl.disabled = false;
+        els.completeEtAlStatus.textContent = '⚠️ Gagal: ' + err.message;
+      });
   });
 
   // ==================================================================================
@@ -626,6 +668,18 @@
           var headingInfo = CE.findReferencesHeading(fullText);
           var xmlArticleText = headingInfo ? fullText.slice(0, headingInfo.offset) : fullText;
           var xmlReferenceText = headingInfo ? fullText.slice(headingInfo.offset) : '';
+
+          // Before converting, check whether any source reference is already truncated with
+          // "et al." (never valid in a reference-LIST entry — see completeTruncatedAuthorsAsync)
+          // and has a DOI CrossRef can resolve. This only affects the FULL-REFORMAT rewrite
+          // below (which reference-list author text actually gets written) — `result` itself is
+          // still computed from the UNMODIFIED xmlReferenceText, because the paragraph-location
+          // step further down needs rl.original to match the actual XML text verbatim (which
+          // still literally says "et al.", regardless of what CrossRef found).
+          return CC.completeTruncatedAuthorsAsync(xmlReferenceText, sourceStyleId).then(function(completionReport) {
+          var completedByNumLabel = {};
+          completionReport.completed.forEach(function(c) { completedByNumLabel[c.numLabel] = c; });
+
           var result = CC.convert(xmlArticleText, xmlReferenceText, sourceStyleId, targetStyleId);
 
           var matches = [];
@@ -662,6 +716,12 @@
               fullReformatEligible++;
               var ref = CE.parseReferenceLine(rl.original, sourceStyleId);
               if (ref) {
+                var completion = completedByNumLabel[ref.numLabel];
+                if (completion) {
+                  // Use the CrossRef-completed author list instead of the truncated source one
+                  // — everything else about `ref` (title, journal, doi, etc.) is unaffected.
+                  ref.authors = CE.parseAuthorsForStyle(completion.after, sourceStyleId).authors;
+                }
                 var authorApa = CC._internal.renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
                 didFullRewrite = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
               }
@@ -690,7 +750,12 @@
           if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
           zip.file(docPath, newXml);
           return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-            .then(function(blob) { return { blob: blob, count: count, reordered: reorderedCount, totalRefs: result.referenceLines.length, fullReformatCount: fullReformatCount, fullReformatEligible: fullReformatEligible }; });
+            .then(function(blob) {
+              return { blob: blob, count: count, reordered: reorderedCount, totalRefs: result.referenceLines.length,
+                fullReformatCount: fullReformatCount, fullReformatEligible: fullReformatEligible,
+                completedAuthorsCount: completionReport.completed.length, completedAuthorsChecked: completionReport.checked };
+            });
+          });
         });
       })
       .then(function(res) {
@@ -699,6 +764,9 @@
         var dateStr = fileTimestamp();
         triggerDownload(res.blob, (state.originalFile.name || 'naskah').replace(/\.docx$/i, '') + '-KONVERSI-' + dateStr + '.docx');
         var msg = '✅ Berhasil — ' + res.count + ' bagian diganti di dalam file asli (format tetap terjaga).';
+        if (res.completedAuthorsChecked > 0) {
+          msg += ' ' + res.completedAuthorsCount + '/' + res.completedAuthorsChecked + ' referensi "et al." di naskah asli dilengkapi otomatis via CrossRef sebelum diformat.';
+        }
         if (res.fullReformatEligible > 0) {
           msg += ' ' + res.fullReformatCount + '/' + res.fullReformatEligible + ' entri daftar pustaka diformat penuh ke APA7 (tahun, tanda kutip, cetak miring volume, DOI).';
           if (res.fullReformatCount < res.fullReformatEligible) msg += ' Sisanya memakai format penulis-saja karena struktur paragrafnya tidak dikenali — cek manual.';
