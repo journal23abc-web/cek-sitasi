@@ -484,6 +484,27 @@
     return t ? (t.textContent || '') : '';
   }
 
+  // Removes a reference paragraph's Word auto-numbered-list binding (<w:numPr> inside its
+  // <w:pPr>), if any, WITHOUT touching its other paragraph formatting (indent/spacing/etc.).
+  // Needed whenever the TARGET style's reference list is never numbered (apa7/harvard/chicago/
+  // mla9 — every family except numeric): rewriteReferenceParagraphToApa7 (and the plain
+  // author-only swap next to it) only ever touch a paragraph's <w:r> runs, by design, so a
+  // paragraph that came from a numeric-family source and was originally bound to a numbered
+  // list (numId in numbering.xml — this is how IEEE/Vancouver templates commonly render "[1]"/
+  // "1." without that text living in any run at all, see buildDocxTextIndex's docstring) keeps
+  // showing that list's auto-generated number in Word/PDF even after its content has been fully
+  // rewritten into correct, unnumbered APA7 prose. Removing just <w:numPr> leaves any explicit
+  // hanging-indent/spacing on the same paragraph intact, since real-world reference paragraphs
+  // commonly set both (the list's own indent behavior is not relied upon), so the visual layout
+  // does not change — only the phantom leading number disappears.
+  function stripListNumbering(paraEl) {
+    if (!paraEl) return;
+    var pPr = paraEl.getElementsByTagName('w:pPr')[0];
+    if (!pPr) return;
+    var numPr = pPr.getElementsByTagName('w:numPr')[0];
+    if (numPr && numPr.parentNode) numPr.parentNode.removeChild(numPr);
+  }
+
   // Rewrites a numeric-source (IEEE/Vancouver) reference paragraph into a genuine APA7
   // bibliographic entry — not just the author-name swap the rest of this file limits itself to:
   // year moves into parentheses after the author(s), the quoted title loses its quote marks, the
@@ -594,6 +615,18 @@
     });
 
     var appliedKeys = {};
+    // Tracks, per MATCH (not per segment), whether its replacement text has already been
+    // inserted somewhere. A short citation like "[1]" almost always sits inside a single <w:t>
+    // segment, but a whole reference-LIST-line replacement is easily 150+ characters and
+    // routinely spans several segments — Word splits a paragraph's text across multiple runs
+    // for its own reasons (a spell-check boundary, a differently-styled sub-string like "doi",
+    // revision markers, ...) independent of anything meaningful in the content itself. Segments
+    // are processed here in document order (index.segments' own construction order in
+    // buildDocxTextIndex), so the first segment a given match overlaps is always its correct,
+    // single insertion point; every later segment the SAME match also overlaps must only have
+    // its overlapping slice consumed (deleted), never re-insert the replacement — otherwise the
+    // full replacement text is duplicated once per segment the original span happened to cross.
+    var insertedFor = {};
     index.segments.forEach(function(seg, i) {
       var ms = segMatches[i];
       if (ms.length === 0) return;
@@ -607,9 +640,10 @@
         var s = Math.max(m.start, seg.start) - seg.start;
         var e = Math.min(m.end, seg.end) - seg.start;
         if (s > cursor) pieces.push(fullText.slice(cursor, s));
-        pieces.push(m.text);
+        var key = m.start + ':' + m.end;
+        if (!insertedFor[key]) { pieces.push(m.text); insertedFor[key] = true; }
         cursor = e;
-        appliedKeys[m.start + ':' + m.end] = true;
+        appliedKeys[key] = true;
       });
       if (cursor < fullText.length) pieces.push(fullText.slice(cursor));
       var parent = runEl.parentNode;
@@ -757,6 +791,14 @@
           matches.forEach(function(m) { if (m.start >= lastEnd) { clean.push(m); lastEnd = m.end; } });
 
           if (clean.length === 0 && fullReformatCount === 0) return { blob: null, count: 0, reordered: 0 };
+
+          // The target style's reference list is never numbered (every family except numeric) —
+          // drop any leftover Word list-numbering binding on each reference paragraph so the
+          // exported file doesn't keep showing a stale/misleading "[N]"/"N." next to prose
+          // that's now genuinely APA7/Harvard/Chicago/MLA9-formatted. See stripListNumbering.
+          if (STYLES[targetStyleId].family !== 'numeric') {
+            refParagraphsInTargetOrder.forEach(stripListNumbering);
+          }
 
           var count = applyPlainReplacements(xmlDoc, index, clean);
           // Physically move the reference paragraphs into the new target order (harmless if

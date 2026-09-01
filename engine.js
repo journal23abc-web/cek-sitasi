@@ -929,7 +929,20 @@ var FormatDetector = {
       else if (/\d+\s*\(\s*\d+\s*\)\s*,\s*\d+[-–]\d+/.test(line)) { scores.apa7 += 2.5; }
       if (/\d{4};\d+(\(\d+\))?:\d+/.test(line)) { scores.vancouver += 4; } // Year;Vol(Issue):Pages
       if (/^[\p{Lu}\p{Lo}][\p{L}'\-]+\s+[A-Z]{1,3}[,.]/u.test(line)) { scores.vancouver += 2; } // Last FM,
-      if (/^[A-Z]\.\s*[A-Z]?\.?\s*[\p{Lu}\p{Lo}][\p{L}'\-]+,/u.test(line)) { scores.ieee += 2; } // F. M. Last,
+      if (/^[A-Z]\.\s*[A-Z]?\.?\s*[\p{Lu}\p{Lo}][\p{L}'\-]+,/u.test(line)) {
+        scores.ieee += 2; // F. M. Last,
+        // This opening shape ("initials THEN surname") is exclusive to non-inverted styles
+        // (IEEE/Vancouver) — apa7/harvard/chicago/mla9 always invert the FIRST author to
+        // "Last, F. M." (or "Last, First"), never the reverse. So this is not just neutral for
+        // those four styles, it's active counter-evidence, and needs to be scored as such —
+        // otherwise a reference list that happens to share IEEE's other surface cues
+        // ("vol.", "no.", "pp.", a quoted title) can out-score IEEE on those alone. This
+        // matters most on exactly the documents where it's needed: when Word's own numbered-
+        // list style produced the "[1]"/"1. " numbering (see parseReferenceLine's identical
+        // fallback below) rather than literal text, so neither of the two numbering-prefix
+        // signals above ever fires and the vote is otherwise left too close to call.
+        scores.apa7 -= 1; scores.harvard -= 1; scores.chicago -= 1; scores.mla9 -= 1;
+      }
     });
     // APA7 never quotes titles at all — if nothing in the whole reference list is quoted,
     // that absence is itself informative (Harvard/Chicago/MLA/IEEE all quote titles).

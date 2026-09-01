@@ -2,8 +2,9 @@
   "name": "cek-sitasi",
   "private": true,
   "scripts": {
-    "test": "npm run test:engine && npm run test:link && npm run test:converter && npm run test:docstats && npm run test:journal-rules && npm run test:scopus && npm run test:terms",
+    "test": "npm run test:engine && npm run test:link && npm run test:converter && npm run test:convert-ui && npm run test:docstats && npm run test:journal-rules && npm run test:scopus && npm run test:terms",
     "test:engine": "node engine.test.js",
+    "test:convert-ui": "node convert-ui.test.js",
     "test:link": "node link-engine.test.js",
     "test:converter": "node converter-engine.test.js",
     "test:docstats": "node docstats-engine.test.js",
