@@ -207,6 +207,31 @@ test('numbering/tab prefix runs are removed for the APA target (no bracket numbe
   assert.ok(fullText.startsWith('Author, A. (2020).'), fullText);
 });
 
+test('removeListNumbering strips <w:numPr> from a paragraph — Word\'s own native numbered-list formatting, not literal "[N] " text', () => {
+  // Reproduces a real bug: some documents number their reference list via Word's native
+  // numbered-list paragraph property instead of literal "[1] " text. That property renders its
+  // own auto-numbered bracket regardless of what the paragraph's own <w:t> runs say, so
+  // rewriteReferenceParagraphToApa7 stripping literal numbering text does nothing for it — the
+  // converted APA7 entry still visibly showed "[1] Author, A. (2020)...".
+  const xmlDoc = parseDoc('<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr>' +
+    run('Author, A. (2020). A title. Some Journal.', false) + '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  assert.strictEqual(paraEl.getElementsByTagName('w:numPr').length, 1);
+  removeListNumbering(paraEl);
+  assert.strictEqual(paraEl.getElementsByTagName('w:numPr').length, 0);
+  // paragraph's own text and other pPr content must be untouched
+  const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  assert.strictEqual(fullText, 'Author, A. (2020). A title. Some Journal.');
+});
+
+test('removeListNumbering is a safe no-op on a paragraph with no numbering at all', () => {
+  const xmlDoc = parseDoc('<w:p>' + run('Author, A. (2020). A title.', false) + '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  removeListNumbering(paraEl); // must not throw
+  const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  assert.strictEqual(fullText, 'Author, A. (2020). A title.');
+});
+
 test('unrecognized paragraph shape (no italic run) is left untouched, not crashed on', () => {
   const raw = '[1] A. Author, "A title," Some Journal, vol. 1, p. 1, 2020.';
   const ref = CE.parseReferenceLine(raw, 'ieee');

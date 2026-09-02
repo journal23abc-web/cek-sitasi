@@ -2880,6 +2880,48 @@ MultiFormatValidator.prototype.validateInstitutionalConsistency = function() {
 // ---------- DOCUMENT AUTO-SPLIT (find References/Daftar Pustaka heading) ----------
 var REFERENCES_HEADING_RE = /(\breferences?\b|reference\s+list|bibliography|works\s+cited|literature\s+cited|daftar\s+pustaka|daftar\s+referensi|referensi)/i;
 
+// Section headings that mark the true structural END of the reference list — deliberately a
+// NARROW set. This is a different, complementary signal from looksLikeGenuineReference's per-
+// line content filter just above: that filter already handles prose-shaped interspersed or
+// trailing non-reference blocks fine on its own (an "Acknowledgments" or "Conflict of Interest"
+// paragraph doesn't have a year/DOI/URL, so it's discarded regardless of position, and real
+// references AFTER it are still found — see the "multiple SEPARATE non-reference blocks" test).
+// What that content filter CANNOT distinguish is a bare-looking citation fragment that isn't
+// actually a bibliography entry — e.g. an Appendix data table whose "Author(s)" column holds
+// values like "Acosta-Enriquez et al. (2024)": that has a year, so it reads as "genuine" by
+// content alone. This list is restricted to headings that specifically tend to introduce that
+// kind of table/list content (Abbreviations, Appendix, Glossary), NOT prose back-matter sections
+// the content filter already handles — adding those here would wrongly cut the reference zone
+// off at the FIRST such heading even when genuine references still follow it further down.
+var TRAILING_SECTION_HEADING_RE = /^(abbreviations?|list\s+of\s+abbreviations|glossary|nomenclature|appendix|appendices|lampiran|daftar\s+singkatan)$/i;
+
+// Finds where the reference LIST portion of the document actually ends — the offset right
+// before a subsequent section that conventionally follows a bibliography (Abbreviations,
+// Appendix, Acknowledgments, Author Contributions, Conflict of Interest, Funding, Data
+// Availability, Supplementary Materials, etc.). Without this, "everything from the References
+// heading to the end of the document" gets wrongly treated as more reference-list entries — for
+// a numeric-family style whose reference list has no explicit "[N]" numbering of its own
+// (numberingInferred kicks in), this silently pulls in whatever text those trailing sections
+// contain too, INCLUDING data tables whose individual cells can each look enough like a
+// fragment of a reference (a bare year, a short "Surname et al. (Year)" citation-style table
+// value) to get "successfully" parsed as one — and then physically reorders all of it together
+// with the genuine references, scattering both.
+function findReferencesListEnd(fullText, searchFromOffset) {
+  var lines = fullText.slice(searchFromOffset).split('\n');
+  var offset = searchFromOffset;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var trimmed = line.trim();
+    if (trimmed.length > 0 && trimmed.length <= 60) {
+      var stripped = trimmed.replace(/^[\dIVXLC]+[.\)]\s*/i, '').replace(/[:.\s]+$/, '');
+      var wordCount = stripped.split(/\s+/).filter(Boolean).length;
+      if (TRAILING_SECTION_HEADING_RE.test(stripped) && wordCount <= 6) return offset;
+    }
+    offset += line.length + 1;
+  }
+  return fullText.length; // no trailing section found — reference list runs to the end of the text, as before
+}
+
 // Small, dependency-free Levenshtein distance — used only for typo-tolerant heading matching
 // below, on short strings (a single word), so no need for anything fancier/faster.
 function levenshteinDistance(a, b) {
@@ -3140,7 +3182,9 @@ function splitDocumentByReferences(fullText) {
   var heading = findReferencesHeading(fullText);
   if (!heading) return null;
   var article = fullText.substring(0, heading.offset).trim();
-  var afterHeading = fullText.substring(heading.offset + heading.lineLength).trim();
+  var refZoneStart = heading.offset + heading.lineLength;
+  var refZoneEnd = findReferencesListEnd(fullText, refZoneStart);
+  var afterHeading = fullText.substring(refZoneStart, refZoneEnd).trim();
   return {
     article: unwrapHardWrappedLines(article),
     references: rejoinWrappedReferenceLines(afterHeading),
@@ -3539,6 +3583,7 @@ var CitationEngine = {
   chunkLooksStructurallyComplete: chunkLooksStructurallyComplete,
   isFuzzyHeadingWord: isFuzzyHeadingWord,
   findReferencesHeading: findReferencesHeading,
+  findReferencesListEnd: findReferencesListEnd,
   YearRange: YearRange,
   detectSourceType: detectSourceType,
   findIntroductionHeading: findIntroductionHeading,

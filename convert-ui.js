@@ -479,6 +479,22 @@
     return out;
   }
 
+  // Some documents number their numeric-family (IEEE/Vancouver) reference list via Word's own
+  // native numbered-list paragraph formatting (<w:numPr>, pointing at a list definition in
+  // numbering.xml) rather than literal "[1] " text — the visible bracket number is then rendered
+  // by Word itself from that list format, and never appears in the paragraph's own <w:t> runs at
+  // all. Stripping literal "[N] " text runs (elsewhere in this file) does nothing for that case:
+  // the reformatted paragraph would still visibly show "[1] Author, A. (2020)...", "[2] ...", "
+  // because Word keeps auto-numbering it — a leftover numeric-style marker on what's now
+  // supposed to be an un-numbered APA7 entry. Removing the <w:numPr> (if present) turns that
+  // auto-numbering off for the paragraph.
+  function removeListNumbering(paraEl) {
+    var pPr = paraEl.getElementsByTagName('w:pPr')[0];
+    if (!pPr) return;
+    var numPr = pPr.getElementsByTagName('w:numPr')[0];
+    if (numPr && numPr.parentNode) numPr.parentNode.removeChild(numPr);
+  }
+
   function runText(runEl) {
     var t = runEl.getElementsByTagName('w:t')[0];
     return t ? (t.textContent || '') : '';
@@ -707,7 +723,18 @@
           // offset this produces is already correct in fullText's own coordinate space.
           var headingInfo = CE.findReferencesHeading(fullText);
           var xmlArticleText = headingInfo ? fullText.slice(0, headingInfo.offset) : fullText;
-          var xmlReferenceText = headingInfo ? fullText.slice(headingInfo.offset) : '';
+          // Bounded to where the reference list itself actually ends — NOT simply "everything to
+          // the end of the document". A reference list is very often followed by other sections
+          // (Abbreviations, Appendix, Acknowledgments, Author Contributions, ...), and for a
+          // reference list with no explicit "[N]" numbering of its own (numberingInferred), that
+          // trailing text would otherwise get parsed as MORE references too — including, in a
+          // real case that surfaced this, individual data-table cells in an Appendix that each
+          // happened to look enough like a fragment of a citation ("Author et al. (Year)", a
+          // bare year) to "successfully" parse — and then get physically reordered together with
+          // the genuine references, scattering both across the document.
+          var refZoneStart = headingInfo ? headingInfo.offset + headingInfo.lineLength : 0;
+          var refZoneEndBound = headingInfo ? CE.findReferencesListEnd(fullText, refZoneStart) : fullText.length;
+          var xmlReferenceText = headingInfo ? fullText.slice(refZoneStart, refZoneEndBound) : '';
 
           // Before converting, check whether any source reference is already truncated with
           // "et al." (never valid in a reference-LIST entry — see completeTruncatedAuthorsAsync)
@@ -748,7 +775,6 @@
           // trailing volume/pages/doi) without guessing at formatting it can't see. If a given
           // paragraph doesn't match that expected shape, it quietly falls back to the plain
           // author-only swap below rather than being left half-edited.
-          var refZoneStart = headingInfo ? headingInfo.offset : xmlArticleText.length;
           var refParagraphsInTargetOrder = [];
           var fullReformatAttempt = STYLES[sourceStyleId].family === 'numeric' && targetStyleId === 'apa7';
           var fullReformatCount = 0, fullReformatEligible = 0;
@@ -757,6 +783,9 @@
             if (idx === -1) { refParagraphsInTargetOrder.push(null); return; }
             var paraEl = paragraphAtOffset(index, idx);
             refParagraphsInTargetOrder.push(paraEl);
+            if (paraEl && STYLES[sourceStyleId].family === 'numeric' && STYLES[targetStyleId].family !== 'numeric') {
+              removeListNumbering(paraEl);
+            }
             var didFullRewrite = false;
             if (fullReformatAttempt && paraEl) {
               fullReformatEligible++;
