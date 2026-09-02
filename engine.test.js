@@ -1605,6 +1605,85 @@ test('a 3-word-surname multi-author list still parses correctly (2 extra capital
   assert.strictEqual(ref.authors.length, 2);
 });
 
+console.log('\n=== Regression: two colliding same-first-author-same-year references with DIFFERENT total author counts (e.g. "Chan, 2023" [1 author] vs "Chan & Hu, 2023" [2 authors]) — a bare single-name citation was wrongly flagged ambiguous against the 2-author reference, even though APA7 requires the 2-author reference to always be cited WITH "& Hu", making the bare form unambiguous ===');
+
+test('a bare single-name citation ("Chan, 2023") correctly resolves to the 1-author reference without being flagged ambiguous against a colliding 2-author "Chan & Hu, 2023" reference', () => {
+  const article = 'Toward educationally grounded AI policy (Chan, 2023; Moorhouse et al., 2023) educators must adapt curricula accordingly across institutions.';
+  const refs = 'Chan, C. K. Y. (2023). A comprehensive AI policy education framework. Journal, 1(1), 1-10.\n' +
+    'Chan, C. K. Y., & Hu, W. (2023). Students voices on generative AI. Journal, 2(2), 5-15.\n' +
+    'Moorhouse, B. L., Yeo, M. A., & Wan, Y. (2023). Generative AI tools. Journal, 3(3), 1-9.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title.indexOf('ambigu') !== -1).length, 0);
+});
+
+test('a two-name citation ("Chan & Hu, 2023") correctly resolves to the 2-author reference, and both colliding references end up correctly matched when the text cites both forms', () => {
+  const article = 'This is supported (Chan & Hu, 2023) and further discussed (Chan, 2023) across the reviewed literature on the topic overall.';
+  const refs = 'Chan, C. K. Y. (2023). A comprehensive AI policy education framework. Journal, 1(1), 1-10.\n' +
+    'Chan, C. K. Y., & Hu, W. (2023). Students voices on generative AI. Journal, 2(2), 5-15.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title.indexOf('ambigu') !== -1).length, 0);
+  assert.strictEqual(r.errors.filter((e) => e.title === 'Referensi tidak disitasi dalam teks').length, 0);
+});
+
+test('a genuinely ambiguous citation (same author count on BOTH colliding references, no disambiguating info at all) is still correctly flagged — the narrowing fix above only applies when author-count itself already disambiguates', () => {
+  const article = 'This finding (Smith, 2020) is important for the field and merits further discussion in subsequent studies conducted here.';
+  const refs = 'Smith, A. (2020). Title one on this topic in general terms overall. Journal, 1(1), 1-10.\n' +
+    'Smith, B. (2020). Title two on this topic in general terms overall. Journal, 2(2), 5-15.';
+  const r = validate(article, refs);
+  assert.strictEqual(r.errors.filter((e) => e.title.indexOf('ambigu') !== -1).length, 1);
+});
+
+console.log('\n=== Regression: a bare article number with NO "e"/"Article" text marker at all (e.g. "13(4), 410" — common in MDPI-style continuous article numbering) was not recognized, wrongly flagged as missing volume/pages metadata ===');
+
+test('a "vol(issue), NNN" reference with a completely bare article number (no "e" prefix, no "Article" word) is fully recognized', () => {
+  const ref = CE.parseReferenceLine('Lo, C. K. (2023). What is the impact of ChatGPT on education? A rapid review of the literature. Education Sciences, 13(4), 410. https://doi.org/10.3390/educsci13040410', 'apa7');
+  assert.strictEqual(ref.volume, '13');
+  assert.strictEqual(ref.issue, '4');
+  assert.strictEqual(ref.articleNumber, '410');
+});
+
+test('a genuine page-range reference is unaffected by the bare-article-number pattern above', () => {
+  const ref = CE.parseReferenceLine('Smith, J. (2020). Title. Journal, 12(3), 45-67.', 'apa7');
+  assert.strictEqual(ref.pages, '45-67');
+  assert.strictEqual(ref.articleNumber, null);
+});
+
+console.log('\n=== Regression: the root-cause fix lives in the SHARED resolveAuthorDateReference/authorDateCandidateScore function (used by both the validator AND link-engine.js) — verified directly here so both consumers stay correct even if either caller\'s own narrowing logic were ever changed ===');
+
+test('resolveAuthorDateReference: a bare single-name citation directly resolves to the 1-author reference (status "matched", 1 candidate), not "ambiguous" against a colliding 2-author reference sharing the same first author + year', () => {
+  const refs = [
+    { firstAuthor: 'Chan, C. K. Y', authors: ['Chan, C. K. Y'], year: '2023', authorCount: 1, isInstitutional: false },
+    { firstAuthor: 'Chan, C. K. Y.', authors: ['Chan, C. K. Y.', 'Hu, W'], year: '2023', authorCount: 2, isInstitutional: false },
+  ];
+  const decision = CE.resolveAuthorDateReference('Chan', ['Chan'], '2023', refs, 'apa7', {}, { hasEtAl: false });
+  assert.strictEqual(decision.status, 'matched');
+  assert.strictEqual(decision.candidates.length, 1);
+  assert.strictEqual(decision.candidates[0].authorCount, 1);
+});
+
+test('resolveAuthorDateReference: a two-name citation ("Chan & Hu") directly resolves to the 2-author reference specifically, not the 1-author one', () => {
+  const refs = [
+    { firstAuthor: 'Chan, C. K. Y', authors: ['Chan, C. K. Y'], year: '2023', authorCount: 1, isInstitutional: false },
+    { firstAuthor: 'Chan, C. K. Y.', authors: ['Chan, C. K. Y.', 'Hu, W'], year: '2023', authorCount: 2, isInstitutional: false },
+  ];
+  const decision = CE.resolveAuthorDateReference('Chan', ['Chan', 'Hu'], '2023', refs, 'apa7', {}, { hasEtAl: false });
+  assert.strictEqual(decision.status, 'matched');
+  assert.strictEqual(decision.candidates.length, 1);
+  assert.strictEqual(decision.candidates[0].authorCount, 2);
+});
+
+test('resolveAuthorDateReference: a bare single-name citation against a colliding 3+-author reference (where "et al." is optional/expected, not a hard requirement for matching) is NOT excluded from candidacy — the fix is scoped to exactly-2-author references only, since those have no "et al." shorthand at all', () => {
+  const refs = [
+    { firstAuthor: 'Chan, C. K. Y', authors: ['Chan, C. K. Y'], year: '2023', authorCount: 1, isInstitutional: false },
+    { firstAuthor: 'Chan, C. K. Y.', authors: ['Chan, C. K. Y.', 'Hu, W.', 'Lee, K'], year: '2023', authorCount: 3, isInstitutional: false },
+  ];
+  const decision = CE.resolveAuthorDateReference('Chan', ['Chan'], '2023', refs, 'apa7', {}, { hasEtAl: false });
+  // Tidak dituntut hasil tunggal spesifik di sini (itu ranah "bentuk sitasi salah", ranah lain)
+  // — yang penting referensi 3-penulis TIDAK didiskualifikasi total dari kandidat (candidates
+  // harus tetap menyertakannya, entah sebagai satu-satunya match atau bagian dari daftar).
+  assert.ok(decision.candidates.some((r) => r.authorCount === 3), 'referensi 3-penulis harus tetap jadi kandidat, tidak boleh didiskualifikasi total');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

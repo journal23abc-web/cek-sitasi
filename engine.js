@@ -1109,6 +1109,11 @@ function extractBibliographicFields(raw, title) {
   // without an issue number in parens. Very common APA7 article-number citation style, distinct
   // from the bare "eNNNNNN" pattern above (no literal word "Article" there).
   var volIssueArticleWord = (!volIssuePages && !volIssueArticleId) ? raw.match(/\b(\d{1,4})\s*(?:\(\s*([\w-]+)\s*\))?\s*,\s*Article\s+([A-Za-z]?\d+)\b/i) : null;
+  // "13(4), 410" — vol(issue), bare article/page number with NO "e"/"Article" marker at all —
+  // common in MDPI-style journals (e.g. "Education Sciences") using continuous article
+  // numbering. Requires the number to be immediately followed by a period/end (not more digits
+  // or a dash) so it doesn't accidentally swallow part of a genuinely different pattern.
+  var volIssueBareNum = (!volIssuePages && !volIssueArticleId && !volIssueArticleWord) ? raw.match(/\b(\d{1,4})\s*\(\s*([\w-]+)\s*\)\s*,\s*(\d{1,6})\b(?=[.,;]|\s|$)(?!\s*[-–\d])/) : null;
   if (volIssuePages) {
     result.volume = volIssuePages[1];
     result.issue = volIssuePages[2];
@@ -1121,6 +1126,10 @@ function extractBibliographicFields(raw, title) {
     result.volume = volIssueArticleWord[1];
     result.issue = volIssueArticleWord[2] || null;
     result.articleNumber = volIssueArticleWord[3];
+  } else if (volIssueBareNum) {
+    result.volume = volIssueBareNum[1];
+    result.issue = volIssueBareNum[2];
+    result.articleNumber = volIssueBareNum[3];
   } else {
     // "vol. 205, no. 3, pp. 45-67" — IEEE-ish
     var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*no\.?\s*(\d+))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
@@ -1691,7 +1700,7 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
 
       // Without "et al.", an explicitly listed multi-author sequence represents the COMPLETE
       // author list. This matters when one work's author list is a prefix of another's.
-      if (options.hasEtAl === false && citationKeys.length > 1 && citationKeys.length !== referenceKeys.length) return null;
+      if (options.hasEtAl === false && citationKeys.length !== referenceKeys.length && (citationKeys.length > 1 || referenceKeys.length <= 2)) return null;
 
       if (citationKeys.length > 1) return { score: 1.04, confidence: 1, reason: 'exact-author-prefix' };
       if (citeInitial) return { score: 1.03, confidence: 1, reason: 'exact-personal-initial' };
@@ -2191,6 +2200,19 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '"' + groupNote + (possible ? ' mungkin merujuk "' + possible.firstAuthor + ' (' + possible.year + ')"' : ' memiliki kemiripan lemah dengan daftar referensi') + ', tetapi keyakinannya hanya ' + Math.round(decision.confidence * 100) + '% sehingga tidak dipasangkan otomatis.', code: d.raw, severity: 'suggestion', matchReason: decision.reason, matchConfidence: decision.confidence });
     } else {
       var refs = resolvedRefs;
+      if (refs.length > 1) {
+        // Persempit dulu berdasar BENTUK sitasi (berapa nama yang genuinely ditulis) sebelum
+        // dianggap genuinely ambigu — sitasi tanpa "et al." SELALU mengutip SEMUA penulis
+        // (kalau <3 penulis di referensinya), jadi sitasi 1-nama polos ("Chan, 2023") cuma
+        // bisa cocok dengan referensi 1-penulis, TIDAK bisa dengan referensi 2-penulis (yang
+        // wajib dikutip "Chan & Hu, 2023" menurut APA7) — bukan ambiguitas genuine, cuma
+        // kebetulan berbagi nama belakang penulis pertama & tahun yang sama.
+        var actualCount = (d.allAuthorNames || []).length;
+        var narrowedRefs = d.part.hasEtAl ? refs : refs.filter(function(ref) {
+          return ref.authorCount >= 3 || ref.authorCount === actualCount;
+        });
+        if (narrowedRefs.length === 1) refs = narrowedRefs;
+      }
       if (refs.length > 1) {
         var guidance = ambiguousCitationGuidance(refs, d);
         self.errors.push({ title: guidance.title, description: 'Sitasi "' + d.raw + '" bisa merujuk ke ' + refs.length + ' referensi. ' + guidance.description, code: d.raw, correction: guidance.correction || undefined, severity: 'error' });
