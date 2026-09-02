@@ -504,6 +504,55 @@ testAsync('completion result can override just one reference\'s ref.authors befo
   }
 });
 
+testAsync('completion entries must be matched by raw text, not numLabel, for a numbering-INFERRED reference list (docx-export integration shape)', async () => {
+  // Reproduces a real bug: for a source reference list with no "[N]" prefixes at all (numbering
+  // inferred from list order — see numberingInferred), a reference re-parsed in ISOLATION (as
+  // the .docx export does per-reference, to build the rewrite) has no list context and its
+  // numLabel comes back null — so a numLabel-keyed lookup into the completion report silently
+  // finds nothing, and the reference keeps its truncated "et al." forever even though the
+  // completion itself succeeded. Keying by raw text instead survives the isolated re-parse.
+  const realFetch = global.fetch;
+  global.fetch = () => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({
+      status: 'ok',
+      message: { author: [{ family: 'Malik', given: 'A R' }, { family: 'Pratiwi', given: 'Y' }, { family: 'Andajani', given: 'K' }], title: ['A title'], issued: { 'date-parts': [[2023]] } },
+    }),
+  });
+  try {
+    const refs = 'J. Smith, "Another title," Journal Z, vol. 2, p. 5, 2021. doi: 10.1000/abc999.\n' +
+      'A. R. Malik et al., "A title," Journal A, vol. 1, p. 1, 2023. doi: 10.1000/xyz123.';
+    const report = await CC.completeTruncatedAuthorsAsync(refs, 'ieee');
+    assert.strictEqual(report.completed.length, 1);
+    // completeTruncatedAuthorsAsync parses the WHOLE list at once, so it benefits from the same
+    // order-inference and correctly gets numLabel=2 here — the mismatch (and the bug) only shows
+    // up once a CALLER re-parses this reference's text in ISOLATION later, below.
+    assert.strictEqual(report.completed[0].numLabel, 2);
+
+    const result = CC.convert('Studies agree [2].', refs, 'ieee', 'apa7');
+    assert.strictEqual(result.numberingInferred, true);
+    const rl = result.referenceLines.find(r => r.original.includes('Malik'));
+
+    // The BROKEN approach (numLabel-keyed) would fail here: re-parsing this reference's text
+    // ALONE (as the .docx export does, to build the per-reference rewrite) has no list context,
+    // so numLabel comes back null — mismatching the completion report's inferred 2 above, and
+    // silently missing the lookup entirely.
+    const ref = CE.parseReferenceLine(rl.original, 'ieee');
+    assert.strictEqual(ref.numLabel, null); // isolated re-parse — no list context, exactly the failure mode
+
+    // The FIXED approach (raw-keyed) correctly finds it:
+    const completedByRaw = {};
+    report.completed.forEach(c => { completedByRaw[c.raw] = c; });
+    const completion = completedByRaw[rl.original];
+    assert.ok(completion);
+    ref.authors = CE.parseAuthorsForStyle(completion.after, 'ieee').authors;
+    const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+    assert.strictEqual(authorApa, 'Malik, A. R., Pratiwi, Y., & Andajani, K.');
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
 (async () => {
   for (const { name, fn } of asyncTests) {
     try { await fn(); pass++; console.log('  PASS  ' + name); }

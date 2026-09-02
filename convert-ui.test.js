@@ -95,36 +95,6 @@ test('three citations sharing one run all get replaced, in order', () => {
   assert.strictEqual(fullText, 'Findings from (Ref1), (Ref2) and (Ref3) agree.');
 });
 
-// Regression: a real 34-reference IEEE manuscript had one reference paragraph Word had split
-// into three runs ("...art. 21, 2024, " / "doi" / ": 10.1186/s41239-024-00453-6.") — an entirely
-// ordinary, content-meaningless split (nothing dramatic like italics; just wherever Word felt
-// like breaking the run). The whole-line plain-swap replacement for that reference (used when
-// rewriteReferenceParagraphToApa7 declines a paragraph shape it doesn't recognize) spans all
-// three runs, and came out tripled in the exported .docx: once per run the single match
-// overlapped, instead of once total. Two DIFFERENT single-run citations in one run (the tests
-// above) were already fine; this is the opposite shape — ONE match spanning MULTIPLE runs.
-test('a single long match spanning THREE separate runs is inserted exactly once, not once per run', () => {
-  const xmlDoc = parseDoc(
-    '<w:p>' +
-    run('A. Yusuf, N. Pervin, and M. Román-González, "Title," Int. J. Educ. Technol. High. Educ., vol. 21, no. 1, art. 21, 2024, ', false) +
-    run('doi', false) +
-    run(': 10.1186/s41239-024-00453-6.', false) +
-    '</w:p>'
-  );
-  const index = buildDocxTextIndex(xmlDoc);
-  const original = 'A. Yusuf, N. Pervin, and M. Román-González, "Title," Int. J. Educ. Technol. High. Educ., vol. 21, no. 1, art. 21, 2024, doi: 10.1186/s41239-024-00453-6.';
-  const replacement = 'Yusuf, A., Pervin, N., & Román-González, M. (2024). Title. Int. J. Educ. Technol. High. Educ.';
-  const start = index.text.indexOf(original);
-  assert.notStrictEqual(start, -1, 'test setup: original text must be found in the synthetic paragraph');
-  const count = applyPlainReplacements(xmlDoc, index, [{ start: start, end: start + original.length, text: replacement }]);
-  assert.strictEqual(count, 1);
-  const p = xmlDoc.getElementsByTagName('w:p')[0];
-  const fullText = Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join('');
-  assert.strictEqual(fullText, replacement, 'replacement text must appear exactly once, not once per run it originally spanned');
-  const occurrences = fullText.split('Yusuf, A.').length - 1;
-  assert.strictEqual(occurrences, 1, 'got ' + occurrences + ' copies of the replacement — expected exactly 1');
-});
-
 test('replacement in one run leaves an unrelated sibling run untouched', () => {
   const xmlDoc = parseDoc('<w:p>' + run('Before ', false) + run('[1]', false) + run(' after, and ', false) + run('Journal Name', true) + '</w:p>');
   const index = buildDocxTextIndex(xmlDoc);
@@ -135,6 +105,33 @@ test('replacement in one run leaves an unrelated sibling run untouched', () => {
   const runs = Array.from(p.getElementsByTagName('w:r'));
   const italicRun = runs.find(r => r.getElementsByTagName('w:i').length > 0);
   assert.strictEqual(italicRun.getElementsByTagName('w:t')[0].textContent, 'Journal Name');
+});
+
+test('a SINGLE match spanning THREE separate runs writes its replacement text exactly once, not three times', () => {
+  // Reproduces a real, serious bug: a whole reference-list line being swapped as one span, where
+  // the original text happened to be split across 3 runs (main text, a separately-styled "doi"
+  // label, and the DOI number itself — common in real documents) — the OLD code inserted the
+  // full replacement text once PER SEGMENT the match touched, so this reference's printed text
+  // came out tripled in the actual converted document.
+  const xmlDoc = parseDoc('<w:p>' +
+    run('Before. ', false) +
+    run('A. Author, "Old title," Journal X, vol. 1, p. 1, 2020, ', false) +
+    run('doi', false) +
+    run(': 10.1/xyz.', false) +
+    run(' After.', false) +
+    '</w:p>');
+  const index = buildDocxTextIndex(xmlDoc);
+  const text = index.text;
+  const refStart = text.indexOf('A. Author');
+  const refEnd = text.indexOf('10.1/xyz.') + '10.1/xyz.'.length;
+  const replacement = 'Author, A. (2020). Old title. Journal X, 1, 1. https://doi.org/10.1/xyz';
+  applyPlainReplacements(xmlDoc, index, [{ start: refStart, end: refEnd, text: replacement }]);
+  const p = xmlDoc.getElementsByTagName('w:p')[0];
+  const fullText = Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  const occurrences = fullText.split('Author, A. (2020). Old title.').length - 1;
+  assert.strictEqual(occurrences, 1, fullText);
+  assert.ok(fullText.startsWith('Before. Author, A. (2020)'), fullText);
+  assert.ok(fullText.endsWith('https://doi.org/10.1/xyz After.'), fullText);
 });
 
 console.log('\n=== rewriteReferenceParagraphToApa7 ===');

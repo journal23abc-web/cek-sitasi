@@ -442,6 +442,14 @@
   // eligible ones substituted in — which the caller can review and then hand to convert() as
   // normal, exactly as if the source manuscript had listed the full names to begin with. Never
   // mutates anything on its own; the caller decides whether/when to use updatedReferenceText.
+  //
+  // Each completed entry carries BOTH numLabel and raw — a caller matching entries back to a
+  // reference it re-parses on its own (e.g. to feed a completed author list into a per-reference
+  // rewrite) should key off raw, not numLabel: numLabel only survives on a reference parsed as
+  // part of the FULL list (parseReferenceListDetailed can infer it from list order when the
+  // source never wrote "[N]" at all — see numberingInferred there); parsing that same reference's
+  // text again in isolation has no such list context and numLabel comes back null, silently
+  // breaking a numLabel-keyed lookup for exactly the documents that most need this feature.
   function completeTruncatedAuthorsAsync(referenceText, sourceStyleId) {
     var refs = CE.parseReferenceList(referenceText, sourceStyleId);
     var candidates = refs.filter(function(r) {
@@ -471,7 +479,7 @@
         var truncatedAuthorSeg = m[2]; // excludes any "[N] "/"N. " numbering prefix — that must
         // survive untouched, since the citation-matching system keys off it.
         updatedText = updatedText.replace(truncatedAuthorSeg, r.evalResult.replacementAuthorText);
-        completed.push({ numLabel: r.ref.numLabel, before: truncatedAuthorSeg, after: r.evalResult.replacementAuthorText, authorCount: r.evalResult.authorCount });
+        completed.push({ numLabel: r.ref.numLabel, raw: r.ref.raw, before: truncatedAuthorSeg, after: r.evalResult.replacementAuthorText, authorCount: r.evalResult.authorCount });
       });
       return { checked: candidates.length, completed: completed, skipped: skipped, updatedReferenceText: updatedText };
     });

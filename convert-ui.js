@@ -484,27 +484,6 @@
     return t ? (t.textContent || '') : '';
   }
 
-  // Removes a reference paragraph's Word auto-numbered-list binding (<w:numPr> inside its
-  // <w:pPr>), if any, WITHOUT touching its other paragraph formatting (indent/spacing/etc.).
-  // Needed whenever the TARGET style's reference list is never numbered (apa7/harvard/chicago/
-  // mla9 — every family except numeric): rewriteReferenceParagraphToApa7 (and the plain
-  // author-only swap next to it) only ever touch a paragraph's <w:r> runs, by design, so a
-  // paragraph that came from a numeric-family source and was originally bound to a numbered
-  // list (numId in numbering.xml — this is how IEEE/Vancouver templates commonly render "[1]"/
-  // "1." without that text living in any run at all, see buildDocxTextIndex's docstring) keeps
-  // showing that list's auto-generated number in Word/PDF even after its content has been fully
-  // rewritten into correct, unnumbered APA7 prose. Removing just <w:numPr> leaves any explicit
-  // hanging-indent/spacing on the same paragraph intact, since real-world reference paragraphs
-  // commonly set both (the list's own indent behavior is not relied upon), so the visual layout
-  // does not change — only the phantom leading number disappears.
-  function stripListNumbering(paraEl) {
-    if (!paraEl) return;
-    var pPr = paraEl.getElementsByTagName('w:pPr')[0];
-    if (!pPr) return;
-    var numPr = pPr.getElementsByTagName('w:numPr')[0];
-    if (numPr && numPr.parentNode) numPr.parentNode.removeChild(numPr);
-  }
-
   // Rewrites a numeric-source (IEEE/Vancouver) reference paragraph into a genuine APA7
   // bibliographic entry — not just the author-name swap the rest of this file limits itself to:
   // year moves into parentheses after the author(s), the quoted title loses its quote marks, the
@@ -606,6 +585,22 @@
   // replacement removes the original run from the tree entirely, so runEl.parentNode is null by
   // the time the second match looks for it, and it's silently skipped — while `applied` still
   // gets incremented for it regardless, since nothing here noticed the mutation didn't happen.
+  // Replaces each {start,end,text} span (in the index's coordinate space) directly in the live
+  // XML DOM, splitting runs as needed so every OTHER run/formatting stays untouched. Matches
+  // must be pre-sorted & non-overlapping (caller's responsibility).
+  //
+  // Grouped by which original segment (<w:t> node) each match falls in, and every match in a
+  // shared segment is applied together in one pass — NOT one match at a time against the same
+  // static segment list. A single run can legitimately contain more than one citation to replace
+  // (e.g. two adjacent bracket citations in one sentence sharing a paragraph-spanning run), and
+  // conversely a SINGLE match (e.g. a whole reference-list entry being swapped as one span) can
+  // legitimately spread across MULTIPLE segments — a plain reference line is often split into
+  // several runs internally (a separately-styled "doi" label is common). A match's replacement
+  // text must be written only ONCE across however many segments it touches; every segment after
+  // the first just needs its portion of the ORIGINAL text removed, not the replacement inserted
+  // again — writtenMatchKeys tracks that globally, since without it a match spanning N segments
+  // ends up with its full replacement text duplicated N times (found via a real reference whose
+  // "doi:" label sat in its own separately-styled run, tripling that reference's printed text).
   function applyPlainReplacements(xmlDoc, index, matches) {
     var segMatches = index.segments.map(function() { return []; });
     matches.forEach(function(m) {
@@ -615,18 +610,7 @@
     });
 
     var appliedKeys = {};
-    // Tracks, per MATCH (not per segment), whether its replacement text has already been
-    // inserted somewhere. A short citation like "[1]" almost always sits inside a single <w:t>
-    // segment, but a whole reference-LIST-line replacement is easily 150+ characters and
-    // routinely spans several segments — Word splits a paragraph's text across multiple runs
-    // for its own reasons (a spell-check boundary, a differently-styled sub-string like "doi",
-    // revision markers, ...) independent of anything meaningful in the content itself. Segments
-    // are processed here in document order (index.segments' own construction order in
-    // buildDocxTextIndex), so the first segment a given match overlaps is always its correct,
-    // single insertion point; every later segment the SAME match also overlaps must only have
-    // its overlapping slice consumed (deleted), never re-insert the replacement — otherwise the
-    // full replacement text is duplicated once per segment the original span happened to cross.
-    var insertedFor = {};
+    var writtenMatchKeys = {};
     index.segments.forEach(function(seg, i) {
       var ms = segMatches[i];
       if (ms.length === 0) return;
@@ -637,11 +621,14 @@
       var pieces = [];
       var cursor = 0;
       ms.forEach(function(m) {
+        var key = m.start + ':' + m.end;
         var s = Math.max(m.start, seg.start) - seg.start;
         var e = Math.min(m.end, seg.end) - seg.start;
         if (s > cursor) pieces.push(fullText.slice(cursor, s));
-        var key = m.start + ':' + m.end;
-        if (!insertedFor[key]) { pieces.push(m.text); insertedFor[key] = true; }
+        if (!writtenMatchKeys[key]) {
+          pieces.push(m.text);
+          writtenMatchKeys[key] = true;
+        }
         cursor = e;
         appliedKeys[key] = true;
       });
@@ -730,8 +717,14 @@
           // step further down needs rl.original to match the actual XML text verbatim (which
           // still literally says "et al.", regardless of what CrossRef found).
           return CC.completeTruncatedAuthorsAsync(xmlReferenceText, sourceStyleId).then(function(completionReport) {
-          var completedByNumLabel = {};
-          completionReport.completed.forEach(function(c) { completedByNumLabel[c.numLabel] = c; });
+          // Keyed by raw reference text, not numLabel — numLabel only survives when a reference
+          // is parsed as part of the full list (parseReferenceListDetailed can infer it from
+          // list order for a source that never wrote "[N]" at all); re-parsing this same
+          // reference's text in isolation below has no such context and numLabel comes back
+          // null, which would silently break a numLabel-keyed lookup for exactly the documents
+          // that most need numbering inferred in the first place.
+          var completedByRaw = {};
+          completionReport.completed.forEach(function(c) { completedByRaw[c.raw] = c; });
 
           var result = CC.convert(xmlArticleText, xmlReferenceText, sourceStyleId, targetStyleId);
 
@@ -769,7 +762,7 @@
               fullReformatEligible++;
               var ref = CE.parseReferenceLine(rl.original, sourceStyleId);
               if (ref) {
-                var completion = completedByNumLabel[ref.numLabel];
+                var completion = completedByRaw[rl.original];
                 if (completion) {
                   // Use the CrossRef-completed author list instead of the truncated source one
                   // — everything else about `ref` (title, journal, doi, etc.) is unaffected.
@@ -791,14 +784,6 @@
           matches.forEach(function(m) { if (m.start >= lastEnd) { clean.push(m); lastEnd = m.end; } });
 
           if (clean.length === 0 && fullReformatCount === 0) return { blob: null, count: 0, reordered: 0 };
-
-          // The target style's reference list is never numbered (every family except numeric) —
-          // drop any leftover Word list-numbering binding on each reference paragraph so the
-          // exported file doesn't keep showing a stale/misleading "[N]"/"N." next to prose
-          // that's now genuinely APA7/Harvard/Chicago/MLA9-formatted. See stripListNumbering.
-          if (STYLES[targetStyleId].family !== 'numeric') {
-            refParagraphsInTargetOrder.forEach(stripListNumbering);
-          }
 
           var count = applyPlainReplacements(xmlDoc, index, clean);
           // Physically move the reference paragraphs into the new target order (harmless if
