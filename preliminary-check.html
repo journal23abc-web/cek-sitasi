@@ -99,6 +99,7 @@
       <h1>🔍 Preliminary Check</h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <button id="onbHelpBtn" class="back-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
       <a href="index.html" class="back-link">🏠 Beranda</a>
       <a href="validator-copy.html" class="back-link">✏️ Validator Sitasi</a>
@@ -164,6 +165,21 @@
 <div class="report-page" id="reportPage"></div>
 
 <script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_preliminary_check',
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Preliminary Check', desc: 'Alat ini memeriksa kelengkapan naskah .docx Anda sebelum masuk proses review — struktur IMRAD, abstrak, statistik referensi, tabel & gambar — semua berjalan langsung di browser Anda. Ikuti tur singkat ini dulu.' },
+    { target: '#dropzone', title: 'Upload naskah .docx', desc: 'Seret file ke sini, atau klik untuk memilih. File tidak pernah diunggah ke server mana pun.' },
+    { target: '#processBtn', title: 'Tombol "Analisis Naskah"', desc: 'Klik untuk memulai. Hasilnya langsung muncul di bawah sebagai dashboard dan checklist.' },
+    { target: '#dashboardPanel', title: 'Dashboard Dokumen', desc: 'Ringkasan cepat: jumlah kata, jumlah referensi, tabel & gambar, dan info dasar lain dari naskah Anda.' },
+    { target: '#checklistPanel', title: 'Checklist Preliminary', desc: 'Daftar hal yang perlu dicek sebelum naskah diteruskan ke reviewer — mis. abstrak ada/tidak, struktur IMRAD lengkap, dsb.' },
+    { target: '#exportOptions', title: 'Ekspor Laporan', desc: 'Pilih bagian yang mau disertakan, lalu unduh semuanya sebagai satu laporan PDF yang rapi.' },
+  ],
+});
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="docstats-engine.js?v=2"></script>
 <script src="shared-file.js?v=1"></script>

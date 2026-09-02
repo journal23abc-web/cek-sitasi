@@ -250,6 +250,7 @@
       <h1>Upload &amp; Ekspor Laporan Sitasi</h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px;">
+      <button id="onbHelpBtn" class="back-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="langToggle" class="back-link" style="cursor:pointer;">🌐 EN</button>
       <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
       <a href="index.html" class="back-link">🏠 Beranda</a>
@@ -476,9 +477,25 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_validator_upload',
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Validator Sitasi', desc: 'Alat ini mengecek kecocokan sitasi di teks dengan daftar referensi, format penulisan, DOI, dan (opsional) status Scopus — dari file .docx yang Anda unggah. Semua berjalan langsung di browser Anda. Ikuti tur singkat ini dulu.' },
+    { target: '#dropzone', title: 'Upload naskah .docx', desc: 'Seret file ke sini, atau klik untuk memilih. File tidak pernah diunggah ke server mana pun.' },
+    { target: '#styleSelect', title: 'Gaya Sitasi', desc: 'Biarkan di "Auto-detect" kalau tidak yakin — sistem akan menebak dari pola sitasi yang ditemukan di naskah Anda.' },
+    { target: '#processBtn', title: 'Tombol "Proses & Buat Laporan"', desc: 'Klik untuk memulai pengecekan. Kalau naskahnya sulit dipisah otomatis, kolom "Isi Manual" di bawah akan muncul sebagai cadangan.' },
+    { target: '#scopusPanel', title: 'Cek Status Scopus (opsional)', desc: 'Kalau berkas Scopus Source List sudah tersedia, referensi Anda otomatis dicek keterindeksannya setiap kali Proses dijalankan — hasilnya muncul di tab "Scopus".' },
+    { target: '#journalRulesDetails', title: 'Aturan Jurnal (opsional)', desc: 'Tetapkan aturan sendiri — jumlah referensi minimal, persentase tahun terbaru, jenis sumber, dsb. — dan sistem akan menandai kalau naskah belum memenuhi.' },
+    { target: '#downloadBtn', title: 'Unduh Laporan sebagai PDF', desc: 'Setelah hasil muncul, unduh sebagai laporan PDF yang rapi untuk dibagikan ke penulis atau tim editorial.' },
+  ],
+});
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
-<script src="theme.js?v=1"></script>
 <script src="engine.js?v=14"></script>
 <script src="i18n-translate.js?v=1"></script>
 <script src="journal-rules-engine.js?v=1"></script>

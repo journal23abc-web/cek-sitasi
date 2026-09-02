@@ -94,6 +94,7 @@
       <h1>Bandingkan Revisi Naskah</h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px;">
+      <button id="onbHelpBtn" class="back-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
       <a href="index.html" class="back-link">🏠 Beranda</a>
     </div>
@@ -174,8 +175,22 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_compare_upload',
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Bandingkan Revisi Naskah', desc: 'Alat ini membandingkan dua versi naskah .docx (sebelum & sesudah revisi) dan menandai perbedaannya — semua berjalan langsung di browser Anda. Ikuti tur singkat ini dulu.' },
+    { target: '#dropzoneBefore', title: 'Versi Sebelum Revisi', desc: 'Upload naskah versi LAMA (sebelum direvisi) di sini.' },
+    { target: '#dropzoneAfter', title: 'Versi Sesudah Revisi', desc: 'Upload naskah versi BARU (hasil revisi) di sini.' },
+    { target: '#compareBtn', title: 'Tombol "Bandingkan Kedua Versi"', desc: 'Setelah kedua file siap, klik di sini. Perbedaan antara dua versi akan ditandai langsung di teksnya.' },
+    { target: '#downloadBtn', title: 'Unduh Hasil sebagai PDF', desc: 'Simpan hasil perbandingan sebagai laporan PDF untuk dibagikan ke penulis atau tim editorial.' },
+  ],
+});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="compare-engine.js?v=1"></script>
 <script src="compare.js?v=1"></script>
 </body>

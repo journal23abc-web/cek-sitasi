@@ -137,6 +137,7 @@
     </div>
     <div class="status-pill" style="gap:14px;">
       <a href="index.html" class="ghost-link">🏠 Beranda</a>
+      <button id="onbHelpBtn" class="ghost-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="themeToggle" class="ghost-link" style="cursor:pointer;">☀️ Terang</button>
       <a href="validator-copy.html" class="ghost-link">✏️ Validator Sitasi</a>
       <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot"></span>ENGINE READY</span>
@@ -315,6 +316,23 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_citation_converter',
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Konversi Sitasi Antar Gaya', desc: 'Alat ini mengubah sitasi in-text dan daftar referensi dari satu gaya (mis. IEEE) ke gaya lain (mis. APA7) — semua berjalan langsung di browser Anda. Ikuti tur singkat ini dulu.' },
+    { target: '#sourceStyleSelect', title: 'Gaya Sumber', desc: 'Gaya sitasi naskah Anda SEKARANG. Biarkan di "Auto-detect" kalau tidak yakin — sistem akan menebak sendiri dari pola sitasi yang ditemukan.' },
+    { target: '#swapBtn', title: 'Tombol Tukar', desc: 'Klik untuk menukar gaya sumber dan tujuan dengan cepat, tanpa perlu buka dua dropdown.' },
+    { target: '#targetStyleSelect', title: 'Gaya Tujuan', desc: 'Gaya sitasi yang Anda INGINKAN sebagai hasil akhir.' },
+    { target: '#tab-btn-upload', title: 'Tiga Cara Memasukkan Naskah', desc: 'Upload file .docx langsung (paling praktis, format ikut dipertahankan saat diunduh nanti), tempel seluruh naskah sekaligus, atau isi kolom Artikel & Referensi secara terpisah untuk kontrol penuh.' },
+    { target: '#btnCompleteEtAl', title: 'Lengkapi "et al." via CrossRef', desc: 'Kalau naskah sumber Anda punya referensi yang penulisnya dipotong "et al." — itu tidak valid di gaya APA7 (harus semua nama ditulis, atau elipsis khusus untuk 21+ penulis). Klik ini untuk mencari daftar penulis lengkapnya lewat DOI, otomatis.' },
+    { target: '#convertBtn', title: 'Tombol "Konversi Sitasi"', desc: 'Setelah gaya & naskah siap, klik di sini. Hasilnya langsung muncul di bawah — pratinjau, teks lengkap, dan daftar sitasi yang tidak bisa diubah otomatis (perlu dicek manual).' },
+    { target: '#btnExportDocxOriginal', title: 'Unduh .docx (format asli dipertahankan)', desc: 'Kalau Anda upload file .docx, ini cara terbaik untuk mengunduh hasilnya — heading, font, dan tata letak asli naskah Anda tidak berubah, cuma sitasi & daftar referensinya yang diformat ulang.' },
+  ],
+});
+</script>
 <script src="engine.js?v=14"></script>
 <script src="converter-engine.js?v=1"></script>
 <script src="shared-file.js?v=1"></script>

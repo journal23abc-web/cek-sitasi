@@ -118,6 +118,7 @@
       <h1>Cek Konsistensi Istilah</h1>
     </div>
     <div style="display:flex;align-items:center;gap:10px;">
+      <button id="onbHelpBtn" class="back-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="themeToggle" class="back-link" style="cursor:pointer;">☀️ Terang</button>
       <a href="index.html" class="back-link">🏠 Beranda</a>
     </div>
@@ -213,9 +214,24 @@
   </div>
 </div>
 
+<script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_term_consistency',
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Cek Konsistensi Istilah', desc: 'Alat ini mendeteksi istilah teknis yang ditulis dengan cara berbeda-beda di naskah yang sama (mis. "pembelajaran mesin" vs "machine learning" vs "ML" tanpa definisi) — semua berjalan langsung di browser Anda. Ikuti tur singkat ini dulu.' },
+    { target: '#modeUploadBtn', title: 'Tempel Teks atau Upload .docx', desc: 'Tempel teks lebih cepat. Upload .docx memungkinkan sistem membaca ISI TABEL juga (mis. nilai loading/CR/AVE) sebagai bukti tambahan — tidak bisa lewat tempel teks biasa.' },
+    { target: '#dropzone', title: 'Upload naskah .docx', desc: 'Seret file ke sini, atau klik untuk memilih.' },
+    { target: '#processBtn', title: 'Tombol "Cek Konsistensi Istilah"', desc: 'Klik untuk memulai. Kalau naskah Anda punya istilah khusus bidang, isi dulu "Kamus khusus naskah" di atas supaya tidak salah ditandai sebagai inkonsisten.' },
+    { target: '#inconsistentDetails', title: 'Hasil: Istilah Tidak Konsisten', desc: 'Daftar istilah yang ditulis dengan variasi berbeda-beda di naskah Anda, lengkap dengan lokasi tiap kemunculannya.' },
+    { target: '#exportBtn', title: 'Unduh Hasil (JSON)', desc: 'Simpan hasil pengecekan sebagai file JSON untuk dibuka lagi nanti atau dibagikan ke tim.' },
+  ],
+});
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
-<script src="theme.js?v=1"></script>
 <script src="term-consistency-engine.js?v=3"></script>
 <script src="shared-file.js?v=1"></script>
 <script src="term-consistency.js?v=3"></script>

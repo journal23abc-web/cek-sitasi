@@ -88,6 +88,7 @@
       <h1>Journal Tools</h1>
     </div>
     <div class="status-pill" style="gap:14px;">
+      <button id="onbHelpBtn" class="ghost-link" style="cursor:pointer;">❓ Cara Pakai</button>
       <button id="themeToggle" class="ghost-link" style="cursor:pointer;">☀️ Terang</button>
       <span style="display:inline-flex;align-items:center;gap:8px;"><span class="dot"></span>ENGINE READY</span>
     </div>
@@ -224,6 +225,19 @@
 </div>
 
 <script src="theme.js?v=1"></script>
+<script src="onboarding.js?v=1"></script>
+<script>
+initOnboarding({
+  key: 'onb_seen_index',
+  helpBtnId: 'onbHelpBtn',
+  steps: [
+    { icon: '👋', title: 'Selamat datang di Journal Tools', desc: 'Kumpulan alat untuk membantu proses editorial jurnal — semuanya berjalan langsung di browser Anda, tanpa server. Ikuti tur singkat ini dulu.' },
+    { target: '#hubDropzone', title: 'Upload sekali, pakai di semua tool', desc: 'Upload naskah .docx di sini SEKALI SAJA — begitu ter-upload, tinggal klik tool mana pun di bawah (yang bertanda "📤 Upload") dan naskahnya langsung terpakai, tidak perlu upload ulang tiap ganti fitur.' },
+    { target: 'a[href="citation-converter.html"]', title: 'Pilih Tool yang Anda Butuhkan', desc: 'Tiap kartu adalah tool yang berbeda — mis. Konversi Sitasi Antar Gaya ini mengubah gaya sitasi dari satu format ke format lain. Klik kartunya untuk membuka.' },
+    { target: 'a[href="validator-copy.html"]', title: 'Tidak mau upload file?', desc: 'Beberapa tool juga tersedia dalam versi "tempel teks" — cocok kalau Anda cuma punya potongan naskah, bukan file .docx utuh.' },
+  ],
+});
+</script>
 <script src="shared-file.js?v=1"></script>
 <script>
 (function () {
