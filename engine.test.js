@@ -1650,6 +1650,90 @@ test('a genuine numeric-style reference whose quoted title happens to mention a 
   assert.strictEqual(ref.year, '2021');
 });
 
+console.log('\n=== Bracket-RANGE in-text citations ("[4]-[7]", the actual IEEE convention) (general/spec-driven) ===');
+
+test('"[4]-[7]" (two separate bracket tokens joined by a dash — the real IEEE convention, not "[4-7]" in one bracket) expands to include the numbers in between', () => {
+  const numeric = CE.extractNumericCitations('as mentioned earlier [4]-[7] and also [9]');
+  const withFour = numeric.find(c => c.numbers.indexOf(4) !== -1);
+  assert.deepStrictEqual(withFour.numbers, [4, 5, 6, 7]);
+  assert.strictEqual(withFour.raw, '[4]-[7]');
+});
+
+test('an en-dash "[4]–[7]" (not a plain hyphen) is recognized the same way', () => {
+  const numeric = CE.extractNumericCitations('as mentioned earlier [4]\u2013[7]');
+  assert.deepStrictEqual(numeric[0].numbers, [4, 5, 6, 7]);
+});
+
+test('a DESCENDING pair "[7]-[4]" is left as two independent citations, not force-merged backwards', () => {
+  const numeric = CE.extractNumericCitations('see [7]-[4] for details');
+  assert.strictEqual(numeric.length, 2);
+  assert.deepStrictEqual(numeric[0].numbers, [7]);
+  assert.deepStrictEqual(numeric[1].numbers, [4]);
+});
+
+test('ordinary comma-separated citations "[2], [9]" are unaffected by the range-merge logic', () => {
+  const numeric = CE.extractNumericCitations('as shown [2], [9]');
+  assert.strictEqual(numeric.length, 2);
+  assert.deepStrictEqual(numeric[0].numbers, [2]);
+  assert.deepStrictEqual(numeric[1].numbers, [9]);
+});
+
+test('convert() renders a bracket range as one combined APA7 parenthetical citation, not two glued together by a bare hyphen', () => {
+  const CC = require('./converter-engine.js');
+  const article = 'This has been shown before [4]-[7].';
+  const refs = [1,2,3,4,5,6,7,8].map(n => '[' + n + '] A' + n + '. Author, "Title ' + n + ',\" Journal, vol. 1, p. 1, 2020.').join('\n');
+  const result = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.strictEqual(result.changedCount, 1);
+  assert.ok(result.convertedArticle.includes('(A4. Author, 2020; A5. Author, 2020; A6. Author, 2020; A7. Author, 2020)'), result.convertedArticle);
+});
+
+console.log('\n=== Volume/issue/pages/article-number extracted independently, robust to text in between (general, spec-driven) ===');
+// These are the IEEE Reference Guide's OWN official examples (journals.ieeeauthorcenter.ieee.org),
+// not reactive fixes to one specific document — the point is that the same field-extraction
+// logic should hold up generally across the format's real variety, not just whatever a single
+// test file happened to contain.
+
+test('a month name between pages and year does not disturb volume/pages extraction', () => {
+  const raw = '[1] M. M. Chiampi and L. L. Zilberti, "Induction of electric field in human bodies," IEEE Trans. Biomed. Eng., vol. 58, pp. 2787-2793, Oct. 2011, doi: 10.1109/TBME.2011.2158315.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.volume, '58');
+  assert.strictEqual(ref.pages, '2787-2793');
+  assert.strictEqual(ref.year, '2011');
+});
+
+test('IEEE\'s own "Art. no. NNN" wording (distinct from APA7\'s "Article NNN") is read as an article number, with volume/issue still found around the intervening month+year', () => {
+  const raw = '[1] R. Fardel, M. Nagel, F. Nuesch, T. Lippert, and A. Wokaun, "Fabrication of organic light emitting diode pixels," Appl. Phys. Lett., vol. 91, no. 6, Aug. 2007, Art. no. 061103.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.volume, '91');
+  assert.strictEqual(ref.issue, '6');
+  assert.strictEqual(ref.articleNumber, '061103');
+  assert.strictEqual(ref.pages, null);
+});
+
+test('"Art. no." does not get its own "no." mistaken for a standalone issue number when there is no real issue', () => {
+  const raw = '[1] S. Preu, G. H. D\u00f6hler, S. Malzer, L. J. Wang, and A. C. Gossard, "Tunable continuous-wave terahertz photo mixer sources," J. Appl. Phys., vol. 109, Mar. 2011, Art. no. 061301.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.volume, '109');
+  assert.strictEqual(ref.issue, null); // must NOT pick up "061301" from "Art. no. 061301" as an issue
+  assert.strictEqual(ref.articleNumber, '061301');
+});
+
+test('a conference paper with no volume of its own still gets its page range, even with a month+year and a parenthetical acronym in between', () => {
+  const raw = '[1] J. Zhao, G. Sun, G. H. Loh, and Y. Xie, "Energy-efficient GPU design," in Proc. ACM/IEEE Int. Symp. Low Power Electron. Design (ISLPED), Jul. 2012, pp. 403-408, doi: 10.1145/2333660.2333752.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.pages, '403-408');
+  assert.strictEqual(ref.year, '2012');
+});
+
+test('IEEE\'s own two-months-for-one-issue convention ("Jul./Aug. 2020") does not break year or volume/issue/pages extraction', () => {
+  const raw = '[1] A. Author, "A title," J. Lightw. Technol., vol. 29, no. 4, pp. 439-448, Jul./Aug. 2020.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.volume, '29');
+  assert.strictEqual(ref.issue, '4');
+  assert.strictEqual(ref.pages, '439-448');
+  assert.strictEqual(ref.year, '2020');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

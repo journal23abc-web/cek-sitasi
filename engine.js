@@ -133,6 +133,29 @@ function extractNumericCitations(text) {
     while ((m = parenRegex.exec(text)) !== null) {
       results.push({ raw: m[0], numbers: expandNumberRange(m[1]), position: m.index, form: 'paren' });
     }
+  } else {
+    // IEEE's own actual convention for a citation RANGE is two separate bracket tokens joined by
+    // a dash — "[4]–[7]" — not a single bracket with the range written inside it ("[4-7]", which
+    // the regex above already handles but which real documents essentially never use). Without
+    // this, "[4]–[7]" parses as two INDEPENDENT single-number citations, "[4]" and "[7]" — [5]
+    // and [6] never get expanded in, silently vanish from citedness tracking, and the two
+    // brackets end up rendered as two separate parenthetical citations glued together by a bare
+    // hyphen ("(Smith, 2020)-(Jones, 2023)") instead of one combined citation covering all four.
+    for (var i = results.length - 1; i > 0; i--) {
+      var prev = results[i - 1], cur = results[i];
+      if (prev.form !== 'bracket' || cur.form !== 'bracket') continue;
+      var between = text.slice(prev.position + prev.raw.length, cur.position);
+      if (!/^\s*[-–]\s*$/.test(between)) continue;
+      if (prev.numbers.length !== 1 || cur.numbers.length !== 1) continue;
+      var a = prev.numbers[0], b = cur.numbers[0];
+      if (b <= a) continue; // not an ascending range — leave both as independent citations
+      var merged = [];
+      for (var n = a; n <= b; n++) merged.push(n);
+      results.splice(i - 1, 2, {
+        raw: text.slice(prev.position, cur.position + cur.raw.length),
+        numbers: merged, position: prev.position, form: 'bracket',
+      });
+    }
   }
   return results;
 }
@@ -1122,18 +1145,29 @@ function extractBibliographicFields(raw, title) {
     result.issue = volIssueArticleWord[2] || null;
     result.articleNumber = volIssueArticleWord[3];
   } else {
-    // "vol. 205, no. 3, pp. 45-67" — IEEE-ish. Issue accepts a combined range too ("nos. 1-2",
-    // common for journals that merge two issues into one physical number) — not just a single
-    // "no. N" — since without it, the WHOLE match fails (the optional issue group simply
-    // doesn't match "nos. 1-2" at all) and volume/pages are lost along with it, not just the
-    // issue number.
-    var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*nos?\.?\s*(\d+(?:[-–]\d+)?))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
-    if (ieeeStyle) {
-      result.volume = ieeeStyle[1];
-      if (ieeeStyle[2]) result.issue = ieeeStyle[2];
-      result.pages = ieeeStyle[4] ? (ieeeStyle[3] + '-' + ieeeStyle[4]) : ieeeStyle[3];
-    } else {
-      // "205, 107590" or "14, e0251234" — volume, article-number (no issue, single-article-ID journals)
+    // IEEE-keyword style ("vol.", "no."/"nos.", "pp.", "Art. no.") — extracted as INDEPENDENT
+    // fields, each via its own keyword anchor, rather than one combined pattern that must match
+    // the whole "vol...no...pp..." sequence contiguously. IEEE references routinely put a month
+    // name (and, per the IEEE Reference Guide, sometimes two months joined by a slash, e.g.
+    // "Jul./Aug. 2020") between the issue/pages and the year, and use their OWN "Art. no. NNN"
+    // wording for an article number — distinct from APA7's "Article NNN" above — so a single
+    // contiguous pattern silently loses volume/issue/pages together the moment ANY of that
+    // extra text sits in the middle, not just whichever field it's nearest to.
+    var volM = raw.match(/\bvol\.?\s*(\d+)/i);
+    var artM = raw.match(/\b(?:art(?:icle)?\.?\s*no\.?|article)\s*([A-Za-z]?[\w-]*\d[\w-]*)/i);
+    // Search for the issue marker in the text with any "Art. no. NNN" span already removed —
+    // otherwise the literal "no." inside "Art. no." (IEEE's own article-number wording) gets
+    // mistaken for a standalone issue-number marker ("no. 6") when there's no real issue at all.
+    var rawForIssue = artM ? (raw.slice(0, artM.index) + raw.slice(artM.index + artM[0].length)) : raw;
+    var issueM = rawForIssue.match(/\bnos?\.?\s*(\d+(?:\s*[-–]\s*\d+)?)/i);
+    var pagesM = raw.match(/\bpp?\.\s*(\d+)(?:\s*[-–]\s*(\d+))?/i);
+    if (volM) result.volume = volM[1];
+    if (issueM) result.issue = issueM[1].replace(/\s*[-–]\s*/, '-');
+    if (pagesM) result.pages = pagesM[2] ? (pagesM[1] + '-' + pagesM[2]) : pagesM[1];
+    if (!pagesM && artM) result.articleNumber = artM[1];
+    if (!volM && !pagesM && !artM) {
+      // "205, 107590" or "14, e0251234" — bare volume + article-number/page, no "vol."/"pp."
+      // keyword at all (a plain-numbered style, e.g. an embedded non-IEEE-keyword reference).
       var volArticle = raw.match(/,\s*(\d{1,4})\s*,\s*(?:pp?\.\s*)?(e?\d{2,})(?:[-–](\d+))?\b/);
       if (volArticle) {
         result.volume = volArticle[1];
@@ -1144,6 +1178,13 @@ function extractBibliographicFields(raw, title) {
         } else {
           result.pages = volArticle[2];
         }
+      } else {
+        // Last resort: a bare page range with no volume/issue/article-number keyword findable
+        // at all (a conference paper cited with no volume of its own, e.g. "in Proc. ..., Jul.
+        // 2012, pp. 403-408" — nothing above anchors on "pp." alone without also requiring
+        // "vol." to have matched first).
+        var barePages = raw.match(/\bpp?\.\s*(\d+)(?:\s*[-–]\s*(\d+))?/i);
+        if (barePages) result.pages = barePages[2] ? (barePages[1] + '-' + barePages[2]) : barePages[1];
       }
     }
   }
