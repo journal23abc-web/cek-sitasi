@@ -1197,7 +1197,14 @@ function extractBibliographicFields(raw, title) {
       var afterTitle = raw.slice(titleIdx + title.length).replace(/^[.,"\u201d'\s]+/, '');
       var endMatch = afterTitle.match(/,\s*\d|\bvol\.?\s*\d|https?:\/\/|\bdoi\b\s*:/i);
       var journalCandidate = endMatch ? afterTitle.slice(0, endMatch.index) : afterTitle.split(/[.,]/)[0];
-      journalCandidate = journalCandidate.replace(/[.,;:\s]+$/, '').trim();
+      // Trailing comma/semicolon/colon/whitespace are always just separator artifacts from
+      // wherever the boundary match above landed — safe to strip unconditionally. A trailing
+      // PERIOD is different: IEEE abbreviates most journal names ("Educ.", "Intell.", "Trans."),
+      // and that period is part of the name itself, not decorative punctuation, so stripping it
+      // unconditionally silently corrupts every abbreviated journal name ending in one (e.g.
+      // "Comput. Educ.: Artif. Intell." was coming out as "...Artif. Intell", missing exactly
+      // the character a reader needs to tell it's an abbreviation at all).
+      journalCandidate = journalCandidate.replace(/[,;:\s]+$/, '').trim();
       if (journalCandidate && journalCandidate.length > 2 && journalCandidate.length < 150) {
         result.journal = journalCandidate;
       }
@@ -1294,7 +1301,15 @@ function looksLikeEmbeddedAuthorDateReference(rest) {
   // signal on its own — a 70+ author list can easily push the "(YYYY)" well past any fixed
   // character bound, but the ellipsis marker itself only ever appears inside an author list.
   var hasApaEllipsis = /(?:\.\s*\.\s*\.|…)\s*[\p{Lu}]/u.test(beforeYear);
-  if (yearParenM.index > 120 && !hasApaEllipsis) return false; // too far in to plausibly BE the author segment's end
+  // A FULLY spelled-out (not ellipsis-truncated) author list can be just as long once it has
+  // enough authors (10+ is common, and still under APA7's 20-author cutoff for spelling
+  // everyone out) — with no ellipsis marker to bypass the length check at all. But APA7's
+  // reference-list convention ALWAYS joins the final author with "& Surname, Initial." (or
+  // "and Surname, Initial." in some author-date styles) regardless of how many authors came
+  // before it — checking for THAT immediately before the year is just as position-independent
+  // a signal as the ellipsis marker, for the un-truncated case the ellipsis check doesn't cover.
+  var hasApaFinalAuthorJoin = /(?:,\s*)?(?:&|\band\b)\s+[\p{Lu}\p{Lo}][\p{L}'\u2019\-]+(?:\s+[\p{Lu}\p{Lo}][\p{L}'\u2019\-]+)?,?\s*(?:[\p{Lu}]\.\s*){1,3}$/u.test(beforeYear.trim());
+  if (yearParenM.index > 120 && !hasApaEllipsis && !hasApaFinalAuthorJoin) return false; // too far in to plausibly BE the author segment's end
   return true;
 }
 

@@ -450,9 +450,19 @@
       });
   }
 
-  function makeRun(xmlDoc, templateRunEl, textValue) {
+  function makeRun(xmlDoc, templateRunEl, textValue, forceItalic) {
     if (!textValue) return null;
     var newRun = templateRunEl.cloneNode(true);
+    // The template run is being reused PURELY for its formatting (rPr) — any actual content it
+    // carried (a tab, a line break, a manual hyphen) must NOT be replicated into every new run
+    // built from it, or a single hanging-indent tab meant to appear once, right at the start of
+    // the paragraph, ends up duplicated into the middle of the text on every rebuilt run instead
+    // (visually this can throw off far more than spacing — a stray mid-run tab character can
+    // make a renderer jump to a tab stop and badly distort that run's apparent size/position).
+    ['w:tab', 'w:br', 'w:cr', 'w:noBreakHyphen'].forEach(function(tag) {
+      var els = newRun.getElementsByTagName(tag);
+      for (var k = els.length - 1; k >= 0; k--) els[k].parentNode.removeChild(els[k]);
+    });
     var tNodes = newRun.getElementsByTagName('w:t');
     var tNode = tNodes[0];
     if (!tNode) {
@@ -463,6 +473,24 @@
     }
     tNode.textContent = textValue;
     tNode.setAttributeNS(XML_NS, 'xml:space', 'preserve');
+    // forceItalic (true/false) explicitly sets italic regardless of the template run's own
+    // formatting — needed because a new italic span (the journal name, or the volume number)
+    // often has to be MANUFACTURED from a template run that was never italic in the source at
+    // all (see rewriteReferenceParagraphToApa7: many real reference lists never italicize the
+    // journal name to begin with, so there's no existing italic run to clone formatting from).
+    if (forceItalic === true || forceItalic === false) {
+      var rPr = newRun.getElementsByTagName('w:rPr')[0];
+      if (!rPr) {
+        rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
+        newRun.insertBefore(rPr, newRun.firstChild);
+      }
+      var existingI = rPr.getElementsByTagName('w:i')[0];
+      if (forceItalic && !existingI) {
+        rPr.appendChild(xmlDoc.createElementNS(W_NS, 'w:i'));
+      } else if (!forceItalic && existingI) {
+        existingI.parentNode.removeChild(existingI);
+      }
+    }
     return newRun;
   }
 
@@ -504,24 +532,97 @@
   // bibliographic entry — not just the author-name swap the rest of this file limits itself to:
   // year moves into parentheses after the author(s), the quoted title loses its quote marks, the
   // volume number becomes italic (newly — it never was in IEEE), and "vol./no./pp./doi:" become
-  // "16(1), 39" / "https://doi.org/...". This only fires for a specific, verified paragraph shape
-  // — author/quoted-title text, one CONTIGUOUS block of one-or-more italicized runs (the journal
-  // or book title — Word frequently fragments this into several adjacent italic runs on its own,
-  // e.g. splitting at each abbreviation period in "Comput. Educ.: Artif. Intell.", which is still
-  // ONE italic title, just spread across several runs), then trailing vol/issue/pages/doi (or,
-  // for a book, "City: Publisher, Year") text. Anything else — no italic run at all, or italic
-  // runs with a non-italic run sandwiched between them (genuinely ambiguous, not just fragmented)
-  // — is left exactly as the older author-only rewrite already produces it, rather than risk
-  // corrupting a structure this hasn't verified.
+  // "16(1), 39" / "https://doi.org/...".
+  //
+  // Tries a TEXT-based approach first: ref.journal / ref.title were already extracted as plain
+  // strings by parseReferenceLine, independent of any formatting, so locating that exact text
+  // within the paragraph's own content tells us exactly where the italic span belongs — a NEW
+  // italic run can simply be manufactured there (see makeRun's forceItalic) even when nothing in
+  // the source was ever italicized at all. This matters because relying on the source ALREADY
+  // having correct italic formatting (the only approach this used to have) leaves the entire
+  // reference list stuck on the safe author-only fallback for any document that doesn't
+  // italicize journal names in the first place — which real manuscripts do fairly often,
+  // independent of anything else being wrong with them.
+  //
+  // Falls back to the OLDER, italic-run-based detection (rewriteReferenceParagraphViaItalicRuns)
+  // if the text-based lookup can't find ref.journal/ref.title verbatim in the paragraph (rare —
+  // e.g. a subtle whitespace or entity difference) — that method still helps on paragraphs that
+  // DO have reliable italic formatting to go on. If neither works, the caller's own safe
+  // author-only swap is what ends up in the output, same as before either of these existed.
   function rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa) {
-    var allOriginalRuns = directChildRuns(paraEl); // numbering + tab + content, in document order
+    var allOriginalRuns = directChildRuns(paraEl);
     var runs = allOriginalRuns.slice();
     function isNumberingOrEmptyRun(r) {
       var txt = runText(r);
       return /^\s*\[?\d+\]?\.?\s*$/.test(txt);
     }
     while (runs.length && isNumberingOrEmptyRun(runs[0])) runs.shift();
+    if (runs.length === 0) return false;
 
+    var templateRun = runs[0];
+    var fullContentText = runs.map(runText).join('');
+    var isBook = !/["“]/.test(ref.raw);
+    var newNodes = null;
+
+    if (isBook) {
+      var bookTitle = ref.title;
+      var titleIdx = bookTitle ? fullContentText.indexOf(bookTitle) : -1;
+      if (titleIdx !== -1) {
+        var beforeTitle = fullContentText.slice(0, titleIdx);
+        var afterTitleText = fullContentText.slice(titleIdx + bookTitle.length);
+        var publisher = CC._internal.deriveBookPublisher(afterTitleText, ref.year);
+        var bookDoiPart = ref.doi ? ('https://doi.org/' + ref.doi) : null;
+        newNodes = [
+          makeRun(xmlDoc, templateRun, authorApa + ' (' + (ref.year || 'n.d.') + '). ', false),
+          makeRun(xmlDoc, templateRun, bookTitle, true),
+          makeRun(xmlDoc, templateRun, '. ' + publisher + (bookDoiPart ? '. ' + bookDoiPart : '.'), false),
+        ];
+      }
+    } else {
+      var journalRaw = ref.journal ? ref.journal.replace(/^in\s+/i, '') : null;
+      var journalIdx = journalRaw ? fullContentText.indexOf(journalRaw) : -1;
+      if (journalIdx !== -1) {
+        var afterJournalText = fullContentText.slice(journalIdx + journalRaw.length);
+        var tail = CC._internal.parseNumericReferenceTail(afterJournalText);
+        var doiPart = tail.doi ? ('https://doi.org/' + tail.doi) : null;
+        if (!tail.volume && tail.pages) {
+          newNodes = [
+            makeRun(xmlDoc, templateRun, authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. In ', false),
+            makeRun(xmlDoc, templateRun, journalRaw, true),
+            makeRun(xmlDoc, templateRun, ' (pp. ' + tail.pages + ')' + (doiPart ? '. ' + doiPart : '.'), false),
+          ];
+        } else {
+          newNodes = [
+            makeRun(xmlDoc, templateRun, authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. ', false),
+            makeRun(xmlDoc, templateRun, journalRaw, true),
+          ];
+          if (tail.volume) {
+            var afterVol = '';
+            if (tail.issue) afterVol += '(' + tail.issue + ')';
+            if (tail.pages) afterVol += ', ' + tail.pages;
+            afterVol += doiPart ? '. ' + doiPart : '.';
+            newNodes.push(makeRun(xmlDoc, templateRun, ', ', false));
+            newNodes.push(makeRun(xmlDoc, templateRun, tail.volume, true));
+            newNodes.push(makeRun(xmlDoc, templateRun, afterVol, false));
+          } else {
+            newNodes.push(makeRun(xmlDoc, templateRun, doiPart ? '. ' + doiPart : '.', false));
+          }
+        }
+      }
+    }
+
+    if (!newNodes) return rewriteReferenceParagraphViaItalicRuns(xmlDoc, paraEl, ref, authorApa, allOriginalRuns, runs, isNumberingOrEmptyRun);
+
+    var anchor = allOriginalRuns[0];
+    newNodes.forEach(function(n) { if (n) paraEl.insertBefore(n, anchor); });
+    allOriginalRuns.forEach(function(r) { if (r.parentNode) r.parentNode.removeChild(r); });
+    return true;
+  }
+
+  // The ORIGINAL approach, kept as a fallback: locates the italic span by looking at which runs
+  // the SOURCE document already italicized, rather than by matching ref.journal/ref.title text.
+  // Only reached when the text-based lookup above can't find that text verbatim (see caller).
+  function rewriteReferenceParagraphViaItalicRuns(xmlDoc, paraEl, ref, authorApa, allOriginalRuns, runs, isNumberingOrEmptyRun) {
     var italicIndices = [];
     for (var i = 0; i < runs.length; i++) {
       if (runIsItalic(runs[i]) && runText(runs[i]).trim()) italicIndices.push(i);
@@ -588,19 +689,6 @@
     return true;
   }
 
-  // Replaces each {start,end,text} span (in the index's coordinate space) directly in the live
-  // XML DOM, splitting runs as needed so every OTHER run/formatting stays untouched. Matches
-  // must be pre-sorted & non-overlapping (caller's responsibility).
-  //
-  // Grouped by which original segment (<w:t> node) each match falls in, and every match in a
-  // shared segment is applied together in one pass — NOT one match at a time against the same
-  // static segment list. A single run can legitimately contain more than one citation to replace
-  // (e.g. two adjacent bracket citations in one sentence, "Chan and Hu [7]" right after another
-  // citation earlier in the same paragraph-spanning run). Processing matches one at a time
-  // against that shared node breaks every match after the first: splicing the first one's
-  // replacement removes the original run from the tree entirely, so runEl.parentNode is null by
-  // the time the second match looks for it, and it's silently skipped — while `applied` still
-  // gets incremented for it regardless, since nothing here noticed the mutation didn't happen.
   // Replaces each {start,end,text} span (in the index's coordinate space) directly in the live
   // XML DOM, splitting runs as needed so every OTHER run/formatting stays untouched. Matches
   // must be pre-sorted & non-overlapping (caller's responsibility).
