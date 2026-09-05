@@ -553,6 +553,46 @@ testAsync('completion entries must be matched by raw text, not numLabel, for a n
   }
 });
 
+console.log('\n=== An embedded reference already in the target style is passed through, not reconstructed (real-world regression) ===');
+
+test('renderAuthorListForReference correctly reads an already-inverted "Last, F. M." author using the reference\'s OWN styleId, not the passed sourceStyleId', () => {
+  // Reproduces a real bug: canonicalAuthorsFromRef/surnamesFromRef used to always interpret
+  // ref.authors with the CALLER-passed sourceStyleId (the list's declared style), even when a
+  // single reference had already been detected as written in a different one (see
+  // looksLikeEmbeddedAuthorDateReference in engine.js). "Hallgren, K. A" read as IEEE
+  // non-inverted came out as "A, H. K." — the surname read off the wrong end of the name.
+  const ref = CE.parseReferenceLine('[22] Hallgren, K. A. (2012). A title. Journal X, 8(1), 23-34. https://doi.org/10.1/x', 'ieee');
+  assert.strictEqual(ref.styleId, 'apa7');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  assert.strictEqual(authorApa, 'Hallgren, K. A.');
+});
+
+test('convert() passes an already-target-styled reference through nearly verbatim, including the year that the usual boundary logic would otherwise drop', () => {
+  // Reproduces a real bug: the normal author-render + boundary/connector/rest reconstruction
+  // assumes a fixed shape and locates "rest" starting at the TITLE — which for this reference
+  // (year sits between author and title, APA-style) silently dropped "(2012)." entirely.
+  const article = 'This was studied by Hallgren [22].';
+  const refs = '[22] Hallgren, K. A. (2012). Computing inter-rater reliability for observational data: An overview and tutorial. Tutorials in Quantitative Methods for Psychology, 8(1), 23-34. https://doi.org/10.20982/tqmp.08.1.p023';
+  const result = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.strictEqual(result.changedCount, 1);
+  assert.ok(result.convertedArticle.includes('Hallgren (2012)'), result.convertedArticle);
+  assert.strictEqual(result.referenceLines[0].line,
+    'Hallgren, K. A. (2012). Computing inter-rater reliability for observational data: An overview and tutorial. Tutorials in Quantitative Methods for Psychology, 8(1), 23–34. https://doi.org/10.20982/tqmp.08.1.p023'.replace('–', '-'));
+});
+
+test('a source reference already using APA7\'s OWN 21+-author ellipsis renders with the ellipsis form, not a spurious "&" glued onto it', () => {
+  // Reproduces a real bug: the ellipsis marker ended up glued onto the final author as one
+  // fragment (". . . Moher, D") during splitting, making the apparent total count exactly one
+  // short of the n>20 threshold — so it fell through to plain "&"-joining instead:
+  // "..., McDonald, S., & . . . Moher, D." instead of "..., McDonald, S., . . . Moher, D."
+  const raw = '[58] Page, M. J., McKenzie, J. E., Bossuyt, P. M., Boutron, I., Hoffmann, T. C., Mulrow, C. D., Shamseer, L., Tetzlaff, J. M., Akl, E. A., Brennan, S. E., Chou, R., Glanville, J., Grimshaw, J. M., Hróbjartsson, A., Lalu, M. M., Li, T., Loder, E. W., Mayo-Wilson, E., McDonald, S., . . . Moher, D. (2021). The PRISMA 2020 statement: An updated guideline for reporting systematic reviews. BMJ, 372, Article n71. https://doi.org/10.1136/bmj.n71';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  assert.ok(authorApa.endsWith(', . . . Moher, D.'), authorApa);
+  assert.ok(!authorApa.includes('&'), authorApa);
+  assert.ok(authorApa.startsWith('Page, M. J., McKenzie, J. E.'), authorApa);
+});
+
 (async () => {
   for (const { name, fn } of asyncTests) {
     try { await fn(); pass++; console.log('  PASS  ' + name); }

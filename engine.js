@@ -1109,11 +1109,6 @@ function extractBibliographicFields(raw, title) {
   // without an issue number in parens. Very common APA7 article-number citation style, distinct
   // from the bare "eNNNNNN" pattern above (no literal word "Article" there).
   var volIssueArticleWord = (!volIssuePages && !volIssueArticleId) ? raw.match(/\b(\d{1,4})\s*(?:\(\s*([\w-]+)\s*\))?\s*,\s*Article\s+([A-Za-z]?\d+)\b/i) : null;
-  // "13(4), 410" — vol(issue), bare article/page number with NO "e"/"Article" marker at all —
-  // common in MDPI-style journals (e.g. "Education Sciences") using continuous article
-  // numbering. Requires the number to be immediately followed by a period/end (not more digits
-  // or a dash) so it doesn't accidentally swallow part of a genuinely different pattern.
-  var volIssueBareNum = (!volIssuePages && !volIssueArticleId && !volIssueArticleWord) ? raw.match(/\b(\d{1,4})\s*\(\s*([\w-]+)\s*\)\s*,\s*(\d{1,6})\b(?=[.,;]|\s|$)(?!\s*[-–\d])/) : null;
   if (volIssuePages) {
     result.volume = volIssuePages[1];
     result.issue = volIssuePages[2];
@@ -1126,13 +1121,13 @@ function extractBibliographicFields(raw, title) {
     result.volume = volIssueArticleWord[1];
     result.issue = volIssueArticleWord[2] || null;
     result.articleNumber = volIssueArticleWord[3];
-  } else if (volIssueBareNum) {
-    result.volume = volIssueBareNum[1];
-    result.issue = volIssueBareNum[2];
-    result.articleNumber = volIssueBareNum[3];
   } else {
-    // "vol. 205, no. 3, pp. 45-67" — IEEE-ish
-    var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*no\.?\s*(\d+))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
+    // "vol. 205, no. 3, pp. 45-67" — IEEE-ish. Issue accepts a combined range too ("nos. 1-2",
+    // common for journals that merge two issues into one physical number) — not just a single
+    // "no. N" — since without it, the WHOLE match fails (the optional issue group simply
+    // doesn't match "nos. 1-2" at all) and volume/pages are lost along with it, not just the
+    // issue number.
+    var ieeeStyle = raw.match(/\bvol\.?\s*(\d+)\s*(?:,\s*nos?\.?\s*(\d+(?:[-–]\d+)?))?\s*,\s*pp?\.\s*(\d+)(?:[-–](\d+))?/i);
     if (ieeeStyle) {
       result.volume = ieeeStyle[1];
       if (ieeeStyle[2]) result.issue = ieeeStyle[2];
@@ -1195,6 +1190,73 @@ function extractBibliographicFields(raw, title) {
   return result;
 }
 
+// Parses a reference line using author-date/author-page conventions (year in/without parens,
+// unquoted or quoted title, inverted authors) — shared by the family-appropriate branch of
+// parseReferenceLine below AND by the numeric branch's embedded-reference detection (see
+// looksLikeEmbeddedAuthorDateReference), since a reference already written in a different style
+// than the rest of the list needs to be read with THAT style's rules, not the declared one.
+function parseAuthorDateOrPageStyleLine(raw, style, styleId) {
+  var yearMatch, authorSeg2, year2, titleStartIdx;
+  if (style.yearInParens === false) {
+    yearMatch = raw.match(/^(.*?)\.\s*(\d{4}[a-z]?)\.\s/);
+    if (yearMatch) { authorSeg2 = yearMatch[1]; year2 = yearMatch[2]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
+  } else {
+    yearMatch = raw.match(/\((\d{4}[a-z]?|n\.d\.)\)/);
+    if (yearMatch) { authorSeg2 = raw.substring(0, yearMatch.index).trim(); year2 = yearMatch[1]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
+  }
+  if (!yearMatch) {
+    var dq2 = raw.match(/["“]/);
+    if (dq2) {
+      authorSeg2 = raw.substring(0, dq2.index).replace(/\.\s*$/, '');
+      var ym = raw.match(/,\s*(19|20)\d{2}\b/) || raw.match(/\b(19|20)\d{2}\b/);
+      year2 = ym ? ym[0].replace(/^,\s*/, '') : null;
+      titleStartIdx = dq2.index;
+    } else {
+      return null;
+    }
+  }
+  if (!authorSeg2) return null;
+  var parsedAuthors2 = parseAuthorsForStyle(authorSeg2, styleId);
+  var title2 = extractTitle(raw, style, titleStartIdx);
+  var doi2 = extractDOI(raw);
+  var bibFields2 = extractBibliographicFields(raw, title2);
+  return {
+    raw: raw, authors: parsedAuthors2.authors, isInstitutional: parsedAuthors2.isInstitutional,
+    authorCount: parsedAuthors2.authors.length, firstAuthor: parsedAuthors2.authors[0] || null,
+    year: year2, title: title2, journal: bibFields2.journal, issn: bibFields2.issn, eissn: bibFields2.eissn,
+    volume: bibFields2.volume, issue: bibFields2.issue, pages: bibFields2.pages, articleNumber: bibFields2.articleNumber, publisher: bibFields2.publisher,
+    doi: doi2, styleId: styleId, sourceType: detectSourceType(raw),
+  };
+}
+
+// Detects a reference line that's already written in author-date shape (unquoted title, "(YYYY)"
+// right after the author) even though the surrounding list is declared as a numeric style like
+// IEEE — a real, recurring pattern: a manuscript's reference list assembled from mixed sources,
+// where one or two entries got pasted in straight from an APA-formatted source and never
+// reformatted. Parsing "Hallgren, K. A. (2012). Computing inter-rater reliability..." with
+// IEEE's own rules (which expect a QUOTED title, and the year at the very END, not right after
+// the author) mangles it badly — the first period inside "K. A." gets mistaken for the end of
+// the "author segment", producing an author of "Hallgren, K" and a title of "A".
+//
+// The signal is a plain (unquoted) "(YYYY)" appearing early — i.e. positioned where an author
+// list would plausibly end, not deep inside a title or journal name where a parenthetical year
+// mention could coincidentally appear. Deliberately requires EARLY position specifically to
+// avoid misfiring on a genuine numeric-style reference whose quoted title happens to mention a
+// year in parentheses.
+function looksLikeEmbeddedAuthorDateReference(rest) {
+  var yearParenM = rest.match(/\((?:19|20)\d{2}[a-z]?\)/);
+  if (!yearParenM) return false;
+  var qIdx = rest.search(/["“]/);
+  if (qIdx > -1 && qIdx < yearParenM.index) return false; // a quote arrives first — this "(YYYY)" is inside/after the title, not right after the author
+  var beforeYear = rest.slice(0, yearParenM.index);
+  // APA7's own 21+-author ellipsis ("Name, F., . . . Last, F.") is a strong, position-independent
+  // signal on its own — a 70+ author list can easily push the "(YYYY)" well past any fixed
+  // character bound, but the ellipsis marker itself only ever appears inside an author list.
+  var hasApaEllipsis = /(?:\.\s*\.\s*\.|…)\s*[\p{Lu}]/u.test(beforeYear);
+  if (yearParenM.index > 120 && !hasApaEllipsis) return false; // too far in to plausibly BE the author segment's end
+  return true;
+}
+
 function parseReferenceLine(line, styleId) {
   var style = STYLES[styleId];
   var raw = line.trim();
@@ -1208,6 +1270,14 @@ function parseReferenceLine(line, styleId) {
     } else if (style.refPrefix === 'dot') {
       var dm = raw.match(/^(\d+)\.\s*(.*)$/);
       if (dm) { numLabel = parseInt(dm[1], 10); rest = dm[2]; }
+    }
+    if (looksLikeEmbeddedAuthorDateReference(rest)) {
+      var embedded = parseAuthorDateOrPageStyleLine(rest, STYLES.apa7, 'apa7');
+      if (embedded) {
+        embedded.raw = raw;
+        embedded.numLabel = numLabel;
+        return embedded;
+      }
     }
     var authorSeg;
     var titleStartOverride = null;
@@ -1257,37 +1327,7 @@ function parseReferenceLine(line, styleId) {
     };
   }
 
-  var yearMatch, authorSeg2, year2, titleStartIdx;
-  if (style.yearInParens === false) {
-    yearMatch = raw.match(/^(.*?)\.\s*(\d{4}[a-z]?)\.\s/);
-    if (yearMatch) { authorSeg2 = yearMatch[1]; year2 = yearMatch[2]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
-  } else {
-    yearMatch = raw.match(/\((\d{4}[a-z]?|n\.d\.)\)/);
-    if (yearMatch) { authorSeg2 = raw.substring(0, yearMatch.index).trim(); year2 = yearMatch[1]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
-  }
-  if (!yearMatch) {
-    var dq2 = raw.match(/["“]/);
-    if (dq2) {
-      authorSeg2 = raw.substring(0, dq2.index).replace(/\.\s*$/, '');
-      var ym = raw.match(/,\s*(19|20)\d{2}\b/) || raw.match(/\b(19|20)\d{2}\b/);
-      year2 = ym ? ym[0].replace(/^,\s*/, '') : null;
-      titleStartIdx = dq2.index;
-    } else {
-      return null;
-    }
-  }
-  if (!authorSeg2) return null;
-  var parsedAuthors2 = parseAuthorsForStyle(authorSeg2, styleId);
-  var title2 = extractTitle(raw, style, titleStartIdx);
-  var doi2 = extractDOI(raw);
-  var bibFields2 = extractBibliographicFields(raw, title2);
-  return {
-    raw: raw, authors: parsedAuthors2.authors, isInstitutional: parsedAuthors2.isInstitutional,
-    authorCount: parsedAuthors2.authors.length, firstAuthor: parsedAuthors2.authors[0] || null,
-    year: year2, title: title2, journal: bibFields2.journal, issn: bibFields2.issn, eissn: bibFields2.eissn,
-    volume: bibFields2.volume, issue: bibFields2.issue, pages: bibFields2.pages, articleNumber: bibFields2.articleNumber, publisher: bibFields2.publisher,
-    doi: doi2, styleId: styleId, sourceType: detectSourceType(raw),
-  };
+  return parseAuthorDateOrPageStyleLine(raw, style, styleId);
 }
 
 function parseReferenceListDetailed(referenceText, styleId) {
@@ -1700,7 +1740,7 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
 
       // Without "et al.", an explicitly listed multi-author sequence represents the COMPLETE
       // author list. This matters when one work's author list is a prefix of another's.
-      if (options.hasEtAl === false && citationKeys.length !== referenceKeys.length && (citationKeys.length > 1 || referenceKeys.length <= 2)) return null;
+      if (options.hasEtAl === false && citationKeys.length > 1 && citationKeys.length !== referenceKeys.length) return null;
 
       if (citationKeys.length > 1) return { score: 1.04, confidence: 1, reason: 'exact-author-prefix' };
       if (citeInitial) return { score: 1.03, confidence: 1, reason: 'exact-personal-initial' };
@@ -2200,19 +2240,6 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
       self.suggestions.push({ title: 'Kemungkinan ketidakcocokan', description: 'Sitasi "' + d.raw + '"' + groupNote + (possible ? ' mungkin merujuk "' + possible.firstAuthor + ' (' + possible.year + ')"' : ' memiliki kemiripan lemah dengan daftar referensi') + ', tetapi keyakinannya hanya ' + Math.round(decision.confidence * 100) + '% sehingga tidak dipasangkan otomatis.', code: d.raw, severity: 'suggestion', matchReason: decision.reason, matchConfidence: decision.confidence });
     } else {
       var refs = resolvedRefs;
-      if (refs.length > 1) {
-        // Persempit dulu berdasar BENTUK sitasi (berapa nama yang genuinely ditulis) sebelum
-        // dianggap genuinely ambigu — sitasi tanpa "et al." SELALU mengutip SEMUA penulis
-        // (kalau <3 penulis di referensinya), jadi sitasi 1-nama polos ("Chan, 2023") cuma
-        // bisa cocok dengan referensi 1-penulis, TIDAK bisa dengan referensi 2-penulis (yang
-        // wajib dikutip "Chan & Hu, 2023" menurut APA7) — bukan ambiguitas genuine, cuma
-        // kebetulan berbagi nama belakang penulis pertama & tahun yang sama.
-        var actualCount = (d.allAuthorNames || []).length;
-        var narrowedRefs = d.part.hasEtAl ? refs : refs.filter(function(ref) {
-          return ref.authorCount >= 3 || ref.authorCount === actualCount;
-        });
-        if (narrowedRefs.length === 1) refs = narrowedRefs;
-      }
       if (refs.length > 1) {
         var guidance = ambiguousCitationGuidance(refs, d);
         self.errors.push({ title: guidance.title, description: 'Sitasi "' + d.raw + '" bisa merujuk ke ' + refs.length + ' referensi. ' + guidance.description, code: d.raw, correction: guidance.correction || undefined, severity: 'error' });

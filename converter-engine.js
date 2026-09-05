@@ -140,15 +140,24 @@
 
   function canonicalAuthorsFromRef(ref, sourceStyleId) {
     if (ref.isInstitutional) return [{ last: ref.firstAuthor, given: [], institutional: true }];
+    // Use THIS reference's own actual format (ref.styleId) when known, not necessarily the
+    // style declared for the whole list — a single entry can be written in a different style
+    // than its neighbors (see looksLikeEmbeddedAuthorDateReference in engine.js: an "et al."
+    // list occasionally has one reference pasted straight from an APA-formatted source, still
+    // inverted "Last, F. M." rather than the list's own declared non-inverted "F. M. Last").
+    // Interpreting ref.authors with the wrong convention reads the surname off the wrong end of
+    // the name entirely.
+    var effectiveStyleId = ref.styleId || sourceStyleId;
     return (ref.authors || []).filter(function(a) { return !isEtAlFragment(a); }).map(function(a) {
-      var sp = splitAuthorFragment(a, sourceStyleId);
+      var sp = splitAuthorFragment(a, effectiveStyleId);
       return { last: sp.last, given: sp.given, institutional: false };
     });
   }
 
   function surnamesFromRef(ref, sourceStyleId) {
     if (ref.isInstitutional) return [ref.firstAuthor];
-    return (ref.authors || []).filter(function(a) { return !isEtAlFragment(a); }).map(function(a) { return CE.surnameOf(a, sourceStyleId); });
+    var effectiveStyleId = ref.styleId || sourceStyleId;
+    return (ref.authors || []).filter(function(a) { return !isEtAlFragment(a); }).map(function(a) { return CE.surnameOf(a, effectiveStyleId); });
   }
 
   // ---------- IN-TEXT RENDERING ----------
@@ -754,8 +763,8 @@
       orderedRefs = matchedOrder.concat(uncitedRefs);
     } else {
       orderedRefs = v.references.slice().sort(function(a, b) {
-        var ka = (a.isInstitutional ? v.resolveInstitutionalName(a.firstAuthor) : CE.surnameOf(a.firstAuthor, sourceStyleId)) || '';
-        var kb = (b.isInstitutional ? v.resolveInstitutionalName(b.firstAuthor) : CE.surnameOf(b.firstAuthor, sourceStyleId)) || '';
+        var ka = (a.isInstitutional ? v.resolveInstitutionalName(a.firstAuthor) : CE.surnameOf(a.firstAuthor, a.styleId || sourceStyleId)) || '';
+        var kb = (b.isInstitutional ? v.resolveInstitutionalName(b.firstAuthor) : CE.surnameOf(b.firstAuthor, b.styleId || sourceStyleId)) || '';
         ka = ka.toLowerCase().replace(/^(the|a|an)\s+/i, ''); kb = kb.toLowerCase().replace(/^(the|a|an)\s+/i, '');
         if (ka < kb) return -1; if (ka > kb) return 1;
         return (a.year || '').localeCompare(b.year || '');
@@ -763,17 +772,36 @@
     }
 
     var referenceLines = orderedRefs.map(function(ref, idx) {
-      var authorPart = renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
-      var trimmedRaw = ref.raw.trim();
-      var boundary = findAuthorSegBoundary(ref, sourceStyleId);
-      var rest, connector;
-      if (boundary != null) {
-        connector = connectorBeforeBoundary(trimmedRaw, boundary);
-        rest = trimmedRaw.substring(boundary);
-      } else { rest = ''; connector = ''; }
-      var prefix = '';
-      if (targetStyle.family === 'numeric') prefix = targetStyle.refPrefix === 'bracket' ? '[' + (idx + 1) + '] ' : (idx + 1) + '. ';
-      var line = prefix + authorPart + connector + rest;
+      var line;
+      if (ref.styleId && ref.styleId === targetStyleId && ref.styleId !== sourceStyleId) {
+        // Already written in exactly the target style (see looksLikeEmbeddedAuthorDateReference
+        // in engine.js — a reference pasted straight from a different-styled source into an
+        // otherwise-uniform list). There's nothing to convert, and the usual author-render +
+        // boundary/connector/rest reconstruction below doesn't fit it: that model assumes a
+        // fixed shape (quoted-title-then-journal, or book-title-then-publisher) that this entry
+        // — already in the TARGET shape — doesn't share with the rest of a numeric list. Just
+        // strip the numeric list's own "[N] "/"N. " prefix, which doesn't belong in the target
+        // style either way, and leave everything else exactly as written.
+        var strippedRaw = ref.raw.trim();
+        if (sourceStyle.family === 'numeric') {
+          strippedRaw = sourceStyle.refPrefix === 'bracket'
+            ? strippedRaw.replace(/^\[\d+\]\s*/, '')
+            : strippedRaw.replace(/^\d+\.\s*/, '');
+        }
+        line = strippedRaw;
+      } else {
+        var authorPart = renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
+        var trimmedRaw = ref.raw.trim();
+        var boundary = findAuthorSegBoundary(ref, sourceStyleId);
+        var rest, connector;
+        if (boundary != null) {
+          connector = connectorBeforeBoundary(trimmedRaw, boundary);
+          rest = trimmedRaw.substring(boundary);
+        } else { rest = ''; connector = ''; }
+        var prefix = '';
+        if (targetStyle.family === 'numeric') prefix = targetStyle.refPrefix === 'bracket' ? '[' + (idx + 1) + '] ' : (idx + 1) + '. ';
+        line = prefix + authorPart + connector + rest;
+      }
       return { line: line, wasCited: matchedOrder.indexOf(ref) !== -1, numLabel: targetStyle.family === 'numeric' ? idx + 1 : null, original: ref.raw };
     });
 
@@ -794,13 +822,35 @@
     };
   }
 
+  // The source's own 21+-author ellipsis marker ("Name, F., . . . Last, F.") can end up glued
+  // onto the final author as one fragment during splitting (". . . Moher, D"), which makes the
+  // apparent total author count look like exactly one ordinary author too few to cross the
+  // n>20 threshold below — silently missing the ellipsis-rendering branch and instead joining
+  // every name, including the ellipsis-glued one, with a plain "&": "..., McDonald, S., &
+  // . . . Moher, D." This strips the ellipsis prefix from that fragment first and remembers
+  // that the list was ALREADY ellipsis-truncated at the source, regardless of the resulting
+  // apparent count.
+  function isEllipsisTruncatedFragment(s) {
+    return /^(?:\.\s*\.\s*\.|…)\s*\S/u.test((s || '').trim());
+  }
+
   function renderAuthorListForReference(ref, sourceStyleId, targetStyleId) {
     var style = STYLES[targetStyleId];
     if (ref.isInstitutional) return ref.firstAuthor;
-    var canon = canonicalAuthorsFromRef(ref, sourceStyleId);
+
+    var rawAuthors = ref.authors || [];
+    var sourceHasEllipsis = rawAuthors.length > 0 && isEllipsisTruncatedFragment(rawAuthors[rawAuthors.length - 1]);
+    var effectiveRef = ref;
+    if (sourceHasEllipsis) {
+      var cleanedLast = rawAuthors[rawAuthors.length - 1].replace(/^(?:\.\s*\.\s*\.|…)\s*/u, '');
+      effectiveRef = { authors: rawAuthors.slice(0, -1).concat([cleanedLast]), isInstitutional: ref.isInstitutional, firstAuthor: ref.firstAuthor, styleId: ref.styleId };
+    }
+
+    var canon = canonicalAuthorsFromRef(effectiveRef, sourceStyleId);
     var n = canon.length;
-    if (targetStyleId === 'apa7' && n > 20) { // APA7: first 19, ellipsis, last author
-      var head = canon.slice(0, 19).map(function(a, i) { return renderAuthorForStyle(a.last, a.given, targetStyleId, i === 0 ? 'first' : 'other'); });
+    if ((targetStyleId === 'apa7' && n > 20) || (sourceHasEllipsis && n >= 2)) { // APA7: first 19, ellipsis, last author
+      var headCount = Math.min(n - 1, 19);
+      var head = canon.slice(0, headCount).map(function(a, i) { return renderAuthorForStyle(a.last, a.given, targetStyleId, i === 0 ? 'first' : 'other'); });
       var lastA = canon[n - 1];
       return head.join(', ') + ', . . . ' + renderAuthorForStyle(lastA.last, lastA.given, targetStyleId, 'other');
     }
