@@ -1734,6 +1734,62 @@ test('IEEE\'s own two-months-for-one-issue convention ("Jul./Aug. 2020") does no
   assert.strictEqual(ref.year, '2020');
 });
 
+test('a LONG (10+ author) fully-spelled-out embedded APA reference (no ellipsis, so the year sits well past a short fixed position) is still detected via the "& Last, Initial" ending right before it', () => {
+  // Reproduces a real bug found comparing an actual converted document: a 14-author reference,
+  // already fully spelled out in APA7 form (no ellipsis needed — 14 is under the 20-author
+  // cutoff), pushes "(2017)" well past a short fixed character position with no ellipsis marker
+  // to bypass that check the way the 70+ author Dwivedi/Kasneci cases could. The embedded-style
+  // detection was missing this case entirely, so it fell through to IEEE's own (wrong) rules,
+  // reading "Boden, M." as if "M" were a whole separate author: "Boden, & M, Bryson, J., ...".
+  const raw = '[43] Boden, M., Bryson, J., Caldwell, D., Dautenhahn, K., Edwards, L., Kember, S., Newman, P., Parry, V., Pegman, G., Rodden, T., Sorrell, T., Wallis, M., Whitby, B., & Winfield, A. (2017). Principles of robotics: Regulating robots in the real world. Connection Science, 29(2), 124-129. https://doi.org/10.1080/09540091.2016.1271400';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.styleId, 'apa7');
+  assert.strictEqual(ref.firstAuthor, 'Boden, M.');
+  const CC = require('./converter-engine.js');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  assert.ok(authorApa.startsWith('Boden, M., Bryson, J.,'), authorApa);
+  assert.ok(authorApa.endsWith('& Winfield, A.'), authorApa);
+  assert.ok(!authorApa.includes('& M,'), authorApa); // the actual observed corruption
+});
+
+console.log('\n=== Book chapter with a named editor (real-world regression) ===');
+
+test('IEEE\'s "in <Book>, <Editor>, Ed. <City>: <Publisher>, <Year>, pp. X-Y" shape is recognized and split into book title / editor / publisher', () => {
+  // Reproduces a real bug: the general journal-name heuristic stops at the first ", <digit>" it
+  // finds, which lands on the YEAR near the end of the whole editor/city/publisher clause — not
+  // on the book title — so the "journal" candidate ballooned to include the editor, city, AND
+  // publisher, failed a sane-length check, and came back null. Nothing about the reference could
+  // be reformatted as a result, even though every individual field (author, chapter title, year,
+  // pages, DOI) was otherwise being extracted just fine.
+  const raw = '[35] J. O. Odia and A. A. Odia, "Accessibility to higher education in Nigeria: The pains, problems, and prospects," in Accessibility and Diversity in Education: Breakthroughs in Research and Practice, Information Resources Management Association, Ed. Hershey, PA, USA: IGI Global, 2020, pp. 80-100, doi: 10.4018/978-1-7998-1213-5.ch005';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.isBookChapter, true);
+  assert.strictEqual(ref.journal, 'Accessibility and Diversity in Education: Breakthroughs in Research and Practice');
+  assert.strictEqual(ref.editor, 'Information Resources Management Association');
+  assert.strictEqual(ref.editorIsPlural, false);
+  assert.strictEqual(ref.publisher, 'IGI Global');
+  assert.strictEqual(ref.pages, '80-100');
+  assert.strictEqual(ref.sourceType, 'book-chapter');
+});
+
+test('"Eds." (plural) is distinguished from "Ed." (singular) for the editor suffix', () => {
+  const raw = '[1] A. Author, "A chapter title," in A Book Title, X. Editor and Y. Editor, Eds. City, ST, USA: Publisher, 2020, pp. 1-10.';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  assert.strictEqual(ref.isBookChapter, true);
+  assert.strictEqual(ref.editorIsPlural, true);
+  assert.strictEqual(ref.editor, 'X. Editor and Y. Editor');
+});
+
+test('convert() renders the book chapter in full, correct APA7 form end to end', () => {
+  const CC = require('./converter-engine.js');
+  const article = 'This is discussed by Odia and Odia [35].';
+  const refs = '[35] J. O. Odia and A. A. Odia, "Accessibility to higher education in Nigeria: The pains, problems, and prospects," in Accessibility and Diversity in Education: Breakthroughs in Research and Practice, Information Resources Management Association, Ed. Hershey, PA, USA: IGI Global, 2020, pp. 80-100, doi: 10.4018/978-1-7998-1213-5.ch005';
+  const result = CC.convert(article, refs, 'ieee', 'apa7');
+  assert.strictEqual(result.changedCount, 1);
+  assert.strictEqual(result.referenceLines[0].line,
+    'Odia, J. O., & Odia, A. A. (2020). Accessibility to higher education in Nigeria: The pains, problems, and prospects. In Information Resources Management Association (Ed.), Accessibility and Diversity in Education: Breakthroughs in Research and Practice (pp. 80-100). IGI Global. https://doi.org/10.4018/978-1-7998-1213-5.ch005');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

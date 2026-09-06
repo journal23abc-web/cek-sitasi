@@ -1111,8 +1111,26 @@ function extractTitle(line, style, authorEndIdx) {
 // source matching (e.g. against a journal/document index) where title+author+year alone isn't
 // enough to disambiguate. Best-effort: any field it can't confidently find is left null rather
 // than guessed.
+// Pulls a publisher name out of a "City, State, Country: Publisher, Year[, pp. X-Y][, doi: ...]."
+// tail — shared by extractBibliographicFields' book-chapter detection below and by the
+// docx-export full-reformat path (converter-engine.js calls this as CE.deriveBookPublisher).
+function deriveBookPublisher(tailText, year) {
+  var s = (tailText || '').trim().replace(/^\.\s*/, '');
+  // Strip trailing clauses from the RIGHT inward — DOI, then a page range (a book CHAPTER'S
+  // tail reports pages after the year, "Publisher, Year, pp. X-Y", which a plain book's tail
+  // never has), then the year — so whatever's left after the last colon is the publisher alone,
+  // regardless of which of these trailing clauses this particular reference actually has.
+  s = s.replace(/,?\s*doi:\s*\S+\.?\s*$/i, '').replace(/,?\s*https?:\/\/(?:dx\.)?doi\.org\/\S+\.?\s*$/i, '');
+  s = s.replace(/,?\s*pp?\.\s*\d+(?:\s*[-–]\s*\d+)?\.?\s*$/i, '');
+  if (year) s = s.replace(new RegExp(',?\\s*' + String(year).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.?\\s*$'), '');
+  else s = s.replace(/,?\s*(?:19|20)\d{2}[a-z]?\.?\s*$/i, ''); // no specific year passed — strip a bare trailing year regardless
+  var lastColon = s.lastIndexOf(':');
+  if (lastColon !== -1) s = s.slice(lastColon + 1);
+  return s.replace(/^[\s.,;:]+|[\s.,;:]+$/g, '');
+}
+
 function extractBibliographicFields(raw, title) {
-  var result = { journal: null, issn: null, eissn: null, volume: null, issue: null, pages: null, articleNumber: null, publisher: null };
+  var result = { journal: null, issn: null, eissn: null, volume: null, issue: null, pages: null, articleNumber: null, publisher: null, editor: null, editorIsPlural: false, isBookChapter: false };
   if (!raw) return result;
 
   var issnM = raw.match(/\be-?issn\b\s*[:.]?\s*(\d{4}-\d{3}[\dXx])/i);
@@ -1195,18 +1213,38 @@ function extractBibliographicFields(raw, title) {
     var titleIdx = raw.indexOf(title);
     if (titleIdx !== -1) {
       var afterTitle = raw.slice(titleIdx + title.length).replace(/^[.,"\u201d'\s]+/, '');
-      var endMatch = afterTitle.match(/,\s*\d|\bvol\.?\s*\d|https?:\/\/|\bdoi\b\s*:/i);
-      var journalCandidate = endMatch ? afterTitle.slice(0, endMatch.index) : afterTitle.split(/[.,]/)[0];
-      // Trailing comma/semicolon/colon/whitespace are always just separator artifacts from
-      // wherever the boundary match above landed — safe to strip unconditionally. A trailing
-      // PERIOD is different: IEEE abbreviates most journal names ("Educ.", "Intell.", "Trans."),
-      // and that period is part of the name itself, not decorative punctuation, so stripping it
-      // unconditionally silently corrupts every abbreviated journal name ending in one (e.g.
-      // "Comput. Educ.: Artif. Intell." was coming out as "...Artif. Intell", missing exactly
-      // the character a reader needs to tell it's an abbreviation at all).
-      journalCandidate = journalCandidate.replace(/[,;:\s]+$/, '').trim();
-      if (journalCandidate && journalCandidate.length > 2 && journalCandidate.length < 150) {
-        result.journal = journalCandidate;
+
+      // Book chapter with a named editor — IEEE's own shape (per the official IEEE Reference
+      // Guide): "in <Book Title>, <Editor name(s)>, Ed[s]. <City>, <State>, <Country>:
+      // <Publisher>, <year>, pp. <X>-<Y>." The general journal-name heuristic below can't handle
+      // this: its boundary search stops at the first ", <digit>" it finds, which lands on the
+      // YEAR near the very end of the whole editor/city/publisher clause — not on the book title
+      // — so the "journal" candidate balloons to include the editor, city, and publisher too,
+      // fails the sane-length check, and the whole reference is left with no italicizable span
+      // found at all. ", Ed." or ", Eds." is a distinctive, unambiguous anchor: splitting on it
+      // separates the book title (before) from the editor (right before it) cleanly, and
+      // deriveBookPublisher already knows how to pull the publisher out of what's left after.
+      var chapterM = afterTitle.match(/^in\s+([\s\S]+?),\s*([\s\S]+?),\s*(Eds?)\.\s*([\s\S]*)$/i);
+      if (chapterM) {
+        result.isBookChapter = true;
+        result.journal = chapterM[1].trim();
+        result.editor = chapterM[2].trim();
+        result.editorIsPlural = /^eds$/i.test(chapterM[3]);
+        result.publisher = deriveBookPublisher(chapterM[4], null);
+      } else {
+        var endMatch = afterTitle.match(/,\s*\d|\bvol\.?\s*\d|https?:\/\/|\bdoi\b\s*:/i);
+        var journalCandidate = endMatch ? afterTitle.slice(0, endMatch.index) : afterTitle.split(/[.,]/)[0];
+        // Trailing comma/semicolon/colon/whitespace are always just separator artifacts from
+        // wherever the boundary match above landed — safe to strip unconditionally. A trailing
+        // PERIOD is different: IEEE abbreviates most journal names ("Educ.", "Intell.", "Trans."),
+        // and that period is part of the name itself, not decorative punctuation, so stripping it
+        // unconditionally silently corrupts every abbreviated journal name ending in one (e.g.
+        // "Comput. Educ.: Artif. Intell." was coming out as "...Artif. Intell", missing exactly
+        // the character a reader needs to tell it's an abbreviation at all).
+        journalCandidate = journalCandidate.replace(/[,;:\s]+$/, '').trim();
+        if (journalCandidate && journalCandidate.length > 2 && journalCandidate.length < 150) {
+          result.journal = journalCandidate;
+        }
       }
     }
   }
@@ -1379,7 +1417,8 @@ function parseReferenceLine(line, styleId) {
       authorCount: numericAuthorCount, firstAuthor: parsedAuthors.authors[0] || null,
       year: year, title: title, journal: bibFields.journal, issn: bibFields.issn, eissn: bibFields.eissn,
       volume: bibFields.volume, issue: bibFields.issue, pages: bibFields.pages, articleNumber: bibFields.articleNumber, publisher: bibFields.publisher,
-      doi: doi, styleId: styleId, sourceType: detectSourceType(raw),
+      editor: bibFields.editor, editorIsPlural: bibFields.editorIsPlural, isBookChapter: bibFields.isBookChapter,
+      doi: doi, styleId: styleId, sourceType: bibFields.isBookChapter ? 'book-chapter' : detectSourceType(raw),
     };
   }
 
@@ -3689,6 +3728,7 @@ var CitationEngine = {
   isFuzzyHeadingWord: isFuzzyHeadingWord,
   findReferencesHeading: findReferencesHeading,
   findReferencesListEnd: findReferencesListEnd,
+  deriveBookPublisher: deriveBookPublisher,
   YearRange: YearRange,
   detectSourceType: detectSourceType,
   findIntroductionHeading: findIntroductionHeading,

@@ -564,7 +564,26 @@
     var isBook = !/["“]/.test(ref.raw);
     var newNodes = null;
 
-    if (isBook) {
+    if (ref.isBookChapter) {
+      // Book chapter with a named editor — the italic span is the BOOK title (ref.journal, per
+      // extractBibliographicFields' book-chapter detection), not the chapter title itself,
+      // which stays plain like a journal article's title does. Editor name(s) need no
+      // reformatting: APA7 keeps an editor in the SAME non-inverted "Initial. Surname" order
+      // IEEE already writes them in (only regular authors get inverted), and an institutional
+      // editor is used verbatim either way.
+      var bookTitleForChapter = ref.journal ? ref.journal.replace(/^in\s+/i, '') : null;
+      var chapterTitleIdx = bookTitleForChapter ? fullContentText.indexOf(bookTitleForChapter) : -1;
+      if (chapterTitleIdx !== -1) {
+        var editorSuffixDocx = ref.editorIsPlural ? ' (Eds.), ' : ' (Ed.), ';
+        var pagesPartDocx = ref.pages ? ' (pp. ' + ref.pages + ')' : '';
+        var chapterDoiPart = ref.doi ? ('https://doi.org/' + ref.doi) : null;
+        newNodes = [
+          makeRun(xmlDoc, templateRun, authorApa + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. In ' + (ref.editor || '') + editorSuffixDocx, false),
+          makeRun(xmlDoc, templateRun, bookTitleForChapter, true),
+          makeRun(xmlDoc, templateRun, pagesPartDocx + '. ' + (ref.publisher || '') + (chapterDoiPart ? '. ' + chapterDoiPart : '.'), false),
+        ];
+      }
+    } else if (isBook) {
       var bookTitle = ref.title;
       var titleIdx = bookTitle ? fullContentText.indexOf(bookTitle) : -1;
       if (titleIdx !== -1) {

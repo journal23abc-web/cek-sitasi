@@ -368,18 +368,12 @@
   // Derives a book's publisher name from the text trailing its (italicized) title, e.g.
   // ". London, U.K.: Pearson, 2016." -> "Pearson". IEEE book references conventionally end
   // "City, Country: Publisher, Year." — APA7 no longer requires the location, just the
-  // publisher, so this takes the text after the LAST colon and strips the trailing ", Year.".
+  // publisher. The actual implementation now lives in engine.js (CE.deriveBookPublisher) since
+  // extractBibliographicFields' book-chapter-with-editor detection needs it too; kept as a thin
+  // delegate here so existing callers of this local name (and CC._internal.deriveBookPublisher,
+  // which convert-ui.js and tests already use) don't need to change.
   function deriveBookPublisher(tailText, year) {
-    var s = (tailText || '').trim().replace(/^\.\s*/, '');
-    // Strip a trailing DOI clause FIRST — a book/report can legitimately carry a DOI (e.g. an
-    // organizational report), and "doi: 10.x/y" has its own colon, which would otherwise get
-    // mistaken by the colon-based extraction below for the "City: Publisher" separator, pulling
-    // out the DOI number itself instead of the actual publisher name.
-    s = s.replace(/,?\s*doi:\s*\S+\.?\s*$/i, '').replace(/,?\s*https?:\/\/(?:dx\.)?doi\.org\/\S+\.?\s*$/i, '');
-    if (year) s = s.replace(new RegExp(',?\\s*' + String(year).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.?\\s*$'), '');
-    var lastColon = s.lastIndexOf(':');
-    if (lastColon !== -1) s = s.slice(lastColon + 1);
-    return s.replace(/^[\s.,;:]+|[\s.,;:]+$/g, '');
+    return CE.deriveBookPublisher(tailText, year);
   }
 
   // ---- Completing a source reference that's already truncated with "et al." -----------------
@@ -789,6 +783,21 @@
             : strippedRaw.replace(/^\d+\.\s*/, '');
         }
         line = strippedRaw;
+      } else if (ref.isBookChapter && targetStyleId === 'apa7') {
+        // Book chapter with a named editor — doesn't fit the generic boundary/connector/rest
+        // model below either (that assumes "quoted title, then journal name" or "unquoted title
+        // IS the book title", neither of which matches "title, then editor, then book title").
+        // APA7 keeps an editor's name in the SAME non-inverted "Initial. Surname" order IEEE
+        // already uses (only regular AUTHORS get inverted to "Surname, Initial.") — and the
+        // same for an institutional editor, used verbatim — so ref.editor needs no reformatting
+        // at all here, just wrapping in "(Ed.)"/"(Eds.)".
+        var authorPartCh = renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
+        var editorSuffix = ref.editorIsPlural ? ' (Eds.), ' : ' (Ed.), ';
+        var pagesPart = ref.pages ? ' (pp. ' + ref.pages + ')' : '';
+        var doiPartCh = ref.doi ? ' https://doi.org/' + ref.doi : '';
+        line = authorPartCh + ' (' + (ref.year || 'n.d.') + '). ' + (ref.title || '') + '. In ' +
+          (ref.editor || '') + editorSuffix + (ref.journal || '') + pagesPart + '. ' + (ref.publisher || '') +
+          (doiPartCh ? '.' + doiPartCh : '.');
       } else {
         var authorPart = renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
         var trimmedRaw = ref.raw.trim();

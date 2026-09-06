@@ -232,16 +232,38 @@ test('removeListNumbering is a safe no-op on a paragraph with no numbering at al
   assert.strictEqual(fullText, 'Author, A. (2020). A title.');
 });
 
-test('unrecognized paragraph shape (no italic run) is left untouched, not crashed on', () => {
+test('a reference with NO italic formatting at all in the source is now still fully reformatted (text-based journal lookup doesn\'t need pre-existing italics)', () => {
+  // This used to be the "give up, no italic run found" case — but ref.journal is extracted as
+  // plain text regardless of formatting, so the text-based lookup finds "Some Journal" and
+  // manufactures its own italic run for it. Real documents that never italicized their journal
+  // names at all (not uncommon) used to be stuck entirely on the safe author-only fallback for
+  // their whole reference list; this is exactly the case that fixes.
   const raw = '[1] A. Author, "A title," Some Journal, vol. 1, p. 1, 2020.';
   const ref = CE.parseReferenceLine(raw, 'ieee');
   const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
   const xmlDoc = parseDoc('<w:p>' + run('[1] \tA. Author, "A title," Some Journal, vol. 1, p. 1, 2020.', false) + '</w:p>');
   const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
   const ok = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
-  assert.strictEqual(ok, false);
+  assert.strictEqual(ok, true);
   const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
-  assert.ok(fullText.includes('[1]')); // untouched — caller is expected to fall back
+  assert.ok(fullText.startsWith('Author, A. (2020). A title.'), fullText);
+  assert.ok(fullText.includes('Some Journal'), fullText);
+  const italicRuns = Array.from(paraEl.getElementsByTagName('w:r')).filter(runIsItalic);
+  assert.ok(italicRuns.some(r => r.getElementsByTagName('w:t')[0].textContent === 'Some Journal'), 'journal run should now be manufactured as italic');
+});
+
+test('a reference whose journal name genuinely can\'t be located as text (and has no italic run either) is left untouched, not crashed on', () => {
+  // A genuine negative case for BOTH the text-based and italic-run-based paths: ref.journal is
+  // null here (extraction itself found nothing usable), and there's no italic run to fall back
+  // to either — so there is truly nothing safe to reformat from.
+  const raw = '[1] A. Author, "A title with no journal info after it at all,"';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  assert.strictEqual(ref.journal, null);
+  const xmlDoc = parseDoc('<w:p>' + run(raw, false) + '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  const ok = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
+  assert.strictEqual(ok, false);
 });
 
 test('journal name fragmented across several adjacent italic runs (Word splitting at abbreviation periods) is still treated as ONE title, not rejected', () => {
@@ -267,7 +289,11 @@ test('journal name fragmented across several adjacent italic runs (Word splittin
   const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
   assert.ok(fullText.includes('Comput. Educ.: Artif. Intell.'), fullText); // fragments reassembled in reading order
   const italicRuns = Array.from(paraEl.getElementsByTagName('w:r')).filter(runIsItalic);
-  assert.strictEqual(italicRuns.length, 5); // 4 original fragments + 1 new italic volume run
+  // The text-based approach (tried first — see rewriteReferenceParagraphToApa7) builds ONE clean
+  // italic run per span from scratch rather than preserving the original run fragmentation, so
+  // this is 2 (journal + volume), not "4 original fragments + 1 new" — cleaner output, and this
+  // reference no longer even depends on the italic-run-based fallback path being reached at all.
+  assert.strictEqual(italicRuns.length, 2);
 });
 
 test('an italic run with a non-italic run sandwiched between two italic pieces is a genuinely different shape and is still rejected (not force-merged)', () => {
@@ -304,6 +330,51 @@ test('a book/report with its OWN DOI (e.g. an organizational report) does not du
   assert.strictEqual(titleOccurrences, 1, fullText); // title appears exactly once, not twice
   assert.ok(fullText.includes('UNESCO.'), fullText); // publisher survives
   assert.ok(fullText.includes('https://doi.org/10.54675/EWZM9535'), fullText); // DOI survives too
+});
+
+test('a template run whose OWN structure embeds a <w:tab/> alongside its text (not as a separate run) does not duplicate that tab into every new run cloned from it', () => {
+  // Reproduces a real, visually serious bug: some documents put the hanging-indent tab INSIDE
+  // the same run as the reference's actual text ("<w:r><w:tab/><w:t>Author, A. ...</w:t></w:r>"),
+  // rather than as its own separate run. cloneNode(true) on that run for every new piece being
+  // built (author+year+title, the journal name, the volume, ...) copied that <w:tab/> into ALL
+  // of them — so instead of one tab at the very start of the paragraph, every rebuilt run got
+  // its own extra tab character in the middle of the text, which visibly distorted spacing and
+  // (via tab-stop jumping) even apparent run size when opened in Word/LibreOffice.
+  const xmlDoc = parseDoc('<w:p>' +
+    '<w:r><w:rPr><w:rFonts w:ascii="Cambria"/></w:rPr><w:tab/><w:t xml:space="preserve">A. Author, \u201cA title,\u201d Some Journal, vol. 1, p. 1, 2020, doi: 10.1/x.</w:t></w:r>' +
+    '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  const ref = CE.parseReferenceLine('[1] A. Author, "A title," Some Journal, vol. 1, p. 1, 2020, doi: 10.1/x.', 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  const ok = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
+  assert.strictEqual(ok, true);
+  const tabCount = paraEl.getElementsByTagName('w:tab').length;
+  assert.strictEqual(tabCount, 0, 'no run built from this reference should carry a tab at all');
+  const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  assert.strictEqual(fullText, 'Author, A. (2020). A title. Some Journal, 1, 1. https://doi.org/10.1/x');
+});
+
+test('rewriteReferenceParagraphToApa7 fully reformats a book chapter with a named editor, including the publisher (docx-level, real-world regression)', () => {
+  // Full end-to-end check of the docx-level rendering for the Odia book-chapter case — the
+  // italic span is the BOOK title (not the chapter title), the editor name is used verbatim
+  // (APA7 keeps editors non-inverted, unlike regular authors), and the publisher must actually
+  // appear (an earlier version of this fix silently dropped it).
+  const raw = '[35] J. O. Odia and A. A. Odia, "Accessibility to higher education in Nigeria: The pains, problems, and prospects," in Accessibility and Diversity in Education: Breakthroughs in Research and Practice, Information Resources Management Association, Ed. Hershey, PA, USA: IGI Global, 2020, pp. 80-100, doi: 10.4018/978-1-7998-1213-5.ch005';
+  const ref = CE.parseReferenceLine(raw, 'ieee');
+  const authorApa = CC._internal.renderAuthorListForReference(ref, 'ieee', 'apa7');
+  const xmlDoc = parseDoc('<w:p>' + run('[35] ', false) + '<w:r><w:tab/></w:r>' +
+    run(raw.replace('[35] ', ''), false) + '</w:p>');
+  const paraEl = xmlDoc.getElementsByTagName('w:p')[0];
+  const ok = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
+  assert.strictEqual(ok, true);
+  const fullText = Array.from(paraEl.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+  assert.strictEqual(fullText,
+    'Odia, J. O., & Odia, A. A. (2020). Accessibility to higher education in Nigeria: The pains, problems, and prospects. In Information Resources Management Association (Ed.), Accessibility and Diversity in Education: Breakthroughs in Research and Practice (pp. 80-100). IGI Global. https://doi.org/10.4018/978-1-7998-1213-5.ch005');
+  const italicRuns = Array.from(paraEl.getElementsByTagName('w:r')).filter(runIsItalic);
+  assert.strictEqual(italicRuns.length, 1);
+  assert.strictEqual(italicRuns[0].getElementsByTagName('w:t')[0].textContent,
+    'Accessibility and Diversity in Education: Breakthroughs in Research and Practice');
+  assert.strictEqual(paraEl.getElementsByTagName('w:tab').length, 0);
 });
 
 console.log(`\n${pass} passed, ${fail} failed.\n`);
