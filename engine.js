@@ -96,6 +96,17 @@ function isInstitutionalAuthor(str) {
   return false;
 }
 
+// `isInstitutionalAuthor()` intentionally has a broad last-resort heuristic for short,
+// title-cased organization names that do not contain an obvious keyword. That same shape is
+// also used by genuine multi-word surnames in in-text citations ("Benavides Rincón", "Di
+// Tore"). Keep a separate strong signal for resolver decisions so an exact personal-name match
+// in the reference list is not rejected solely because that broad heuristic fired.
+function isClearlyInstitutionalAuthor(str) {
+  if (!str) return false;
+  var s = str.trim().replace(/\.$/, '');
+  return ACRONYM_PATTERN.test(s) || !!extractAcronymPairing(s) || INSTITUTION_KEYWORDS.test(s);
+}
+
 // extract "Full Name (ACR)" or "Full Name [ACR]" pairing from institutional citations
 function extractAcronymPairing(str) {
   var m = str.match(/^(.+?)\s*[\(\[]([A-Z]{2,8})[\)\]]/);
@@ -1302,6 +1313,11 @@ function parseAuthorDateOrPageStyleLine(raw, style, styleId) {
     }
   }
   if (!authorSeg2) return null;
+  // In APA/Harvard-style edited books, an editor occupies the author position but carries a
+  // role marker immediately before the year: "Miller, R. (Ed.). (2018). ...". The marker is
+  // metadata, not a second author. Leaving it in authorSeg2 makes the comma parser produce
+  // ["Miller", "R. (Ed.)"] and creates false ambiguity plus bogus "and (Ed.)" suggestions.
+  authorSeg2 = authorSeg2.replace(/\s*\((?:Eds?|Editors?)\.?\)\.?\s*$/i, '').trim();
   var parsedAuthors2 = parseAuthorsForStyle(authorSeg2, styleId);
   var title2 = extractTitle(raw, style, titleStartIdx);
   var doi2 = extractDOI(raw);
@@ -1701,71 +1717,87 @@ function buildApa7DisambiguationPlan(references, styleId) {
           identityKeys: personalReferenceAuthorIdentityKeys(ref),
         };
       });
-      var signatureGroups = new Map();
+      // Only references whose normal APA short forms collide need special disambiguation. A
+      // solo work and a 3+-author work are already distinct as "Miller (2018)" versus "Miller
+      // et al. (2018)"; two-author works normally show both surnames as well.
+      var defaultCitationGroups = new Map();
       entries.forEach(function(entry) {
-        var signature = entry.identityKeys.join('\u001f');
-        if (!signatureGroups.has(signature)) signatureGroups.set(signature, []);
-        signatureGroups.get(signature).push(entry.ref);
+        var defaultSignature;
+        if (entry.keys.length === 1) defaultSignature = 'solo\u001f' + entry.keys[0];
+        else if (entry.keys.length === 2) defaultSignature = 'pair\u001f' + entry.keys.join('\u001f');
+        else defaultSignature = 'etal\u001f' + entry.keys[0];
+        if (!defaultCitationGroups.has(defaultSignature)) defaultCitationGroups.set(defaultSignature, []);
+        defaultCitationGroups.get(defaultSignature).push(entry);
       });
 
-      if (signatureGroups.size > 1) {
-        var plans = [];
-        entries.forEach(function(entry) {
-          var requiredNames = 1;
-          var initialPositions = new Set();
-          entries.forEach(function(other) {
-            if (other.ref === entry.ref || other.identityKeys.join('\u001f') === entry.identityKeys.join('\u001f')) return;
-            var surnamePrefix = longestCommonAuthorPrefix(entry.keys, other.keys);
-            requiredNames = Math.max(requiredNames, surnamePrefix + 1);
-            // Rare but real: two different people at the distinguishing position can share the
-            // same surname. Record that position so the suggested citation includes their initial
-            // instead of falsely treating the complete author lists as identical and assigning a/b.
-            var identityLimit = Math.min(entry.identityKeys.length, other.identityKeys.length);
-            for (var identityIndex = 0; identityIndex < identityLimit; identityIndex++) {
-              if (entry.identityKeys[identityIndex] !== other.identityKeys[identityIndex] && entry.keys[identityIndex] === other.keys[identityIndex]) {
-                initialPositions.add(identityIndex);
-                requiredNames = Math.max(requiredNames, identityIndex + 1);
-                break;
-              }
-            }
-          });
-          requiredNames = Math.min(requiredNames, entry.keys.length);
-          var omitted = Math.max(0, entry.keys.length - requiredNames);
-          var plan = {
-            ref: entry.ref,
-            requiredNames: requiredNames,
-            expectedNamedCount: omitted >= 2 ? requiredNames : entry.keys.length,
-            useEtAl: omitted >= 2,
-            initialPositions: Array.from(initialPositions),
-            reason: 'different-author-sequence',
-          };
-          planByRef.set(entry.ref, plan);
-          plans.push(plan);
+      defaultCitationGroups.forEach(function(collisionEntries) {
+        if (collisionEntries.length < 2) return;
+        var signatureGroups = new Map();
+        collisionEntries.forEach(function(entry) {
+          var signature = entry.identityKeys.join('\u001f');
+          if (!signatureGroups.has(signature)) signatureGroups.set(signature, []);
+          signatureGroups.get(signature).push(entry.ref);
         });
-        nameGroups.push({ refs: identityGroup.slice(), plans: plans });
-      }
 
-      // Only works whose COMPLETE author sequence is identical receive year suffixes. Different
-      // coauthor sequences are distinguished by names, never by inventing a/b for the whole group.
-      signatureGroups.forEach(function(sameAuthors) {
-        if (sameAuthors.length < 2) return;
-        var ordered = sameAuthors.slice().sort(function(a, b) {
-          var cmp = apaTitleSortKey(a).localeCompare(apaTitleSortKey(b), 'en', { sensitivity: 'base' });
-          if (cmp !== 0) return cmp;
-          return String(a.raw || '').localeCompare(String(b.raw || ''), 'en', { sensitivity: 'base' });
+        if (signatureGroups.size > 1) {
+          var plans = [];
+          collisionEntries.forEach(function(entry) {
+            var requiredNames = 1;
+            var initialPositions = new Set();
+            collisionEntries.forEach(function(other) {
+              if (other.ref === entry.ref || other.identityKeys.join('\u001f') === entry.identityKeys.join('\u001f')) return;
+              var surnamePrefix = longestCommonAuthorPrefix(entry.keys, other.keys);
+              requiredNames = Math.max(requiredNames, surnamePrefix + 1);
+              // Rare but real: two different people at the distinguishing position can share the
+              // same surname. Record that position so the suggested citation includes their initial
+              // instead of falsely treating the complete author lists as identical and assigning a/b.
+              var identityLimit = Math.min(entry.identityKeys.length, other.identityKeys.length);
+              for (var identityIndex = 0; identityIndex < identityLimit; identityIndex++) {
+                if (entry.identityKeys[identityIndex] !== other.identityKeys[identityIndex] && entry.keys[identityIndex] === other.keys[identityIndex]) {
+                  initialPositions.add(identityIndex);
+                  requiredNames = Math.max(requiredNames, identityIndex + 1);
+                  break;
+                }
+              }
+            });
+            requiredNames = Math.min(requiredNames, entry.keys.length);
+            var omitted = Math.max(0, entry.keys.length - requiredNames);
+            var plan = {
+              ref: entry.ref,
+              requiredNames: requiredNames,
+              expectedNamedCount: omitted >= 2 ? requiredNames : entry.keys.length,
+              useEtAl: omitted >= 2,
+              initialPositions: Array.from(initialPositions),
+              reason: 'different-author-sequence',
+            };
+            planByRef.set(entry.ref, plan);
+            plans.push(plan);
+          });
+          nameGroups.push({ refs: collisionEntries.map(function(entry) { return entry.ref; }), plans: plans });
+        }
+
+        // Only works whose COMPLETE author sequence is identical receive year suffixes. Different
+        // coauthor sequences are distinguished by names, never by inventing a/b for the whole group.
+        signatureGroups.forEach(function(sameAuthors) {
+          if (sameAuthors.length < 2) return;
+          var ordered = sameAuthors.slice().sort(function(a, b) {
+            var cmp = apaTitleSortKey(a).localeCompare(apaTitleSortKey(b), 'en', { sensitivity: 'base' });
+            if (cmp !== 0) return cmp;
+            return String(a.raw || '').localeCompare(String(b.raw || ''), 'en', { sensitivity: 'base' });
+          });
+          ordered.forEach(function(ref, index) {
+            var current = planByRef.get(ref) || {
+              ref: ref,
+              requiredNames: ref.authorCount >= 3 ? 1 : ref.authorCount,
+              expectedNamedCount: ref.authorCount >= 3 ? 1 : ref.authorCount,
+              useEtAl: ref.authorCount >= 3,
+            };
+            current.assignedYear = String(ref.year).replace(/[a-z]$/i, '') + alphabeticSuffix(index);
+            current.reason = current.reason ? current.reason + '+identical-author-sequence' : 'identical-author-sequence';
+            planByRef.set(ref, current);
+          });
+          suffixGroups.push({ refs: ordered });
         });
-        ordered.forEach(function(ref, index) {
-          var current = planByRef.get(ref) || {
-            ref: ref,
-            requiredNames: ref.authorCount >= 3 ? 1 : ref.authorCount,
-            expectedNamedCount: ref.authorCount >= 3 ? 1 : ref.authorCount,
-            useEtAl: ref.authorCount >= 3,
-          };
-          current.assignedYear = String(ref.year).replace(/[a-z]$/i, '') + alphabeticSuffix(index);
-          current.reason = current.reason ? current.reason + '+identical-author-sequence' : 'identical-author-sequence';
-          planByRef.set(ref, current);
-        });
-        suffixGroups.push({ refs: ordered });
       });
     });
   });
@@ -1813,7 +1845,13 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
   options = options || {};
   if (!firstAuthor || !ref || !ref.firstAuthor) return null;
   var citeInstitutional = isInstitutionalAuthor(firstAuthor);
-  if (citeInstitutional !== !!ref.isInstitutional) return null;
+  // A broad title-case heuristic can make a multi-word personal surname look institutional.
+  // Reject a personal reference only when the citation carries a strong institutional signal;
+  // otherwise let exact surname/year matching decide. Conversely, an institutional reference
+  // still requires the citation to be at least plausibly institutional.
+  if (ref.isInstitutional && !citeInstitutional) return null;
+  if (!ref.isInstitutional && isClearlyInstitutionalAuthor(firstAuthor)) return null;
+  citeInstitutional = !!ref.isInstitutional;
 
   if (!citeInstitutional) {
     var citeSurname = normalizeKeyName(surnameFromCitationToken(firstAuthor), false);
@@ -1838,8 +1876,15 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
       if (options.hasEtAl === false && citationKeys.length > 1 && citationKeys.length !== referenceKeys.length) return null;
 
       if (citationKeys.length > 1) return { score: 1.04, confidence: 1, reason: 'exact-author-prefix' };
-      if (citeInitial) return { score: 1.03, confidence: 1, reason: 'exact-personal-initial' };
-      return { score: 1, confidence: 1, reason: 'exact-personal' };
+      // When same-surname/year candidates have different normal APA forms, the form itself is
+      // decisive: "Miller" selects the solo work, while "Miller et al." selects the 3+-author
+      // work. Keep the non-matching shape as a lower-scored candidate so a lone malformed
+      // citation can still resolve and receive the specific author-form warning.
+      var formBonus = 0;
+      if (options.hasEtAl === true && referenceKeys.length >= 3) formBonus = 0.06;
+      else if (options.hasEtAl === false && referenceKeys.length === 1) formBonus = 0.06;
+      if (citeInitial) return { score: 1.03 + formBonus, confidence: 1, reason: 'exact-personal-initial' };
+      return { score: 1 + formBonus, confidence: 1, reason: 'exact-personal' };
     }
     if (citeSurname.length > 3 && refSurname.length > 3 &&
         (citeSurname.indexOf(refSurname.substring(0, 3)) === 0 || refSurname.indexOf(citeSurname.substring(0, 3)) === 0)) {
@@ -2019,11 +2064,24 @@ MultiFormatValidator.prototype.validate = function() {
     var mapSelf = this;
     this.citations.forEach(function (c) {
       if (c.parts) {
-        c.parts.forEach(function (p) { p.matched = mapSelf.isCitationMatched(p.firstAuthor, p.year != null ? p.year : null); });
+        c.parts.forEach(function (p) {
+          p.matched = mapSelf.isCitationMatched(
+            p.firstAuthor,
+            p.year != null ? p.year : null,
+            p.authors || [p.firstAuthor],
+            !!p.hasEtAl
+          );
+        });
       } else {
         var cleaned = (c.authors || '').replace(/\s*et\s+al\.?/i, '');
-        var firstTok = (splitOnSeparators(cleaned)[0]) || cleaned;
-        c.matched = mapSelf.isCitationMatched(firstTok, c.year != null ? c.year : null);
+        var authorTokens = extractAcronymPairing(cleaned) ? [cleaned] : splitOnSeparators(cleaned);
+        var firstTok = authorTokens[0] || cleaned;
+        c.matched = mapSelf.isCitationMatched(
+          firstTok,
+          c.year != null ? c.year : null,
+          authorTokens.length ? authorTokens : [firstTok],
+          /et\s+al/i.test(c.authors || '')
+        );
       }
     });
     this.references.forEach(function (r) { r.cited = mapSelf.isReferenceCited(r); });
@@ -2182,7 +2240,19 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
         // secara alfabetis (mis. "Çivitci" harus di antara "C" dan "D", bukan di akhir).
         var isAlpha = fa.every(function(v,i){return i===0 || fa[i-1].localeCompare(fa[i], 'en', { sensitivity: 'base' }) <= 0;});
         if (!isAlpha) {
-          var sortedParts = c.parts.map(function(p, i) { return { part: p, key: fa[i] }; })
+          // parseSingleAuthorDate emits one internal part per year for a grouped same-author
+          // citation ("Poli, 2017, 2019"), but each part deliberately retains the same raw
+          // display text. Collapse only those grouped duplicates when building the correction;
+          // otherwise the proposed fix repeats the whole citation once per year.
+          var seenGroupedRaw = new Set();
+          var correctionParts = c.parts.map(function(p, i) { return { part: p, key: fa[i] }; })
+            .filter(function(item) {
+              if (!item.part.groupedSameAuthor) return true;
+              if (seenGroupedRaw.has(item.part.raw)) return false;
+              seenGroupedRaw.add(item.part.raw);
+              return true;
+            });
+          var sortedParts = correctionParts
             .sort(function(a, b) { return a.key.localeCompare(b.key, 'en', { sensitivity: 'base' }); })
             .map(function(x) { return x.part.raw; });
           self.errors.push({ title: 'Multiple citations tidak alfabetis', description: 'Beberapa sitasi dalam satu kurung harus diurutkan alfabetis berdasarkan penulis pertama.', code: c.raw, correction: '(' + sortedParts.join('; ') + ')', severity: 'error' });
@@ -2515,10 +2585,12 @@ MultiFormatValidator.prototype.keyFromCitationToken = function(token) {
 // Public helpers for UI: determine whether a given in-text citation token/year
 // has a matching reference, and whether a given reference was cited in text.
 // Used by the citation map so unmatched items render as errors (red), not green.
-MultiFormatValidator.prototype.isCitationMatched = function(token, year) {
+MultiFormatValidator.prototype.isCitationMatched = function(token, year, allAuthorNames, hasEtAl) {
   if (!this.refMap) return null; // not yet validated (numeric family doesn't use this)
   if (this.style.family === 'author-date') {
-    var decision = resolveAuthorDateReference(token, [token], year, this.references, this.styleId, this.acronymMap);
+    var names = allAuthorNames && allAuthorNames.length ? allAuthorNames : [token];
+    var options = typeof hasEtAl === 'boolean' ? { hasEtAl: hasEtAl } : {};
+    var decision = resolveAuthorDateReference(token, names, year, this.references, this.styleId, this.acronymMap, options);
     return decision.status === 'matched';
   }
   var key = this.keyFromCitationToken(token) + (year != null ? '_' + year : (this.style.family === 'author-date' ? '_' : ''));
