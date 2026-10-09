@@ -1,101 +1,11 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Audit Sebelum Copyediting — Journal Tools</title>
-  <script>(function(){try{var s=localStorage.getItem('citationValidatorTheme');document.documentElement.setAttribute('data-theme',s||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'));}catch(e){}})();</script>
-  <link rel="stylesheet" href="shared.css?v=2">
-  <style>
-    .wrap{max-width:1080px;margin:auto;position:relative;z-index:1}header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:26px}h1{font-size:28px;line-height:1.2;margin:4px 0 12px;letter-spacing:-.025em}h2{font-size:18px;margin:0 0 18px}h3{font-size:14px;margin:18px 0 9px}.intro{max-width:730px;color:var(--text-dim);font-size:14px;margin:0}.header-actions{display:flex;gap:8px;flex-shrink:0}a{color:var(--cyan)}.back{text-decoration:none}.panel{padding:24px}.step{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;background:var(--cyan);color:var(--void);border-radius:50%;font-size:12px;margin-right:9px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.two{grid-template-columns:repeat(2,minmax(0,1fr))}.field{display:block;font-size:12px;font-weight:600;color:var(--text-dim)}.field input,.field select,.field textarea{display:block;width:100%;margin-top:7px}.field textarea{resize:vertical;min-height:80px}input,select,textarea{font:inherit;background:var(--input-bg);color:var(--text);border:1px solid var(--hairline);border-radius:7px;padding:10px 12px;font-size:13px}small,.hint{display:block;font-weight:400;color:var(--text-dim);font-size:12px;line-height:1.6}.hint{margin:10px 0}button{font:inherit;border-radius:7px;cursor:pointer}button.primary{background:var(--cyan);color:var(--void);border:1px solid var(--cyan);font-size:13px;font-weight:700;padding:11px 18px}button:disabled{opacity:.45;cursor:not-allowed}.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}.dropzone{display:flex;align-items:center;justify-content:space-between;gap:20px;width:100%;text-align:left;border:1.5px dashed var(--hairline);padding:22px;background:var(--input-bg);color:var(--text);margin:0 0 20px}.dropzone:hover,.dropzone.drag{border-color:var(--cyan)}.dz-icon{font-size:28px}.dropzone strong{display:block;font-size:14px}.file-name{color:var(--cyan);word-break:break-word}.status{font-size:13px;padding:12px 0;min-height:18px;margin:0;overflow-wrap:anywhere}.status.err{color:var(--red)}.status.ok{color:var(--green)}.status.info{color:var(--text-dim)}details{border-top:1px solid var(--hairline);margin-top:18px;padding-top:14px}summary{cursor:pointer;color:var(--text);font-size:13px;font-weight:600}details>div{margin-top:14px}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:15px}.metric{padding:16px;background:var(--input-bg);border:1px solid var(--hairline);border-radius:8px}.metric b{font-size:25px;display:block}.metric span{font-size:11px;color:var(--text-dim)}.coverage{padding:12px 14px;border-left:3px solid var(--amber);background:var(--input-bg);font-size:12px;line-height:1.7}.coverage.complete{border-color:var(--green)}.source-text{background:var(--input-bg);border:1px solid var(--hairline);padding:15px;border-radius:7px;white-space:pre-wrap;max-height:260px;overflow:auto;font-size:13px}.pill{display:inline-block;border:1px solid var(--hairline);border-radius:20px;padding:2px 8px;font-size:10px;color:var(--text-dim);margin:0 5px 5px 0}.issue{display:grid;grid-template-columns:22px 1fr;gap:10px;border:1px solid var(--hairline);padding:14px;border-radius:8px;margin-bottom:10px;background:var(--input-bg)}.issue input[type=checkbox]{margin-top:6px;accent-color:var(--cyan)}.issue p{font-size:13px;line-height:1.65;margin:4px 0;overflow-wrap:anywhere}.issue blockquote{font-size:12px;margin:8px 0 0;padding-left:12px;border-left:2px solid var(--hairline);color:var(--text-dim)}.empty{font-size:13px;color:var(--text-dim);padding:12px 0}.ref{background:var(--input-bg);padding:14px;border-radius:7px;border:1px solid var(--hairline);margin-bottom:12px}.ref p{font-size:12px;margin:4px 0;overflow-wrap:anywhere}.ref-status{font-weight:700;color:var(--amber)}.ref-status.good{color:var(--green)}.ref .grid{margin-top:10px}.ref a{font-size:12px;overflow-wrap:anywhere}.ref-fields{font-size:12px;line-height:1.6}.elements{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.confirmation{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.6;padding:14px;background:var(--input-bg);border:1px solid var(--hairline);border-radius:7px;margin-top:18px}.confirmation input{accent-color:var(--cyan);margin-top:5px}.report-page{white-space:normal;overflow-wrap:anywhere}.report-page p{margin:0 0 13px}.report-page h2{font-size:14px;border:0;padding:0;margin:20px 0 10px}.preview-toolbar .mode{color:var(--amber);font-size:10px}footer{color:var(--text-dim);font-size:12px;margin-top:22px}#results[hidden],section[hidden]{display:none}.error-box{color:var(--red);font-size:12px}progress{width:100%;accent-color:var(--cyan);height:7px;display:block;margin-top:8px}.muted-label{font-size:11px;color:var(--text-dim)}.instruction{font-size:12px;background:var(--input-bg);padding:12px;border-radius:7px;line-height:1.8}.instruction ol{margin:0;padding-left:18px}.pdf-note{font-size:12px;color:var(--text-dim);margin:0}.warning-list{font-size:12px;color:var(--amber);padding-left:20px}
-    [hidden]{display:none!important}
-    @media(max-width:700px){body{padding:24px 12px 50px}header{flex-direction:column}h1{font-size:24px}.panel{padding:18px}.grid,.two{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.report-page{margin:12px;padding:22px}.dropzone{padding:18px}}
-    @media print{body{background:white!important;padding:0!important}header,.panel,.export-panel,footer{display:none!important}.report-page p{orphans:3;widows:3}.report-page h2{break-after:avoid}.report-page{padding:0!important;font-size:11pt;line-height:1.55}}
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="refresh" content="0; url=copyediting-local.html?v=20261009-local3">
+<title>Buka Audit Copyediting Lokal v3</title>
+<script>window.location.replace('copyediting-local.html?v=20261009-local3');</script>
 </head>
-<body>
-<div class="watermark" aria-hidden="true"><span>JOURNAL TOOLS</span></div>
-<div class="wrap">
-  <header>
-    <div><div class="eyebrow">Journal Tools / Editorial Workflow</div><h1>Audit Sebelum Copyediting</h1><p class="intro">Periksa naskah Word dengan aturan jurnal Anda. Pilih temuan yang didukung bukti, lalu hasilkan satu catatan editorial Inggris sebagai PDF atau komentar pada salinan Word.</p></div>
-    <div class="header-actions"><a class="back" href="index.html">← Beranda</a><button type="button" class="ghost" id="themeToggle" aria-label="Ganti tema">☀ / ☾</button></div>
-  </header>
-  <section class="panel" aria-labelledby="inputTitle">
-    <span class="corner tl" aria-hidden="true"></span><span class="corner br" aria-hidden="true"></span>
-    <h2 id="inputTitle"><span class="step">1</span>Naskah &amp; aturan jurnal</h2>
-    <button type="button" class="dropzone" id="dropzone"><span><strong id="fileLabel">Pilih atau letakkan naskah .docx di sini</strong><small id="fileMeta">Maksimum 25 MB. Naskah dari beranda akan dimuat otomatis.</small></span><span class="dz-icon" aria-hidden="true">📄</span></button>
-    <input type="file" id="fileInput" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
-    <div class="grid">
-      <label class="field">Manuscript ID <input id="manuscriptId" type="text" placeholder="Contoh: 1400" maxlength="160" required autocomplete="off"></label>
-      <label class="field">Maksimum kata abstrak <input id="abstractMax" type="number" min="1" max="10000" value="250" step="1" required></label>
-      <label class="field">Minimum referensi <input id="referenceMin" type="number" min="0" max="5000" value="35" step="1" required></label>
-      <label class="field">Maksimum kata seluruh draft <input id="manuscriptMax" type="number" min="1" max="1000000" value="9000" step="1" required></label>
-      <label class="field">Nama author (opsional, sesuai byline) <input id="authorNames" type="text" placeholder="Pisahkan nama author dengan titik koma" autocomplete="off"><small>Untuk memeriksa nama dan inisial dalam kontribusi author.</small></label>
-    </div>
-    <p class="hint">Default 250 / 35 / 9.000 dapat diubah. Hitungan draft mencakup judul, abstrak, teks, tabel, caption, referensi, dan catatan; header/footer dikecualikan. Hitungan memakai token berhuruf/berangka yang dipisahkan spasi, sehingga dapat berbeda dari Word.</p>
-    <div class="actions"><button class="primary" id="auditBtn" type="button" disabled>Jalankan audit lokal</button><button class="ghost" id="resetRulesBtn" type="button">Reset aturan</button><button class="ghost" id="removeBtn" type="button" disabled>Hapus naskah</button><button class="ghost" id="cancelBtn" type="button" hidden>Batalkan proses</button></div>
-    <p class="status info" id="statusMsg" role="status" aria-live="polite"></p><progress id="progress" hidden aria-label="Kemajuan pemeriksaan"></progress>
-  </section>
-
-  <section id="results" class="results" hidden>
-    <section class="panel" aria-labelledby="factsTitle">
-      <h2 id="factsTitle"><span class="step">2</span>Hasil &amp; cakupan audit</h2>
-      <div id="metrics" class="metrics"></div><div id="coverage" class="coverage"></div><ul id="warnings" class="warning-list"></ul>
-      <details><summary>Konfirmasi batas abstrak dan daftar referensi</summary><div>
-        <p class="hint">Pengenalan heading dapat keliru pada templat tertentu. Pilihan di sini mengubah cakupan analisis, bukan isi naskah.</p>
-        <div class="grid"><label class="field">Awal abstrak <select id="abstractStart"></select></label><label class="field">Akhir abstrak (paragraf terakhir) <select id="abstractEnd"></select></label><label class="field">Heading sebelum daftar referensi <select id="referenceStart"></select></label></div>
-        <div class="actions"><button type="button" id="applyBoundariesBtn" class="ghost">Terapkan &amp; audit ulang</button></div>
-        <h3>Abstrak yang dihitung</h3><div class="source-text" id="abstractPreview"></div><div id="abstractElements" class="elements"></div>
-      </div></details>
-      <details><summary>Lihat seluruh teks yang dibaca</summary><div><p class="hint">ID paragraf dipakai untuk menautkan bukti dan komentar Word. Teks dalam gambar tidak diekstrak dengan OCR.</p><div class="source-text" id="fullText"></div></div></details>
-    </section>
-
-    <section class="panel" aria-labelledby="refTitle">
-      <h2 id="refTitle">Verifikasi setiap referensi</h2>
-      <p class="hint">Pencocokan sitasi tidak membuktikan sumbernya nyata. Pemeriksaan online mengirim DOI atau metadata setiap referensi ke Crossref. Metadata yang tidak lengkap, pencarian gagal, dan sumber tanpa DOI tetap ditandai belum terverifikasi sampai ada bukti. Relevansi terhadap klaim memerlukan isi sumber.</p>
-      <div class="actions"><button type="button" id="verifyBtn" class="primary">Verifikasi semua referensi online</button></div>
-      <p id="refStatus" class="status info" aria-live="polite"></p>
-      <details id="referenceDetails"><summary id="referenceSummary">Daftar referensi &amp; bukti sumber</summary><div id="referenceList"></div></details>
-    </section>
-
-    <section class="panel" aria-labelledby="semanticTitle">
-      <h2 id="semanticTitle">Tinjauan substansi &amp; bahasa</h2>
-      <p class="hint">Audit lokal tidak menilai seluruh metodologi, etik, kontribusi author, grammar, atau dukungan sumber terhadap klaim. Tinjau bagian tersebut sebagai editor, atau gunakan review AI berikut. Seluruh teks dikirim tanpa pemotongan; setiap temuan harus memiliki kutipan yang cocok dengan naskah.</p>
-      <div class="instruction"><ol><li>Unduh prompt yang memuat seluruh naskah, aturan, dan bukti referensi.</li><li>Jalankan prompt pada layanan AI pilihan Anda, lalu simpan jawabannya sebagai JSON.</li><li>Impor JSON dan tinjau temuan sebelum memasukkannya ke catatan author.</li></ol></div>
-      <div class="actions"><button type="button" class="ghost" id="promptBtn">Unduh prompt review (.txt)</button><button type="button" class="ghost" id="importBtn">Impor hasil review (.json)</button></div><input type="file" id="reviewInput" accept=".json,application/json" hidden>
-      <details><summary>Review AI langsung melalui layanan editor (opsional)</summary><div>
-        <p class="hint">Gunakan proxy AI milik editor yang menerima Chat Completions JSON dan mengizinkan akses browser. Hosting statis ini tidak menyediakan proxy atau API key. Kunci penyedia disimpan di server proxy; token sesi di sini tidak disimpan.</p>
-        <div class="grid"><label class="field">URL endpoint proxy <input id="aiEndpoint" type="url" placeholder="https://layanan-editor.example/api/review" autocomplete="off"></label><label class="field">Nama model pada proxy <input id="aiModel" type="text" placeholder="Model yang tersedia pada layanan Anda" autocomplete="off"></label><label class="field">Token sesi proxy (opsional) <input id="aiToken" type="password" autocomplete="off" placeholder="Bukan API key penyedia"></label></div>
-        <p class="hint">Dengan menjalankan review langsung, Anda mengirim seluruh teks naskah dan bukti referensi ke endpoint tersebut. Pastikan layanan dan kapasitas model sesuai kebutuhan naskah.</p>
-        <div class="actions"><button type="button" class="primary" id="aiBtn">Jalankan review AI</button></div>
-      </div></details><p class="status info" id="semanticStatus" aria-live="polite"></p>
-      <details><summary>Tambahkan temuan editor berdasarkan bukti</summary><div>
-        <div class="grid two"><label class="field">Bagian catatan <select id="issueSection"><option value="1">1 Abstract</option><option value="2">2 Research Method and Findings</option><option value="3">3 Citations and References</option><option value="4">4 Reference List and DOI Verification</option><option value="5">5 Author Contribution Statement</option><option value="6">6 Language and Terminology</option><option value="7">7 Tables, Figures, and Formatting</option></select></label><label class="field">Paragraf bukti <select id="issueParagraph"></select></label></div>
-        <label class="field">Kutipan persis dari paragraf <textarea id="issueQuote" rows="2"></textarea></label><label class="field">Komentar untuk author (bahasa Inggris: masalah &amp; perbaikan) <textarea id="issueComment" rows="4"></textarea></label>
-        <div class="actions"><button type="button" class="ghost" id="addIssueBtn">Tambahkan temuan</button></div><p id="manualStatus" class="status info" aria-live="polite"></p>
-      </div></details>
-    </section>
-
-    <section class="panel" aria-labelledby="issuesTitle"><h2 id="issuesTitle"><span class="step">3</span>Pilih temuan untuk author</h2><p class="hint">Temuan heuristik dan AI dimulai tanpa centang. Centang setelah memeriksa bukti. Komentar yang tidak dipilih tidak masuk ke laporan atau komentar Word; jumlah sitasi dan status verifikasi sumber tetap dilaporkan sebagai fakta audit.</p><div id="issueList"></div></section>
-
-    <section class="export-panel" aria-labelledby="exportTitle"><h2 id="exportTitle">Catatan editorial &amp; ekspor</h2>
-      <p class="hint">Satu catatan Inggris dengan subject wajib dan penomoran tujuh bagian. Bagian tanpa masalah tidak diisi dengan komentar generik. Ekspor Word membuat salinan berkomentar, mempertahankan teks dan komentar yang sudah ada.</p>
-      <label class="confirmation"><input id="editorConfirmed" type="checkbox"><span>Saya telah meninjau seluruh naskah, aspek substantif yang belum diperiksa otomatis, kecocokan sitasi, referensi, bahasa, dan visual. Temuan terpilih telah saya konfirmasi untuk dikirim kepada author.</span></label>
-      <label class="confirmation"><input id="highlightWord" type="checkbox" checked><span>Tambahkan sorotan kuning pada paragraf yang dikomentari di salinan Word.</span></label>
-      <div class="actions"><button type="button" id="pdfBtn" class="primary">Laporan PDF (draf)</button><button type="button" id="wordBtn" class="ghost">Word berkomentar (draf)</button></div><p class="pdf-note">PDF: pilih “Save as PDF / Simpan sebagai PDF” pada dialog cetak. Matikan header/footer browser jika muncul.</p><p id="exportStatus" class="status info" aria-live="polite"></p>
-    </section>
-    <div class="preview-shell"><div class="preview-toolbar"><span>Catatan untuk author</span><span id="letterMode" class="mode">Draf otomatis</span></div><article class="report-page" id="reportPage" lang="en" aria-label="Catatan editorial untuk author"></article></div>
-  </section>
-  <footer>Audit lokal tetap di browser. Pemeriksaan Crossref dan review AI berjalan hanya saat Anda memilihnya. Berkas asli tidak ditimpa; Word keluaran berupa salinan dengan komentar editorial.</footer>
-</div>
-<script src="theme.js?v=1"></script>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
-<script src="engine.js?v=14"></script>
-<script src="i18n-translate.js?v=1"></script>
-<script src="shared-file.js?v=1"></script>
-<script src="copyediting-engine.js?v=1"></script>
-<script src="copyediting-docx.js?v=1"></script>
-<script src="copyediting-ai.js?v=1"></script>
-<script src="copyediting.js?v=1"></script>
-</body>
+<body><p>Audit Copyediting telah diperbarui ke versi lokal 3.</p><p><a href="copyediting-local.html?v=20261009-local3">Buka pemeriksaan terbaru: Indonesia, nomor berurutan, tanpa AI.</a></p></body>
 </html>
