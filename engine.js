@@ -34,7 +34,7 @@ function bigramSimilarity(s1, s2) {
 }
 
 // ---------- INSTITUTIONAL AUTHOR DETECTION ----------
-var INSTITUTION_KEYWORDS = /\b(Organization|Organisation|Organisasi|Ministry|Kementerian|Department|Departemen|Institute|Institut|University|Universitas|Agency|Agensi|Badan|Dinas|Komisi|Commission|Council|Dewan|Association|Asosiasi|Perhimpunan|Ikatan|Committee|Panitia|Bureau|Biro|Corporation|Corp\.?|Inc\.?|Foundation|Yayasan|Center|Centre|Pusat|Bank|WHO|UNESCO|UNICEF|UNDP|WWF|FAO|World|National|Nasional|Federal|State|Pemerintah|Government|Perusahaan|PT\.?|Fakultas|Faculty|Sekolah|School|Rumah\s+Sakit|Hospital|Perpustakaan|Library|Laboratorium|Laboratory)\b/i;
+var INSTITUTION_KEYWORDS = /\b(Organization|Organisation|Organisasi|Ministry|Kementerian|Department|Departemen|Institute|Institut|University|Universitas|Agency|Agensi|Office|Badan|Dinas|Komisi|Commission|Council|Dewan|Association|Asosiasi|Perhimpunan|Ikatan|Committee|Panitia|Bureau|Biro|Corporation|Corp\.?|Inc\.?|Foundation|Yayasan|Center|Centre|Pusat|Bank|WHO|UNESCO|UNICEF|UNDP|WWF|FAO|World|National|Nasional|Federal|State|Pemerintah|Government|Perusahaan|PT\.?|Fakultas|Faculty|Sekolah|School|Rumah\s+Sakit|Hospital|Perpustakaan|Library|Laboratorium|Laboratory)\b/i;
 
 var ACRONYM_PATTERN = /^[A-Z]{2,8}$/;
 
@@ -105,6 +105,16 @@ function isClearlyInstitutionalAuthor(str) {
   if (!str) return false;
   var s = str.trim().replace(/\.$/, '');
   return ACRONYM_PATTERN.test(s) || !!extractAcronymPairing(s) || INSTITUTION_KEYWORDS.test(s);
+}
+
+// An explicit comma list ending in ", &"/", and" denotes separate group authors.
+// Keep hierarchical comma-separated names and unpunctuated "X & Y" names intact:
+// those can denote one organization and cannot safely be split from text alone.
+function splitInstitutionalAuthorList(str) {
+  var s = (str || '').trim().replace(/\.\s*$/, '');
+  if (!/,\s*(?:&|and\b|dan\b)\s*/i.test(s)) return null;
+  var names = s.replace(/,\s*(?:&|and\b|dan\b)\s*/i, ', ').split(/\s*,\s*/).filter(Boolean);
+  return names.length >= 2 && names.every(isInstitutionalAuthor) ? names : null;
 }
 
 // extract "Full Name (ACR)" or "Full Name [ACR]" pairing from institutional citations
@@ -447,7 +457,9 @@ function extractAuthorDateCitations(text) {
     var parts = parseParentheticalAuthorDate(content);
     if (parts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parts, position: m.index });
   }
-  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  // Consecutive connectors ("of the", "for the", "van der") belong to the
+  // author name; requiring a capitalized word after each connector loses its prefix.
+  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -642,7 +654,7 @@ function parseSingleAuthorDate(text) {
   // introducing its own acronym — its official name may itself legitimately contain "and"
   // (e.g. "Organisation for Economic Co-operation and Development [OECD]"), which must NOT be
   // misread as a personal-author separator splitting it into two fake "co-authors".
-  var authors = (extractAcronymPairing(cleanAuthorPart) || isInstitutionalAuthor(cleanAuthorPart)) ? [cleanAuthorPart] : splitOnSeparators(cleanAuthorPart);
+  var authors = splitInstitutionalAuthorList(cleanAuthorPart) || ((extractAcronymPairing(cleanAuthorPart) || isInstitutionalAuthor(cleanAuthorPart)) ? [cleanAuthorPart] : splitOnSeparators(cleanAuthorPart));
   var authorCount = authors.length;
   if (hasEtAl) authorCount = Math.max(authorCount, 3);
   var firstAuthor = authors[0] || null;
@@ -656,6 +668,9 @@ function parseSingleAuthorDate(text) {
 }
 
 var MONTH_NAME_SOURCE = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)';
+// APA references may carry a month/day after the year. Consume the entire date so
+// "June 26" is not mistaken for author/title text, while citation keys keep just 2025.
+var REFERENCE_DATE_RE = new RegExp('\\((\\d{4}[a-z]?|n\\.d\\.)(?:,\\s*' + MONTH_NAME_SOURCE + '\\.?(?:\\s+\\d{1,2})?)?\\)', 'i');
 var MONTH_DAY_YEAR_RE = new RegExp('\\b' + MONTH_NAME_SOURCE + '\\s+\\d{1,2}(?:st|nd|rd|th)?\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
 var DAY_MONTH_YEAR_RE = new RegExp('\\b\\d{1,2}(?:st|nd|rd|th)?\\s+' + MONTH_NAME_SOURCE + '\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
 
@@ -831,6 +846,8 @@ function parseAuthorsForStyle(authorStr, styleId) {
   var style = STYLES[styleId];
   if (!authorStr || !authorStr.trim()) return { authors: [], isInstitutional: false };
   var trimmed = authorStr.trim();
+  var institutionalAuthors = splitInstitutionalAuthorList(trimmed);
+  if (institutionalAuthors) return { authors: institutionalAuthors, isInstitutional: true };
   if (!looksLikeNonInvertedAuthorList(trimmed) && isInstitutionalAuthor(trimmed.replace(/,\s*$/, ''))) {
     return { authors: [trimmed.replace(/\.\s*$/, '')], isInstitutional: true };
   }
@@ -949,7 +966,7 @@ var FormatDetector = {
     lines.forEach(function(line) {
       if (/^\[\d+\]/.test(line)) { scores.ieee += 4; }
       if (/^\d+\.\s/.test(line)) { scores.vancouver += 3; scores.mla9 -= 0.5; }
-      if (/\(\d{4}[a-z]?\)/.test(line)) { scores.apa7 += 1; scores.harvard += 1; }
+      if (REFERENCE_DATE_RE.test(line)) { scores.apa7 += 1; scores.harvard += 1; }
       if (/^\S[^()]*\.\s*\d{4}\.\s/.test(line)) { scores.chicago += 3; } // Author. Year. "Title."
       if (/["""][^"""]+["""]/.test(line)) { scores.chicago += 1; scores.ieee += 1; scores.mla9 += 1; }
       if (/'[^']+'/.test(line)) { scores.harvard += 2; anyQuotedTitle = true; }
@@ -986,7 +1003,7 @@ function extractYear(line, style) {
     var m = line.match(/\.\s*(\d{4}[a-z]?)\.\s/);
     if (m) return m[1];
   }
-  var m2 = line.match(/\((\d{4}[a-z]?|n\.d\.)\)/);
+  var m2 = line.match(REFERENCE_DATE_RE);
   if (m2) return m2[1];
   // Numeric-family (IEEE/Vancouver) references state the year as bare text near the END of the
   // citation info, e.g. "..., pp. 1944-1958, 2025. doi: ...". Taking the FIRST 19xx/20xx-looking
@@ -1298,7 +1315,7 @@ function parseAuthorDateOrPageStyleLine(raw, style, styleId) {
     yearMatch = raw.match(/^(.*?)\.\s*(\d{4}[a-z]?)\.\s/);
     if (yearMatch) { authorSeg2 = yearMatch[1]; year2 = yearMatch[2]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
   } else {
-    yearMatch = raw.match(/\((\d{4}[a-z]?|n\.d\.)\)/);
+    yearMatch = raw.match(REFERENCE_DATE_RE);
     if (yearMatch) { authorSeg2 = raw.substring(0, yearMatch.index).trim(); year2 = yearMatch[1]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
   }
   if (!yearMatch) {
@@ -1806,8 +1823,8 @@ function buildApa7DisambiguationPlan(references, styleId) {
 }
 
 function formatApa7CitationForReference(ref, styleId, plan, narrative, pageInfo, firstAuthorOverride) {
-  if (!ref || ref.isInstitutional) return null;
-  var names = (ref.authors || []).map(function(author) { return surnameOf(author, styleId); });
+  if (!ref || (ref.isInstitutional && ref.authorCount <= 1)) return null;
+  var names = (ref.authors || []).map(function(author) { return ref.isInstitutional ? author : surnameOf(author, styleId); });
   if (!names.length) return null;
   if (plan && plan.initialPositions) {
     plan.initialPositions.forEach(function(index) {
@@ -1891,6 +1908,23 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
       return { score: 0.55, confidence: 0.55, reason: 'fuzzy-prefix', reviewOnly: true };
     }
     return null;
+  }
+
+  // Multiple institutional coauthors obey the same explicit-prefix requirement as
+  // personal coauthors. Match every named institution, never just a shared lead acronym.
+  if (ref.authors && ref.authors.length > 1) {
+    var groupNames = allAuthorNames && allAuthorNames.length ? allAuthorNames : [firstAuthor];
+    if (groupNames.length > ref.authors.length) return null;
+    if (options.hasEtAl === false && groupNames.length > 1 && groupNames.length !== ref.authors.length) return null;
+    var groupMatch = null;
+    for (var groupIdx = 0; groupIdx < groupNames.length; groupIdx++) {
+      var memberMatch = authorDateCandidateScore(groupNames[groupIdx], [groupNames[groupIdx]], {
+        firstAuthor: ref.authors[groupIdx], authors: [ref.authors[groupIdx]], isInstitutional: true,
+      }, styleId, acronymMap, options);
+      if (!memberMatch) return null;
+      if (!groupMatch || memberMatch.score < groupMatch.score) groupMatch = memberMatch;
+    }
+    return { score: groupMatch.score + (groupNames.length > 1 ? 0.04 : 0), confidence: groupMatch.confidence, reason: groupMatch.reason };
   }
 
   var citationVariants = [firstAuthor];
@@ -2314,7 +2348,7 @@ MultiFormatValidator.prototype.validateAuthorDate = function() {
   }
 
   function validateResolvedAuthorForm(ref, detail) {
-    if (!ref || ref.isInstitutional) return;
+    if (!ref || (ref.isInstitutional && ref.authorCount <= 1)) return;
 
     if (self.styleId !== 'apa7') {
       if (ref.authorCount <= 2 && detail.part.hasEtAl) {
@@ -2816,6 +2850,13 @@ MultiFormatValidator.prototype.detectDuplicateReferences = function() {
         var a = refs[i], b = refs[j];
         if (!a.title || !b.title) continue;
         if (a.title.length < 25 || b.title.length < 25) continue; // short titles: one word can differ a lot yet still look "similar" by bigram count
+        // Annual reports often differ only in their reporting year. Distinct years
+        // stated in both titles identify separate editions, not duplicate entries.
+        // The same-DOI check above still catches an incorrectly reused identifier.
+        var aTitleYears = a.title.match(/\b(?:19|20)\d{2}\b/g) || [];
+        var bTitleYears = b.title.match(/\b(?:19|20)\d{2}\b/g) || [];
+        if (a.year && b.year && a.year !== b.year && aTitleYears.length && bTitleYears.length &&
+            aTitleYears.join(',') !== bTitleYears.join(',')) continue;
         var sim = bigramSimilarity(a.title, b.title);
         if (sim >= 0.88) {
           // A near-identical TITLE alone isn't sufficient — many templated source types (bank
@@ -3243,7 +3284,7 @@ function findIntroductionHeading(fullText) {
 // to stop merging further lines onto it, so unrelated content starting right after (see below)
 // can't get glued on just because it doesn't itself look like a new reference's opening line.
 function chunkLooksStructurallyComplete(t) {
-  if (!/\(\d{4}[a-z]?\)|(?:^|\s)(19|20)\d{2}[a-z]?[.,)]/.test(t) && !/\bn\.d\./i.test(t)) return false;
+  if (!REFERENCE_DATE_RE.test(t) && !/(?:^|\s)(19|20)\d{2}[a-z]?[.,)]/.test(t) && !/\bn\.d\./i.test(t)) return false;
   var end = t.replace(/\s+$/, '');
   return /[.)]$/.test(end) || /https?:\/\/\S+$/.test(end) || /\d{4,9}\/[^\s]*$/.test(end);
 }
@@ -3341,7 +3382,7 @@ function rejoinWrappedReferenceLines(text) {
     if (!/^[\p{Lu}\p{Lo}]/u.test(t)) return false;
     var head100 = t.slice(0, 100);
     var head220 = t.slice(0, 220);
-    return /,/.test(head100) && /\(\d{4}[a-z]?\)/.test(head220);
+    return /,/.test(head100) && REFERENCE_DATE_RE.test(head220);
   }
   var merged = [];
   var current = null;

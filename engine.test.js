@@ -1790,6 +1790,101 @@ test('convert() renders the book chapter in full, correct APA7 form end to end',
     'Odia, J. O., & Odia, A. A. (2020). Accessibility to higher education in Nigeria: The pains, problems, and prospects. In Information Resources Management Association (Ed.), Accessibility and Diversity in Education: Breakthroughs in Research and Practice (pp. 80-100). IGI Global. https://doi.org/10.4018/978-1-7998-1213-5.ch005');
 });
 
+console.log('\n=== Regression: full publication dates and institutional coauthors ===');
+
+test('APA publication dates retain the year and consume the month/day before the title', () => {
+  for (const date of ['2025, June 26', '2025, June', '2025, Jun. 26']) {
+    const ref = CE.parseReferenceLine('Onanuga, B. (' + date + '). New tax laws. The State House. https://example.org/news', 'apa7');
+    assert.ok(ref);
+    assert.strictEqual(ref.firstAuthor, 'Onanuga, B');
+    assert.strictEqual(ref.year, '2025');
+    assert.strictEqual(ref.title, 'New tax laws');
+  }
+});
+
+test('dated news references match both narrative and parenthetical citations without parse failures', () => {
+  const result = validate('Onanuga (2025) explains the reform (Onanuga, 2025).',
+    'Onanuga, B. (2025, June 26). New tax laws. The State House. https://example.org/news');
+  assert.strictEqual(result.parseStats.failedCount, 0);
+  assert.strictEqual(result.errors.length, 0);
+  assert.ok(result.citations.every(c => c.matched || (c.parts && c.parts.every(p => p.matched))));
+});
+
+test('a wrapped news reference is not merged into the following dated reference', () => {
+  const text = 'Adams, A. (2025, June 26). A news report\ncontinued on this line.\n' +
+    'Onanuga, B. (2025, June 27). Another news report\ncontinued here. https://example.org/news';
+  const refs = CE.parseReferenceList(CE.rejoinWrappedReferenceLines(text), 'apa7');
+  assert.strictEqual(refs.length, 2);
+  assert.ok(refs[0].raw.includes('continued on this line.'));
+  assert.strictEqual(refs[1].firstAuthor, 'Onanuga, B');
+});
+
+test('an explicit Oxford-comma list retains three separate institutional authors', () => {
+  const ref = CE.parseReferenceLine('OECD, African Union Commission, & African Tax Administration Forum. (2024). Revenue statistics in Africa 2024. OECD Publishing.', 'apa7');
+  assert.strictEqual(ref.isInstitutional, true);
+  assert.deepStrictEqual(ref.authors, ['OECD', 'African Union Commission', 'African Tax Administration Forum']);
+  assert.strictEqual(ref.firstAuthor, 'OECD');
+  assert.strictEqual(ref.authorCount, 3);
+});
+
+test('institutional et al. citations match their coauthored reference in both forms', () => {
+  const result = validate('OECD et al. (2024) provide context (OECD et al., 2024).',
+    'OECD, African Union Commission, & African Tax Administration Forum. (2024). Revenue statistics in Africa 2024. OECD Publishing.');
+  assert.strictEqual(result.errors.length, 0);
+  assert.strictEqual(result.references[0].cited, true);
+  assert.strictEqual(result.citations[0].parts[0].matched, true);
+  assert.strictEqual(result.citations[1].matched, true);
+});
+
+test('institutional coauthor matching abstains on a shared lead author and distinguishes explicit coauthors', () => {
+  const refs = CE.parseReferenceList('OECD, African Union Commission, & African Tax Administration Forum. (2024). First report. Publisher.\n' +
+    'OECD, World Bank, & United Nations Development Programme. (2024). Second report. Publisher.', 'apa7');
+  assert.strictEqual(CE.resolveAuthorDateReference('OECD', ['OECD'], '2024', refs, 'apa7', {}, { hasEtAl: true }).status, 'ambiguous');
+  const names = ['OECD', 'World Bank', 'United Nations Development Programme'];
+  const decision = CE.resolveAuthorDateReference(names[0], names, '2024', refs, 'apa7', {}, { hasEtAl: false });
+  assert.strictEqual(decision.status, 'matched');
+  assert.strictEqual(decision.ref, refs[1]);
+});
+
+test('an unpunctuated joint institution and a hierarchical comma name remain single group authors', () => {
+  for (const name of ['Institute of International Finance & Deloitte', 'Legislative Department, Ministry of Law and Justice, Government of India']) {
+    const ref = CE.parseReferenceLine(name + '. (2024). A report. Publisher.', 'apa7');
+    assert.strictEqual(ref.authorCount, 1);
+    assert.strictEqual(ref.firstAuthor, name);
+  }
+});
+
+test('consecutive connectors preserve complete Office names and their narrative positions', () => {
+  const name = 'Office of the Auditor-General for the Federation';
+  const article = 'According to the ' + name + ' (2024), oversight matters.';
+  const citations = CE.extractAuthorDateCitations(article);
+  assert.strictEqual(citations.length, 1);
+  assert.strictEqual(citations[0].authors, name);
+  assert.strictEqual(citations[0].position, article.indexOf(name));
+  const result = validate(article + ' (' + name + ', 2024).', name + '. (2024). Performance report. https://example.org/audit');
+  assert.strictEqual(result.references[0].isInstitutional, true);
+  assert.strictEqual(result.errors.length, 0);
+});
+
+test('different reporting years in similar annual report titles do not imply duplicate entries', () => {
+  const refs = 'International Monetary Fund. (2025). Nigeria: 2025 Article IV consultation and staff report. https://doi.org/10.5089/example2025\n' +
+    'International Monetary Fund. (2026). Nigeria: 2026 Article IV consultation and staff report. https://doi.org/10.5089/example2026';
+  const result = validate('(IMF, 2025; IMF, 2026)', refs);
+  assert.ok(!errorTitles(result).some(t => /duplikat/i.test(t)));
+  const repeatedDoi = validate('(IMF, 2025; IMF, 2026)', refs.replace('example2026', 'example2025'));
+  assert.ok(errorTitles(repeatedDoi).includes('DOI duplikat'));
+});
+
+test('genuinely missing years and uncited references remain visible after institutional/date fixes', () => {
+  const result = validate('IMF (2015) and Onanuga (2025) discuss policy.',
+    'Browne, M., & Rockloff, M. J. (2018). Prevalence of gambling-related harm. Journal, 7(2), 410-422.\n' +
+    'International Monetary Fund. (2025). Nigeria: 2025 Article IV consultation. Publisher.\n' +
+    'Onanuga, B. (2025, June 26). New tax laws. https://example.org/news');
+  assert.ok(result.errors.some(e => e.title === 'Sitasi tidak ada di daftar referensi' && e.code === 'IMF (2015)'));
+  assert.ok(result.errors.some(e => e.title === 'Referensi tidak disitasi dalam teks' && /Browne/.test(e.code)));
+  assert.ok(!result.errors.some(e => e.title === 'Sitasi tidak ada di daftar referensi' && /Onanuga/.test(e.code)));
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(pass + ' passed, ' + fail + ' failed (of ' + (pass + fail) + ' total)');
 if (fail > 0) {

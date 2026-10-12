@@ -956,6 +956,67 @@ test('permissive mode may apply one unique fuzzy candidate but still exposes its
   assert.strictEqual(result.linkedDetails[0].confidence, 0.55);
 });
 
+console.log('\n=== Regression: dated sources and institutional references in DOCX ===');
+
+test('dated news and institutional coauthors link to the correct references with text preserved', () => {
+  const xmlDoc = xmlDocFromParas([
+    para(run('INTRODUCTION')),
+    para(run('Onanuga (2025) explains policy (Onanuga, 2025; OECD et al., 2024).')),
+    para(run('OECD et al. (2024) report comparative evidence.')),
+    para(run('REFERENCES')),
+    para(run('OECD, African Union Commission, & African Tax Administration Forum. (2024). Revenue statistics in Africa. Publisher.')),
+    para(run('Onanuga, B. (2025, June 26). New tax laws. Publisher.')),
+  ]);
+  const before = plainText(xmlDoc);
+  const result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.refCount, 2);
+  assert.strictEqual(result.linked, 4);
+  assert.strictEqual(result.unmatched.length, 0);
+  assert.strictEqual(result.refParseFailed.length, 0);
+  const links = Array.from(xmlDoc.getElementsByTagName('w:hyperlink'));
+  for (const link of links) {
+    const text = Array.from(link.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+    assert.strictEqual(link.getAttribute('w:anchor'), /Onanuga/.test(text) ? 'Onanuga2025' : 'OECD2024');
+  }
+  assert.strictEqual(plainText(xmlDoc), before);
+  assert.strictEqual(result.integrity.ok, true);
+  const second = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(second.newlyLinked, 0);
+  assert.strictEqual(second.alreadyLinked, 4);
+});
+
+test('full Office names link without stealing their last word as a personal surname', () => {
+  const name = 'Office of the Auditor-General for the Federation';
+  const xmlDoc = xmlDocFromParas([
+    para(run('INTRODUCTION')),
+    para(run(name + ' (2024) reports findings. Federation (2024) is a different citation.')),
+    para(run('REFERENCES')),
+    para(run(name + '. (2024). Performance report. Publisher.')),
+  ]);
+  const result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7' });
+  assert.strictEqual(result.linked, 1);
+  assert.deepStrictEqual(result.unmatched, ['Federation (2024)']);
+  const link = xmlDoc.getElementsByTagName('w:hyperlink')[0];
+  assert.strictEqual(Array.from(link.getElementsByTagName('w:t')).map(t => t.textContent).join(''), name + ' (2024)');
+  assert.strictEqual(result.integrity.ok, true);
+});
+
+test('a missing IMF year stays unmatched while a dated source still links in year-only mode', () => {
+  const xmlDoc = xmlDocFromParas([
+    para(run('INTRODUCTION')),
+    para(run('IMF (2015) and Onanuga (2025) discuss policy.')),
+    para(run('REFERENCES')),
+    para(run('International Monetary Fund. (2025). Annual report. Publisher.')),
+    para(run('Onanuga, B. (2025, June 26). New tax laws. Publisher.')),
+  ]);
+  const result = CitationLinker.linkDocx(xmlDoc, { styleId: 'apa7', linkScope: 'year' });
+  assert.strictEqual(result.linked, 1);
+  assert.deepStrictEqual(result.unmatched, ['IMF (2015)']);
+  const link = xmlDoc.getElementsByTagName('w:hyperlink')[0];
+  assert.strictEqual(link.getAttribute('w:anchor'), 'Onanuga2025');
+  assert.strictEqual(link.textContent, '2025');
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);
