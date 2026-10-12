@@ -14,9 +14,12 @@
     linkScope: document.getElementById('linkScope'),
     applyColor: document.getElementById('applyColor'),
     linkColor: document.getElementById('linkColor'),
+    linkColorPreset: document.getElementById('linkColorPreset'),
+    linkColorPreview: document.getElementById('linkColorPreview'),
     narrowToHighlight: document.getElementById('narrowToHighlight'),
     onlyHighlighted: document.getElementById('onlyHighlighted'),
     linkReferenceUrls: document.getElementById('linkReferenceUrls'),
+    repairExternalLinks: document.getElementById('repairExternalLinks'),
     linkFiguresTables: document.getElementById('linkFiguresTables'),
     processBtn: document.getElementById('processBtn'),
     statusMsg: document.getElementById('statusMsg'),
@@ -47,9 +50,23 @@
     return d.innerHTML;
   }
 
-  els.applyColor.addEventListener('change', function () {
+  function updateColorControls() {
     els.linkColor.disabled = !els.applyColor.checked;
+    els.linkColorPreset.disabled = !els.applyColor.checked;
+    els.linkColorPreview.style.color = els.linkColor.value;
+    els.linkColorPreview.style.opacity = els.applyColor.checked ? '1' : '.5';
+  }
+  els.applyColor.addEventListener('change', updateColorControls);
+  els.linkColorPreset.addEventListener('change', function () {
+    if (els.linkColorPreset.value !== 'custom') els.linkColor.value = els.linkColorPreset.value;
+    updateColorControls();
   });
+  els.linkColor.addEventListener('input', function () {
+    var value = els.linkColor.value.toUpperCase();
+    els.linkColorPreset.value = value === '#0000FF' || value === '#0563C1' ? value : 'custom';
+    updateColorControls();
+  });
+  updateColorControls();
 
   // ---------- file selection ----------
   els.dropzone.addEventListener('click', function () { els.fileInput.click(); });
@@ -138,6 +155,7 @@
           narrowToHighlight: els.narrowToHighlight.checked,
           onlyHighlighted: els.onlyHighlighted.checked,
           linkReferenceUrls: els.linkReferenceUrls ? els.linkReferenceUrls.checked : true,
+          repairExternalLinks: els.repairExternalLinks.checked,
           linkFiguresTables: els.linkFiguresTables ? els.linkFiguresTables.checked : false,
           relsXmlDoc: relsXmlDoc
         });
@@ -150,7 +168,7 @@
         var serializer = new XMLSerializer();
         var newXmlStr = serializer.serializeToString(xmlDoc);
         bundle.zip.file('word/document.xml', newXmlStr);
-        if (result.urlsLinked > 0) {
+        if (result.urlsLinked > 0 || result.externalLinksRepaired > 0) {
           bundle.zip.file('word/_rels/document.xml.rels', serializer.serializeToString(relsXmlDoc));
         }
         return bundle.zip.generateAsync({
@@ -206,13 +224,17 @@
         figTblNote = '<div class="pb-stats" style="margin-top:4px;">🖼️ Tidak ditemukan caption "Figure N."/"Table N." di naskah — tidak ada yang bisa ditautkan.</div>';
       }
     }
+    var repairNote = els.repairExternalLinks.checked
+      ? '<div class="pb-stats" style="margin-top:4px;">' + result.externalLinksExamined + ' tautan eksternal diperiksa &middot; ' +
+        result.externalLinksRepaired + ' target diperbaiki &middot; ' + result.externalTrackingCleaned + ' tautan dibersihkan dari pelacakan</div>'
+      : '';
     els.parseBanner.innerHTML =
       '<div class="parse-banner ' + bannerClass + '">' +
       '<div class="pb-title">Gaya sitasi: ' + escHtml(styleLabel) + '</div>' +
       '<div class="pb-stats">' + result.refCount + ' referensi terdeteksi &middot; ' + result.linked + ' sitasi tertaut &middot; ' + result.unmatched.length + ' tidak cocok' +
       (result.reviewRequired ? ' &middot; ' + result.reviewRequired + ' perlu ditinjau' : '') +
       (result.protectedControlsSkipped ? ' &middot; ' + result.protectedControlsSkipped + ' field sitasi dilindungi' : '') + '</div>' +
-      hlNote + figTblNote +
+      hlNote + figTblNote + repairNote +
       '</div>';
 
     els.summaryGrid.innerHTML =
@@ -222,10 +244,20 @@
       (result.reviewRequired ? '<div class="sum-card warn"><div class="n">' + result.reviewRequired + '</div><div class="l">Perlu Ditinjau</div></div>' : '') +
       '<div class="sum-card fmt"><div class="n">' + escHtml(result.styleName) + '</div><div class="l">Gaya</div></div>' +
       (result.urlsLinked ? '<div class="sum-card ok"><div class="n">' + result.urlsLinked + '</div><div class="l">URL Referensi Ditautkan</div></div>' : '') +
+      (els.repairExternalLinks.checked ? '<div class="sum-card ok"><div class="n">' + result.externalLinksRepaired + '</div><div class="l">Target URL Diperbaiki</div></div>' : '') +
       (els.linkFiguresTables && els.linkFiguresTables.checked ? '<div class="sum-card ok"><div class="n">' + result.figuresTablesLinked + '</div><div class="l">Figure/Table Tertaut</div></div>' : '') +
       (els.linkFiguresTables && els.linkFiguresTables.checked ? '<div class="sum-card"><div class="n">' + result.figuresTablesCaptionsFound + '</div><div class="l">Caption Figure/Table</div></div>' : '');
 
     var html = '';
+    if (result.externalRepairDetails && result.externalRepairDetails.length) {
+      html += '<h3>Tautan eksternal yang diperbaiki</h3>';
+      result.externalRepairDetails.slice(0, 10).forEach(function (detail) {
+        html += '<div class="cite-row"><span style="min-width:0;overflow-wrap:anywhere;">' + escHtml(detail.text) +
+          '<br><small>Sebelumnya: ' + escHtml(detail.before) + '<br>Tujuan baru: ' + escHtml(detail.after) +
+          '</small></span><span class="tag ok">diperbaiki</span></div>';
+      });
+      if (result.externalRepairDetails.length > 10) html += '<div class="more-note">...dan ' + (result.externalRepairDetails.length - 10) + ' tautan lainnya.</div>';
+    }
     if (result.unmatched.length) {
       html += '<h3>Sitasi yang tidak berhasil ditautkan — cek manual</h3>';
       result.unmatched.slice(0, 40).forEach(function (u, idx) {

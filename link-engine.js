@@ -292,6 +292,8 @@
     var colorEl;
     if (colorList.length) colorEl = colorList[0];
     else { colorEl = xmlDoc.createElementNS(W_NS, 'w:color'); rPr.appendChild(colorEl); }
+    // A theme color overrides w:val in Word. Fixed presets must remove that override.
+    ['themeColor', 'themeTint', 'themeShade'].forEach(function (attr) { colorEl.removeAttributeNS(W_NS, attr); });
     colorEl.setAttributeNS(W_NS, 'w:val', colorHex.replace('#', ''));
   }
 
@@ -579,6 +581,8 @@
         else { anyFail = true; anyProtected = true; }
       } else if (g.key && g.key.tagName === 'w:hyperlink') {
         var already = g.key.getAttribute('w:anchor') === bookmarkName;
+        // r:id would keep this an external link even after setting an internal anchor.
+        if (g.key.hasAttributeNS(R_NS, 'id')) { g.key.removeAttributeNS(R_NS, 'id'); already = false; }
         if (!already) {
           g.key.setAttributeNS(W_NS, 'w:anchor', bookmarkName);
           g.key.setAttributeNS(W_NS, 'w:history', '1');
@@ -726,17 +730,18 @@
   // Relationship baru di file .rels dan kembalikan rId barunya.
   function ensureExternalRelationship(relsXmlDoc, url) {
     var root = relsXmlDoc.documentElement;
-    var rels = root.getElementsByTagName('Relationship');
+    var rels = root.getElementsByTagNameNS(root.namespaceURI, 'Relationship');
     var maxNum = 0;
     for (var i = 0; i < rels.length; i++) {
-      if (rels[i].getAttribute('Target') === url && rels[i].getAttribute('TargetMode') === 'External') {
+      if (rels[i].getAttribute('Target') === url && rels[i].getAttribute('TargetMode') === 'External' &&
+          rels[i].getAttribute('Type') === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink') {
         return rels[i].getAttribute('Id');
       }
       var m = /^rId(\d+)$/.exec(rels[i].getAttribute('Id') || '');
       if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
     }
     var newId = 'rId' + (maxNum + 1);
-    var newRel = relsXmlDoc.createElement('Relationship');
+    var newRel = relsXmlDoc.createElementNS(root.namespaceURI, 'Relationship');
     newRel.setAttribute('Id', newId);
     newRel.setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink');
     newRel.setAttribute('Target', url);
@@ -748,7 +753,7 @@
   // Menaut setiap URL/DOI polos yang ditemukan di paragraf REFERENSI (bukan badan artikel —
   // link internal sitasi sudah ditangani terpisah). Melewati URL yang sudah di dalam
   // <w:hyperlink> (sudah bisa diklik, tidak perlu disentuh).
-  function linkifyReferenceUrls(xmlDoc, relsXmlDoc, refParas) {
+  function linkifyReferenceUrls(xmlDoc, relsXmlDoc, refParas, colorHex, cleanTracking) {
     var linked = 0;
     refParas.forEach(function (paraObj) {
       var p = paraObj.el;
@@ -762,13 +767,91 @@
         var overlapping = info.infos.filter(function (inf) { return inf.end > mt.start && inf.start < mt.end; });
         if (overlapping.length === 0) return;
         var alreadyLinked = overlapping.every(function (inf) { return !!findWrapperHyperlink(inf.run, p); });
-        if (alreadyLinked) return; // URL ini sudah bisa diklik, tidak perlu disentuh
+        if (alreadyLinked) {
+          if (colorHex) overlapping.forEach(function (inf) { applyColorToRun(xmlDoc, inf.run, colorHex); });
+          return;
+        }
         if (overlapping.some(function (inf) { return !inf.spliceable; })) return; // sebagian di wrapper lain (tracked-change dst.) — lewati demi aman
-        var rId = ensureExternalRelationship(relsXmlDoc, mt.url);
-        if (wrapWithExternalHyperlink(xmlDoc, p, mt.start, mt.end, rId)) linked++;
+        var url = cleanTracking ? cleanTrackingUrl(mt.url) : mt.url;
+        var rId = ensureExternalRelationship(relsXmlDoc, url);
+        if (wrapWithExternalHyperlink(xmlDoc, p, mt.start, mt.end, rId, colorHex)) linked++;
       });
     });
     return linked;
+  }
+
+  function isHttpUrl(value) {
+    if (!/^https?:\/\/\S+$/i.test(value || '')) return false;
+    try { var url = new URL(value); return !!url.hostname && /^(https?:)$/.test(url.protocol); }
+    catch (e) { return false; }
+  }
+
+  // Filter raw query pairs so retained parameters keep their exact encoding, order,
+  // repeated keys, and fragment. Removing all text after "?" would break functional URLs.
+  function cleanTrackingUrl(value) {
+    if (!isHttpUrl(value)) return value;
+    var fragmentAt = value.indexOf('#');
+    var fragment = fragmentAt < 0 ? '' : value.slice(fragmentAt);
+    var base = fragmentAt < 0 ? value : value.slice(0, fragmentAt);
+    var queryAt = base.indexOf('?');
+    if (queryAt < 0) return value;
+    var pairs = base.slice(queryAt + 1).split('&');
+    var kept = pairs.filter(function (pair) {
+      var name = pair.split('=')[0];
+      try { name = decodeURIComponent(name.replace(/\+/g, ' ')); } catch (e) {}
+      return !/^utm_/i.test(name) && !/^(?:fbclid|gclid|dclid|msclkid|mc_cid|mc_eid)$/i.test(name);
+    });
+    if (kept.length === pairs.length) return value;
+    var query = kept.join('&');
+    return base.slice(0, queryAt) + (query ? '?' + query : '') + fragment;
+  }
+
+  function visibleHyperlinkTarget(text) {
+    var value = (text || '').trim();
+    if (isHttpUrl(value)) return trimTrailingPunctuation(value);
+    var doi = value.match(/^(?:doi\s*:\s*)?(10\.\d{4,9}\/\S+)$/i);
+    if (doi) return 'https://doi.org/' + trimTrailingPunctuation(doi[1]);
+    if (/^(?:doi\.org\/10\.\d{4,9}\/|www\.)\S+$/i.test(value)) {
+      var url = 'https://' + trimTrailingPunctuation(value);
+      if (isHttpUrl(url)) return url;
+    }
+    return null; // A title/author label does not reveal its destination URL.
+  }
+
+  // Update each hyperlink separately: several labels can share one relationship but
+  // display different correct URLs. Rebinding r:id avoids changing another label's target.
+  function repairExternalHyperlinks(xmlDoc, relsXmlDoc, colorHex) {
+    var rels = relsXmlDoc.documentElement.getElementsByTagNameNS(relsXmlDoc.documentElement.namespaceURI, 'Relationship');
+    var byId = {};
+    for (var ri = 0; ri < rels.length; ri++) byId[rels[ri].getAttribute('Id')] = rels[ri];
+    var result = { examined: 0, repaired: 0, trackingCleaned: 0, rebuiltFromText: 0, details: [] };
+    var links = xmlDoc.getElementsByTagNameNS(W_NS, 'hyperlink');
+    for (var li = 0; li < links.length; li++) {
+      var link = links[li];
+      var rel = byId[link.getAttributeNS(R_NS, 'id')];
+      if (!rel || rel.getAttribute('TargetMode') !== 'External' ||
+          rel.getAttribute('Type') !== 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink') continue;
+      var oldTarget = rel.getAttribute('Target');
+      if (!isHttpUrl(oldTarget)) continue;
+      result.examined++;
+      var texts = link.getElementsByTagNameNS(W_NS, 't'), text = '';
+      for (var ti = 0; ti < texts.length; ti++) text += texts[ti].textContent;
+      var visibleTarget = visibleHyperlinkTarget(text);
+      var candidate = visibleTarget || oldTarget;
+      var target = cleanTrackingUrl(candidate);
+      if (colorHex) {
+        var runs = link.getElementsByTagNameNS(W_NS, 'r');
+        for (var ci = 0; ci < runs.length; ci++) applyColorToRun(xmlDoc, runs[ci], colorHex);
+      }
+      if (target === oldTarget) continue;
+      link.setAttributeNS(R_NS, 'r:id', ensureExternalRelationship(relsXmlDoc, target));
+      if (visibleTarget) link.removeAttributeNS(W_NS, 'anchor');
+      result.repaired++;
+      if (visibleTarget) result.rebuiltFromText++;
+      if (cleanTrackingUrl(oldTarget) !== oldTarget || target !== candidate) result.trackingCleaned++;
+      result.details.push({ text: text, before: oldTarget, after: target, fromText: !!visibleTarget });
+    }
+    return result;
   }
 
   // ---------- Opsional: tautkan sebutan "Figure N" / "Table N" ke gambar/tabelnya ----------
@@ -1184,8 +1267,12 @@
     // dikirim si pemanggil, karena link eksternal perlu entri Relationship baru yang TIDAK bisa
     // dibuat cukup dari document.xml saja.
     var urlsLinked = 0;
+    var externalRepair = { examined: 0, repaired: 0, trackingCleaned: 0, rebuiltFromText: 0, details: [] };
+    if (options.repairExternalLinks && options.relsXmlDoc) {
+      externalRepair = repairExternalHyperlinks(xmlDoc, options.relsXmlDoc, linkColor);
+    }
     if (options.linkReferenceUrls !== false && options.relsXmlDoc) {
-      urlsLinked = linkifyReferenceUrls(xmlDoc, options.relsXmlDoc, refParas);
+      urlsLinked = linkifyReferenceUrls(xmlDoc, options.relsXmlDoc, refParas, linkColor, !!options.repairExternalLinks);
     }
 
     // Sebutan "Figure N"/"Table N" -> tautkan ke gambar/tabel aslinya. Fitur OPSIONAL, default
@@ -1220,6 +1307,11 @@
       retargeted: retargetedCount,
       alreadyLinked: alreadyCount,
       urlsLinked: urlsLinked,
+      externalLinksRepaired: externalRepair.repaired,
+      externalLinksExamined: externalRepair.examined,
+      externalTrackingCleaned: externalRepair.trackingCleaned,
+      externalLinksRebuiltFromText: externalRepair.rebuiltFromText,
+      externalRepairDetails: externalRepair.details,
       figuresTablesLinked: figTblResult.linked,
       figuresTablesCaptionsFound: figTblResult.captionsFound,
       integrity: integrity
@@ -1231,6 +1323,9 @@
     findExternalUrlMatches: findExternalUrlMatches,
     ensureExternalRelationship: ensureExternalRelationship,
     linkifyReferenceUrls: linkifyReferenceUrls,
+    cleanTrackingUrl: cleanTrackingUrl,
+    visibleHyperlinkTarget: visibleHyperlinkTarget,
+    repairExternalHyperlinks: repairExternalHyperlinks,
     findFigureTableCaptions: findFigureTableCaptions,
     linkFigureTableReferences: linkFigureTableReferences,
     documentVisibleText: documentVisibleText,

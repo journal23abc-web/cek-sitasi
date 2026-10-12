@@ -1017,6 +1017,163 @@ test('a missing IMF year stays unmatched while a dated source still links in yea
   assert.strictEqual(link.textContent, '2025');
 });
 
+console.log('\n=== Two blue presets and external hyperlink repair ===');
+
+const RELS_NS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+const OFFICE_RELS_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const HYPERLINK_TYPE = OFFICE_RELS_NS + '/hyperlink';
+function externalRels(target, id = 'rId9') {
+  const doc = new DOMParser().parseFromString('<Relationships xmlns="' + RELS_NS + '"/>', 'application/xml');
+  if (target) {
+    const rel = doc.createElementNS(RELS_NS, 'Relationship');
+    rel.setAttribute('Id', id); rel.setAttribute('Type', HYPERLINK_TYPE);
+    rel.setAttribute('TargetMode', 'External'); rel.setAttribute('Target', target);
+    doc.documentElement.appendChild(rel);
+  }
+  return doc;
+}
+function externalLink(text, id = 'rId9') {
+  return '<w:hyperlink xmlns:r="' + OFFICE_RELS_NS + '" r:id="' + id + '">' + run(text) + '</w:hyperlink>';
+}
+function externalTarget(link, rels) {
+  const id = link.getAttributeNS(OFFICE_RELS_NS, 'id');
+  return Array.from(rels.getElementsByTagNameNS(RELS_NS, 'Relationship')).find(r => r.getAttribute('Id') === id).getAttribute('Target');
+}
+
+test('both blue presets override Word theme colors and color citations plus newly created URL links', () => {
+  for (const color of ['0000FF', '0563C1']) {
+    const styledRun = '<w:r><w:rPr><w:rFonts w:ascii="Times New Roman"/><w:b/><w:i/>' +
+      '<w:color w:val="FF0000" w:themeColor="accent1" w:themeTint="99" w:themeShade="88"/>' +
+      '<w:sz w:val="24"/></w:rPr><w:t>Prior work (Smith, 2020) supports this claim.</w:t></w:r>';
+    const doc = xmlDocFromParas([para(styledRun), para(run('REFERENCES')),
+      para(run('Smith, J. (2020). A report. https://doi.org/10.1234/report'))]);
+    const before = plainText(doc);
+    const result = CitationLinker.linkDocx(doc, { styleId: 'apa7', linkColor: '#' + color, relsXmlDoc: externalRels() });
+    assert.strictEqual(result.linked, 1); assert.strictEqual(result.urlsLinked, 1);
+    for (const link of Array.from(doc.getElementsByTagName('w:hyperlink'))) {
+      for (const c of Array.from(link.getElementsByTagName('w:color'))) {
+        assert.strictEqual(c.getAttribute('w:val'), color);
+        for (const attr of ['themeColor', 'themeTint', 'themeShade']) assert.strictEqual(c.hasAttributeNS(W_NS, attr), false);
+      }
+    }
+    const citation = doc.getElementsByTagName('w:hyperlink')[0];
+    assert.strictEqual(citation.getElementsByTagName('w:rFonts')[0].getAttribute('w:ascii'), 'Times New Roman');
+    assert.strictEqual(citation.getElementsByTagName('w:b').length, 1);
+    assert.strictEqual(citation.getElementsByTagName('w:i').length, 1);
+    assert.strictEqual(plainText(doc), before);
+    assert.strictEqual(result.integrity.ok, true);
+  }
+});
+
+test('chosen blue is also applied to an existing reference URL when URL repair is disabled', () => {
+  const doc = xmlDocFromParas([para(run('Prior work (Smith, 2020).')), para(run('REFERENCES')),
+    para(run('Smith, J. (2020). A report. ') + externalLink('https://doi.org/10.1234/report'))]);
+  const rels = externalRels('https://doi.org/10.1234/report?utm_source=chatgpt.com');
+  const result = CitationLinker.linkDocx(doc, { styleId: 'apa7', linkColor: '#0563C1', relsXmlDoc: rels });
+  const link = Array.from(doc.getElementsByTagName('w:hyperlink')).find(h => h.hasAttributeNS(OFFICE_RELS_NS, 'id'));
+  assert.strictEqual(link.getElementsByTagName('w:color')[0].getAttribute('w:val'), '0563C1');
+  assert.strictEqual(result.externalLinksRepaired, 0);
+  assert.strictEqual(externalTarget(link, rels), 'https://doi.org/10.1234/report?utm_source=chatgpt.com');
+});
+
+test('query cleaning preserves functional parameters, their raw encoding, duplicates, and fragments', () => {
+  const url = 'https://example.org/article?id=17&utm_source=chatgpt.com&q=a%20b&q=c+d&token=a%2Fb%3D&utm_medium=referral#page=8';
+  assert.strictEqual(CitationLinker.cleanTrackingUrl(url), 'https://example.org/article?id=17&q=a%20b&q=c+d&token=a%2Fb%3D#page=8');
+  assert.strictEqual(CitationLinker.cleanTrackingUrl('https://example.org/a?utm_source=chatgpt.com'), 'https://example.org/a');
+  assert.strictEqual(CitationLinker.cleanTrackingUrl('https://example.org/a?utm_source=x&id=17&utm_campaign=y'), 'https://example.org/a?id=17');
+});
+
+test('tracking names are decoded case-insensitively while matching values and anchors stay intact', () => {
+  assert.strictEqual(CitationLinker.cleanTrackingUrl('https://example.org/a?UTM%5Fsource=x&utm_source=y&next=utm_source%3Dx&gclid=z#utm_source=anchor'),
+    'https://example.org/a?next=utm_source%3Dx#utm_source=anchor');
+  const unchanged = 'https://example.org/a?id=1&token=a%2Fb#?utm_source=anchor';
+  assert.strictEqual(CitationLinker.cleanTrackingUrl(unchanged), unchanged);
+  assert.strictEqual(CitationLinker.cleanTrackingUrl('mailto:author@example.org?utm_source=x'), 'mailto:author@example.org?utm_source=x');
+});
+
+test('visible destinations accept full URLs and DOI labels without guessing from a title', () => {
+  for (const text of ['https://doi.org/10.1234/paper(1)', '10.1234/paper(1)', 'doi: 10.1234/paper(1)', 'doi.org/10.1234/paper(1)']) {
+    assert.strictEqual(CitationLinker.visibleHyperlinkTarget(text), 'https://doi.org/10.1234/paper(1)');
+  }
+  assert.strictEqual(CitationLinker.visibleHyperlinkTarget('www.example.org/article'), 'https://www.example.org/article');
+  assert.strictEqual(CitationLinker.visibleHyperlinkTarget('Read this article'), null);
+  assert.strictEqual(CitationLinker.visibleHyperlinkTarget('See https://example.org/article'), null);
+  assert.strictEqual(CitationLinker.visibleHyperlinkTarget('javascript:alert(1)'), null);
+});
+
+test('a displayed URL repairs the hidden destination and a shared title label keeps its own destination', () => {
+  const old = 'https://example.org/wrong?id=17&utm_source=chatgpt.com#section';
+  const doc = xmlDocFromParas([para(externalLink('https://doi.org/10.1234/correct') + run(' and ') + externalLink('Article title'))]);
+  const before = plainText(doc), rels = externalRels(old);
+  const result = CitationLinker.repairExternalHyperlinks(doc, rels);
+  const links = Array.from(doc.getElementsByTagName('w:hyperlink'));
+  assert.strictEqual(result.repaired, 2); assert.strictEqual(result.trackingCleaned, 2);
+  assert.strictEqual(result.rebuiltFromText, 1);
+  assert.strictEqual(externalTarget(links[0], rels), 'https://doi.org/10.1234/correct');
+  assert.strictEqual(externalTarget(links[1], rels), 'https://example.org/wrong?id=17#section');
+  assert.strictEqual(rels.getElementsByTagName('Relationship')[0].getAttribute('Target'), old);
+  assert.strictEqual(plainText(doc), before);
+  const relCount = rels.getElementsByTagName('Relationship').length;
+  const second = CitationLinker.repairExternalHyperlinks(doc, rels);
+  assert.strictEqual(second.repaired, 0);
+  assert.strictEqual(rels.getElementsByTagName('Relationship').length, relCount);
+});
+
+test('cleanup works in body and references while preserving internal bookmark hyperlinks', () => {
+  const doc = xmlDocFromParas([
+    para(externalLink('Article title') + run(' reports this.')),
+    para('<w:hyperlink w:anchor="Section1">' + run('Jump to section') + '</w:hyperlink>'),
+    para(run('REFERENCES')),
+    para(run('Smith, J. (2020). A report. ') + externalLink('https://doi.org/10.1234/report')),
+  ]);
+  const before = plainText(doc), rels = externalRels('https://example.org/article?id=7&utm_source=chatgpt.com');
+  const result = CitationLinker.linkDocx(doc, { styleId: 'apa7', relsXmlDoc: rels, repairExternalLinks: true, linkColor: '#0563C1' });
+  assert.strictEqual(result.externalLinksRepaired, 2);
+  const internal = Array.from(doc.getElementsByTagName('w:hyperlink')).find(h => h.getAttribute('w:anchor') === 'Section1');
+  assert.ok(internal);
+  assert.strictEqual(internal.hasAttributeNS(OFFICE_RELS_NS, 'id'), false);
+  assert.strictEqual(plainText(doc), before);
+  assert.strictEqual(result.integrity.ok, true);
+});
+
+test('new relationship elements retain the package namespace after serialization and reparsing', () => {
+  const rels = externalRels();
+  CitationLinker.ensureExternalRelationship(rels, 'https://example.org/article');
+  const serialized = new XMLSerializer().serializeToString(rels);
+  const reparsed = new DOMParser().parseFromString(serialized, 'application/xml');
+  assert.strictEqual(reparsed.getElementsByTagNameNS(RELS_NS, 'Relationship').length, 1);
+  assert.ok(!serialized.includes('xmlns=""'), serialized);
+});
+
+test('an external image relationship is never reused as a hyperlink destination', () => {
+  const url = 'https://example.org/image.png', rels = externalRels(url);
+  rels.getElementsByTagName('Relationship')[0].setAttribute('Type', OFFICE_RELS_NS + '/image');
+  const id = CitationLinker.ensureExternalRelationship(rels, url);
+  assert.notStrictEqual(id, 'rId9');
+  const rel = Array.from(rels.getElementsByTagName('Relationship')).find(r => r.getAttribute('Id') === id);
+  assert.strictEqual(rel.getAttribute('Type'), HYPERLINK_TYPE);
+});
+
+test('new plain reference URLs are cleaned when the repair option is enabled, with functional query retained', () => {
+  const doc = xmlDocFromParas([para(run('Prior work (Smith, 2020).')), para(run('REFERENCES')),
+    para(run('Smith, J. (2020). A report. https://example.org/article?id=17') + run('&amp;utm_source=chatgpt.com'))]);
+  const rels = externalRels();
+  const result = CitationLinker.linkDocx(doc, { styleId: 'apa7', relsXmlDoc: rels, repairExternalLinks: true });
+  assert.strictEqual(result.urlsLinked, 1);
+  const external = Array.from(doc.getElementsByTagName('w:hyperlink')).find(h => h.hasAttributeNS(OFFICE_RELS_NS, 'id'));
+  assert.strictEqual(externalTarget(external, rels), 'https://example.org/article?id=17');
+});
+
+test('an existing external citation becomes a real internal bookmark link, removing stale r:id', () => {
+  const doc = xmlDocFromParas([para(externalLink('(Smith, 2020)')), para(run('REFERENCES')),
+    para(run('Smith, J. (2020). A report. Publisher.'))]);
+  const result = CitationLinker.linkDocx(doc, { styleId: 'apa7' });
+  const link = doc.getElementsByTagName('w:hyperlink')[0];
+  assert.strictEqual(result.linked, 1);
+  assert.strictEqual(link.getAttribute('w:anchor'), 'Smith2020');
+  assert.strictEqual(link.hasAttributeNS(OFFICE_RELS_NS, 'id'), false);
+});
+
 console.log('\n' + '='.repeat(50));
 console.log(`${pass} passed, ${fail} failed (of ${pass + fail} total)`);
 if (fail > 0) process.exit(1);

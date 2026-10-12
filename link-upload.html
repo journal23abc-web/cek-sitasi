@@ -151,20 +151,29 @@
       <option value="year">Hanya tahunnya saja — mis. (Smith, <u>2019</u>) atau Smith (<u>2019</u>)</option>
     </select>
 
-    <div class="field-label" style="margin-top:22px;"><span class="step-num">5</span>Warna Teks Sitasi <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
+    <div class="field-label" style="margin-top:22px;"><span class="step-num">5</span>Warna Tautan <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
     <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
-      Default: format asli tidak diubah sama sekali (cuma jadi bisa diklik). Kalau diaktifkan,
-      teks sitasi yang ditautkan diberi warna — defaultnya biru khas hyperlink, bisa diganti bebas.
+      Aktifkan untuk memilih <b>biru klasik (#0000FF)</b> atau <b>biru Word (#0563C1)</b>.
+      Warna pilihan diterapkan pada sitasi dan URL/DOI yang diproses. Warna lain tetap bisa dipilih sendiri.
     </p>
     <div class="checkbox-row" style="margin-top:0;">
       <input type="checkbox" id="applyColor">
-      <label for="applyColor">Beri warna pada teks sitasi yang ditautkan</label>
-      <input type="color" id="linkColor" value="#0000FF" disabled style="margin-left:6px;width:34px;height:26px;padding:2px;border-radius:5px;border:1px solid var(--hairline);background:var(--input-bg);cursor:pointer;">
+      <label for="applyColor">Terapkan warna pada tautan</label>
+    </div>
+    <div class="row" style="margin-top:10px;gap:10px;">
+      <label for="linkColorPreset" style="font-size:12px;color:var(--text-dim);">Pilihan warna</label>
+      <select id="linkColorPreset" disabled>
+        <option value="#0000FF">Biru klasik — #0000FF</option>
+        <option value="#0563C1">Biru Word — #0563C1</option>
+        <option value="custom">Warna lain</option>
+      </select>
+      <input type="color" id="linkColor" value="#0000FF" aria-label="Pilih warna tautan" disabled style="width:34px;height:26px;padding:2px;border-radius:5px;border:1px solid var(--hairline);background:var(--input-bg);cursor:pointer;">
+      <span id="linkColorPreview" style="color:#0000FF;font-size:13px;text-decoration:underline;opacity:.5;">Contoh tautan</span>
     </div>
 
     <div class="field-label" style="margin-top:22px;"><span class="step-num">6</span>Opsi Tautan Tambahan <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional)</span></div>
     <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
-      Selain sitasi, dua jenis tautan tambahan yang bisa diaktifkan/nonaktifkan terpisah:
+      Selain sitasi, opsi berikut bisa diaktifkan atau dinonaktifkan secara terpisah:
     </p>
     <div class="checkbox-row" style="margin-top:0;">
       <input type="checkbox" id="linkReferenceUrls" checked>
@@ -174,6 +183,16 @@
       <input type="checkbox" id="linkFiguresTables">
       <label for="linkFiguresTables">Tautkan sebutan "Figure N" / "Table N" di teks ke gambar/tabel aslinya (lompat internal, seperti sitasi)</label>
     </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="repairExternalLinks">
+      <label for="repairExternalLinks">Perbaiki target hyperlink dari teks URL/DOI dan bersihkan parameter pelacakan</label>
+    </div>
+    <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:8px 0 0;">
+      Berlaku untuk tautan yang sudah ada dalam naskah, termasuk hasil tempelan dari ChatGPT atau HTML.
+      URL/DOI yang terlihat menjadi acuan tujuan tautan; <code>utm_source=chatgpt.com</code> dan parameter
+      pelacakan serupa dihapus. Jika label tautan hanya judul artikel, tujuan yang sudah ada dibersihkan.
+      Teks yang terlihat tetap dipertahankan.
+    </p>
 
     <div class="field-label" style="margin-top:22px;"><span class="step-num">7</span>Highlight Manual di Word <span style="color:var(--text-faint);text-transform:none;letter-spacing:0;">(opsional, lanjutan)</span></div>
     <p style="font-size:12px;color:var(--text-dim);line-height:1.6;margin:0 0 10px;">
@@ -235,8 +254,8 @@ initOnboarding({
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="engine.js?v=16"></script>
-<script src="link-engine.js?v=7"></script>
+<script src="link-engine.js?v=8"></script>
 <script src="shared-file.js?v=1"></script>
-<script src="link-upload.js?v=7"></script>
+<script src="link-upload.js?v=8"></script>
 </body>
 </html>
