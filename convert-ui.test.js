@@ -443,6 +443,22 @@ test('DOCX paragraph splitting preserves long author lists and the appendix boun
   assert.ok(split.references.includes('(2021). Two.'));
 });
 
+test('IEEE labels occupy their own tab column without changing preview text or accumulating tabs', () => {
+  const result = CC.convert('Evidence (Smith, 2024).', 'Smith, J. (2024). A study. Journal A, 1, 1–3.', 'apa7', 'ieee');
+  const entry = result.referenceLines[0];
+  const doc = parseDoc('<w:p>' + run('old', false) + '</w:p>');
+  const p = doc.getElementsByTagNameNS(W_NS, 'p')[0];
+  for (let i = 0; i < 3; i++) {
+    writeReferenceRuns(doc, p, entry.runs, 'ieee');
+    assert.strictEqual(textOf(p), entry.line);
+    assert.strictEqual(buildDocxTextIndex(doc).text.trim(), entry.line);
+    assert.strictEqual(p.getElementsByTagNameNS(W_NS, 'tabs').length, 1);
+    const tabs = Array.from(p.getElementsByTagNameNS(W_NS, 'tab'));
+    assert.strictEqual(tabs.length, 2); // one stop in pPr and one actual run tab
+    assert.strictEqual(tabs[0].getAttributeNS(W_NS, 'pos'), '720');
+  }
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   process.exitCode = 1;

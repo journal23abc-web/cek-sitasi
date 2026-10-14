@@ -447,7 +447,7 @@ testAsync('completeTruncatedAuthorsAsync: end-to-end with a mocked fetch, number
     assert.strictEqual(result.changedCount, 1);
     assert.ok(result.convertedArticle.includes('(Malik et al., 2023)'), result.convertedArticle);
     const ref2Line = result.referenceLines.find(r => r.line.startsWith('Malik'));
-    assert.ok(ref2Line.line.startsWith('Malik, A. R., Pratiwi, Y., Andajani, K., Numertayasa, I. W., Suharti, S., Darwis, A., & Marzuki (2023).'), ref2Line.line);
+    assert.ok(ref2Line.line.startsWith('Malik, A. R., Pratiwi, Y., Andajani, K., Numertayasa, I. W., Suharti, S., Darwis, A., & Marzuki. (2023).'), ref2Line.line);
   } finally {
     global.fetch = realFetch;
   }

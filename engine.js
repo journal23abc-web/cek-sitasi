@@ -438,7 +438,7 @@ function detectMalformedCitations(text) {
 
 function extractAuthorDateCitations(text) {
   var citations = [];
-  var parenRegex = /\(([^()]+?)\)/g;
+  var parenRegex = /\(((?:[^()]|\([^()]*\))+?)\)/g;
   var m;
   var editorialMetaRegex = /^(received|revised|accepted|submitted|published|available\s+online|in\s+press|first\s+published)\s*:/i;
   while ((m = parenRegex.exec(text)) !== null) {
@@ -446,7 +446,7 @@ function extractAuthorDateCitations(text) {
     // A "year" immediately preceded by a decimal point is really just the tail of a decimal
     // fraction (e.g. "p = 0.4330" or "Effect = −0.0509") — common in statistics/regression
     // results reported in parentheses — not a citation year, so it doesn't count here.
-    if (!/(?<![.\d])\d{4}[a-z]?\b/.test(content) && !/\bn\.d\./i.test(content)) continue;
+    if (!/(?<![.\d])\d{4}[a-z]?\b/.test(content) && !/\bn\.d\.|\bin press\b/i.test(content)) continue;
     if (/^[\d\s,.\-–:;]+$/.test(content)) continue;
     // Journal manuscripts commonly carry a "(Received: ...; Revised: ...; Accepted: ...)"
     // line near the title/abstract. Every ";"-segment there matches "Word: Date", which
@@ -459,7 +459,7 @@ function extractAuthorDateCitations(text) {
   }
   // Consecutive connectors ("of the", "for the", "van der") belong to the
   // author name; requiring a capitalized word after each connector loses its prefix.
-  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?|n\.d\.)[,)]/gu;
+  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.[a-z]?|in press)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -573,7 +573,7 @@ function extractAuthorDateCitations(text) {
     var years = [year];
     if (text.charAt(m.index + m[0].length - 1) === ',') {
       var scanPos = m.index + m[0].length;
-      var yearListRe = /^\s*(\d{4}[a-z]?|n\.d\.)\s*([,)])/;
+      var yearListRe = /^\s*(\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.[a-z]?|in press)\s*([,)])/;
       while (true) {
         var ym = yearListRe.exec(text.slice(scanPos));
         if (!ym) break;
@@ -626,7 +626,7 @@ function parseSingleAuthorDate(text) {
   // a day as well as a month and year so genuine surnames that happen to be month names (for
   // example "May, 2020") remain valid citations.
   if (looksLikeFullCalendarDate(text)) return null;
-  var yearMatch = text.match(/,?\s*(?<![.\d])(\d{4}[a-z]?|n\.d\.)(?:\s*[,:]\s*(.+))?$/);
+  var yearMatch = text.match(/,?\s*(?<![.\d])(\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.[a-z]?|in press)(?:\s*[,:]\s*(.+))?$/);
   if (!yearMatch) return null;
   var year = yearMatch[1];
   var tail = yearMatch[2] ? yearMatch[2].trim() : null;
@@ -667,10 +667,10 @@ function parseSingleAuthorDate(text) {
   return { raw: text, authors: authors, authorCount: authorCount, year: year, pageInfo: pageInfo, hasEtAl: hasEtAl, firstAuthor: firstAuthor, usedAmp: usedAmp, usedAnd: usedAnd };
 }
 
-var MONTH_NAME_SOURCE = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)';
+var MONTH_NAME_SOURCE = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember|Spring|Summer|Fall|Autumn|Winter)';
 // APA references may carry a month/day after the year. Consume the entire date so
 // "June 26" is not mistaken for author/title text, while citation keys keep just 2025.
-var REFERENCE_DATE_RE = new RegExp('\\((\\d{4}[a-z]?|n\\.d\\.)(?:,\\s*' + MONTH_NAME_SOURCE + '\\.?(?:\\s+\\d{1,2})?)?\\)', 'i');
+var REFERENCE_DATE_RE = new RegExp('\\((\\d{4}[a-z]?(?:[–-](?:\\d{4}|present))?|n\\.d\\.[a-z]?|in press)(?:,\\s*' + MONTH_NAME_SOURCE + '\\.?(?:\\s+\\d{1,2}(?:[–-]\\d{1,2})?)?)?\\)', 'i');
 var MONTH_DAY_YEAR_RE = new RegExp('\\b' + MONTH_NAME_SOURCE + '\\s+\\d{1,2}(?:st|nd|rd|th)?\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
 var DAY_MONTH_YEAR_RE = new RegExp('\\b\\d{1,2}(?:st|nd|rd|th)?\\s+' + MONTH_NAME_SOURCE + '\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
 
@@ -681,7 +681,7 @@ function looksLikeFullCalendarDate(text) {
 function extractAuthorPageCitations(text) {
   // MLA-style (Author Page) or (Author Page-Page) or (Author, Page) - no year
   var citations = [];
-  var parenRegex = /\(([^()]+?)\)/g;
+  var parenRegex = /\(((?:[^()]|\([^()]*\))+?)\)/g;
   var m;
   while ((m = parenRegex.exec(text)) !== null) {
     var content = m[1].trim();
@@ -1001,23 +1001,26 @@ var FormatDetector = {
 // ---------- REFERENCE LIST PARSING ----------
 
 function extractYear(line, style) {
+  if (style.family === 'numeric') {
+    // IEEE puts article IDs AFTER the date, while pages often precede it. Remove labeled
+    // numbers and titles first; neither a page/ID such as 2021 nor a quoted title's year
+    // may override the publication year. URLs and accessed dates are separate elements.
+    var numericScope = line.split(/\bdoi\s*:|https?:\/\/|\bAccessed\s*:/i)[0]
+      .replace(/["“][^"”]*["”]/g, '')
+      .replace(/\b(?:Art\.\s*no\.|vols?\.|nos?\.|pp?\.)\s*[A-Za-z]?\d+(?:\s*[–-]\s*[A-Za-z]?\d+)?/gi, '');
+    var numericDates = numericScope.match(/\b[12]\d{3}[a-z]?\b/g);
+    if (numericDates && numericDates.length) return numericDates[numericDates.length - 1];
+    return /\bn\.d\./i.test(numericScope) ? 'n.d.' : /to be published/i.test(numericScope) ? 'in press' : null;
+  }
   if (style.yearInParens === false) {
     var m = line.match(/\.\s*(\d{4}[a-z]?)\.\s/);
     if (m) return m[1];
   }
   var m2 = line.match(REFERENCE_DATE_RE);
   if (m2) return m2[1];
-  // Numeric-family (IEEE/Vancouver) references state the year as bare text near the END of the
-  // citation info, e.g. "..., pp. 1944-1958, 2025. doi: ...". Taking the FIRST 19xx/20xx-looking
-  // number in the line risks matching a page number, volume, or article number that happens to
-  // look like a year (e.g. "pp. 1944-1958" would wrongly read as year 1944). The true year is
-  // reliably the LAST such match before the DOI (or before the end of the line, if there's no
-  // DOI) — IEEE/Vancouver both always place it last, right before the closing period.
   var scope = line.split(/\bdoi\s*:/i)[0];
   var matches = scope.match(/\b(19|20)\d{2}[a-z]?\b/g);
-  if (matches && matches.length) return matches[matches.length - 1];
-  var m3 = line.match(/\b(19|20)\d{2}[a-z]?\b/);
-  return m3 ? m3[0] : null;
+  return matches && matches.length ? matches[matches.length - 1] : null;
 }
 
 // Strips trailing sentence-punctuation (., ,, ;) unconditionally, but only strips a trailing

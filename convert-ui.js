@@ -1,6 +1,7 @@
 (function() {
   var CE = window.CitationEngine;
   var CC = window.CitationConverter;
+  var BE = window.BibliographyEngine;
   var STYLES = CE.STYLES;
   var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
   var XML_NS = 'http://www.w3.org/XML/1998/namespace';
@@ -62,9 +63,105 @@
     lastResult: null,
     lastSourceText: '',        // article text as it was at the moment "Konversi" was clicked (for the preview)
     metadata: null,
+    lastDetailsJSON: '[]',
   };
 
   function esc(s) { return CE.esc ? CE.esc(s) : String(s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+
+  var detailsHost = document.getElementById('sourceDetails');
+  function readSourceDetails() {
+    return Array.from(detailsHost.querySelectorAll('[data-source-row]')).map(function(row) {
+      var result = { line: row._referenceLine };
+      row.querySelectorAll('[data-field]').forEach(function(input) {
+        if (input.value.trim()) result[input.dataset.field] = input.value.trim();
+      });
+      return result;
+    }).filter(function(item) { return Object.keys(item).length > 1; });
+  }
+  function showSourceDetails(result, supplied) {
+    detailsHost.textContent = '';
+    result.referenceLines.forEach(function(ref, i) {
+      var extra = (supplied || []).find(function(x) { return x.line === ref.original; }) || {};
+      var row = document.createElement('fieldset'); row.dataset.sourceRow = 'true'; row._referenceLine = ref.original;
+      row.style.marginTop = '12px';
+      var legend = document.createElement('legend'); legend.textContent = (i + 1) + '. ' + (ref.model.title || ref.original); row.appendChild(legend);
+      var label = document.createElement('label'); label.textContent = 'Jenis sumber ';
+      var select = document.createElement('select'); select.dataset.field = 'type';
+      var auto = document.createElement('option'); auto.value = ''; auto.textContent = 'Deteksi: ' + (BE.TYPES[ref.model.type] || ref.model.type); select.appendChild(auto);
+      Object.keys(BE.TYPES).forEach(function(type) { var o = document.createElement('option'); o.value = type; o.textContent = BE.TYPES[type]; select.appendChild(o); });
+      select.value = extra.type || ''; label.appendChild(select); row.appendChild(label);
+      [['place', 'Lokasi penerbit / institusi'], ['accessed', 'Tanggal akses (mis. 2024, July 10)'],
+        ['journalAbbreviation', 'Singkatan jurnal terverifikasi'], ['journal', 'Nama lengkap jurnal terverifikasi'], ['publisher', 'Nama penerbit / instansi terverifikasi'], ['articleNumber', 'Nomor artikel terverifikasi'],
+        ['date', 'Tanggal terbit edisi (mis. 2024, June 12)']].forEach(function(field) {
+        var l = document.createElement('label'); l.style.display = 'block'; l.style.marginTop = '8px'; l.textContent = field[1] + ' ';
+        var input = document.createElement('input'); input.type = 'text'; input.dataset.field = field[0];
+        input.value = extra[field[0]] || ''; l.appendChild(input); row.appendChild(l);
+      });
+      detailsHost.appendChild(row);
+    });
+  }
+  document.getElementById('btnSourceDetails').addEventListener('click', function() {
+    try {
+      var source = els.sourceStyleSelect.value === 'auto' ? CE.FormatDetector.detect(els.articleText.value, els.referenceText.value).styleId : els.sourceStyleSelect.value;
+      var supplied = readSourceDetails();
+      var result = CC.convert(els.articleText.value, els.referenceText.value, source, source, { metadata: state.metadata, referenceDetails: supplied });
+      showSourceDetails(result, supplied);
+    } catch (e) { els.topStatus.textContent = e.message; }
+  });
+  detailsHost.addEventListener('input', function() { refreshOriginalExportAvailability(); });
+  detailsHost.addEventListener('change', function() { refreshOriginalExportAvailability(); });
+
+  document.getElementById('btnUseResult').addEventListener('click', function() {
+    var result = state.lastResult;
+    if (!result) return;
+    els.articleText.value = els.convertedArticleOut.value; els.referenceText.value = els.convertedRefsOut.value;
+    state.metadata = result.metadata;
+    els.sourceStyleSelect.value = result.targetStyleId; els.targetStyleSelect.value = result.sourceStyleId;
+    state.originalFile = null; state.docxOriginalArticleText = null; state.docxOriginalReferenceText = null;
+    state.lastResult = null; detailsHost.textContent = ''; els.fileChip.classList.remove('show');
+    els.results.classList.remove('active'); setInputMode('manual'); refreshOriginalExportAvailability();
+    els.topStatus.textContent = 'Hasil dipindahkan ke input beserta metadata. Klik Konversi Sitasi. Untuk mempertahankan tata letak Word, unduh DOCX lalu unggah kembali.';
+  });
+
+  document.getElementById('btnRunScenarios').addEventListener('click', async function() {
+    var button = this, host = document.getElementById('scenarioResults'); button.disabled = true;
+    host.textContent = 'Menguji contoh…';
+    try {
+      var response = await fetch('fixtures/apa-ieee-scenarios.json');
+      if (!response.ok) throw new Error('Contoh uji tidak dapat dimuat.');
+      var data = await response.json(), outcomes = [], passed = 0;
+      for (var i = 0; i < data.cases.length; i++) {
+        var sample = data.cases[i], article = sample.article, refs = sample.apa, metadata = null;
+        var error = null;
+        try {
+          for (var cycle = 0; cycle < data.cycles; cycle++) {
+            var ieee = CC.convert(article, refs, 'apa7', 'ieee', { metadata: metadata, referenceDetails: [Object.assign({ line: refs }, sample.details)] });
+            if (ieee.unmatched.length || ieee.referenceLines[0].line !== sample.ieee) throw new Error('Keluaran IEEE berbeda dari acuan.');
+            var apa = CC.convert(ieee.convertedArticle, ieee.referenceLines[0].line, 'ieee', 'apa7', { metadata: ieee.metadata });
+            if (apa.unmatched.length || apa.convertedArticle !== sample.article || apa.referenceLines[0].line !== sample.expectedAPA || apa.restoredMetadataCount !== 1) throw new Error('Keluaran APA atau sitasi berbeda dari acuan.');
+            article = apa.convertedArticle; refs = apa.referenceLines[0].line; metadata = apa.metadata;
+          }
+          passed++;
+        } catch (e) { error = e.message; }
+        outcomes.push({ sample: sample, error: error });
+        if (i % 8 === 0) await new Promise(function(resolve) { setTimeout(resolve, 0); });
+      }
+      host.textContent = passed + '/' + data.cases.length + ' contoh lulus ' + data.cycles + ' putaran. Uji DOCX dan kasus batas juga tersedia dalam suite pengujian.';
+      var list = document.createElement('ul');
+      outcomes.forEach(function(outcome) {
+        var li = document.createElement('li'), b = document.createElement('button'); b.className = 'ghost';
+        li.textContent = (outcome.error ? 'GAGAL: ' + outcome.error : 'LULUS') + ' — ' + outcome.sample.id + (outcome.sample.review ? ' (adaptasi IEEE; tinjauan editorial)' : '') + ' ';
+        b.textContent = 'Coba contoh'; b.addEventListener('click', function() {
+          var sample = outcome.sample; els.articleText.value = sample.article; els.referenceText.value = sample.apa;
+          state.metadata = null; state.lastResult = null; state.originalFile = null; els.sourceStyleSelect.value = 'apa7'; els.targetStyleSelect.value = 'ieee';
+          var hints = [Object.assign({ line: sample.apa }, sample.details)];
+          showSourceDetails(CC.convert(sample.article, sample.apa, 'apa7', 'apa7', { referenceDetails: hints }), hints);
+          setInputMode('manual'); els.results.classList.remove('active'); refreshOriginalExportAvailability();
+        }); li.appendChild(b); list.appendChild(li);
+      }); host.appendChild(list);
+    } catch (e) { host.textContent = e.message; }
+    finally { button.disabled = false; }
+  });
 
   // ---------- Tabs ----------
   function setInputMode(mode) {
@@ -171,7 +268,7 @@
     var issues = result.unmatched.concat(result.referenceIssues || []);
     els.unmatchedCount.textContent = issues.length;
     if (issues.length === 0) {
-      els.unmatchedList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);font-style:italic;">Semua sitasi berhasil dikonversi.</div>';
+      els.unmatchedList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);font-style:italic;">Semua sitasi yang terdeteksi berhasil diproses.</div>';
       els.unmatchedDetails.open = false;
       return;
     }
@@ -228,7 +325,7 @@
 
       var result;
       try {
-        result = CC.convert(articleText, referenceText, sourceStyleId, targetStyleId, { metadata: state.metadata });
+        result = CC.convert(articleText, referenceText, sourceStyleId, targetStyleId, { metadata: state.metadata, referenceDetails: readSourceDetails() });
       } catch (err) {
         els.loading.classList.remove('active');
         els.topStatus.textContent = '⚠️ ' + err.message;
@@ -241,6 +338,7 @@
       els.topStatus.textContent = '';
 
       state.lastResult = result;
+      state.lastDetailsJSON = JSON.stringify(readSourceDetails());
       state.lastSourceText = articleText;
       state.autoConvertedArticle = result.convertedArticle;
       state.autoConvertedRefs = result.referenceLines.map(function(l) { return l.line; }).join('\n');
@@ -355,7 +453,7 @@
     state.originalFile = file;
     state.docxOriginalArticleText = null;
     state.docxOriginalReferenceText = null;
-    state.lastResult = null; state.metadata = null;
+    state.lastResult = null; state.metadata = null; detailsHost.textContent = '';
     els.btnExportDocxOriginal.disabled = true;
 
     loadDocxTextIndex(file)
@@ -867,7 +965,8 @@
       els.convertedArticleOut.value === state.autoConvertedArticle &&
       els.convertedRefsOut.value === state.autoConvertedRefs &&
       (els.sourceStyleSelect.value === 'auto' || els.sourceStyleSelect.value === result.sourceStyleId) &&
-      els.targetStyleSelect.value === result.targetStyleId);
+      els.targetStyleSelect.value === result.targetStyleId &&
+      JSON.stringify(readSourceDetails()) === state.lastDetailsJSON);
     els.btnExportDocxOriginal.disabled = !ready;
     return ready;
   }
@@ -893,8 +992,17 @@
     });
     var anchor = content[0];
     if (!anchor) throw new Error('Struktur paragraf referensi belum didukung.');
-    richRuns.forEach(function(piece) {
-      var r = makeRun(xmlDoc, template, piece.text, piece.italic);
+    richRuns.forEach(function(piece, index) {
+      var value = piece.text;
+      if (targetStyleId === 'ieee' && index === 0) {
+        var label = value.match(/^\[\d+\] /);
+        if (label) {
+          var labelRun = makeRun(xmlDoc, template, label[0], false);
+          labelRun.appendChild(xmlDoc.createElementNS(W_NS, 'w:tab'));
+          paraEl.insertBefore(labelRun, anchor); value = value.slice(label[0].length);
+        }
+      }
+      var r = makeRun(xmlDoc, template, value, piece.italic);
       if (r) paraEl.insertBefore(r, anchor);
     });
     content.forEach(function(node) { paraEl.removeChild(node); });
@@ -908,8 +1016,18 @@
     var ind = pPr.getElementsByTagNameNS(W_NS, 'ind')[0];
     if (!ind) { ind = xmlDoc.createElementNS(W_NS, 'w:ind'); pPr.appendChild(ind); }
     ['firstLine', 'firstLineChars', 'hangingChars', 'leftChars', 'rightChars', 'startChars', 'endChars', 'start', 'end'].forEach(function(attr) { ind.removeAttributeNS(W_NS, attr); });
-    ind.setAttributeNS(W_NS, 'w:left', targetStyleId === 'apa7' ? '720' : '360');
-    ind.setAttributeNS(W_NS, 'w:hanging', targetStyleId === 'apa7' ? '720' : '360');
+    ind.setAttributeNS(W_NS, 'w:left', '720');
+    ind.setAttributeNS(W_NS, 'w:hanging', '720');
+    // A half-inch column also accommodates multi-digit labels at the source font size;
+    // a quarter-inch stop can be overrun by [10] and send it to a different tab stop.
+    var tabs = pPr.getElementsByTagNameNS(W_NS, 'tabs')[0];
+    if (tabs) pPr.removeChild(tabs);
+    if (targetStyleId === 'ieee') {
+      tabs = xmlDoc.createElementNS(W_NS, 'w:tabs');
+      var tab = xmlDoc.createElementNS(W_NS, 'w:tab');
+      tab.setAttributeNS(W_NS, 'w:val', 'left'); tab.setAttributeNS(W_NS, 'w:pos', '720');
+      tabs.appendChild(tab); pPr.appendChild(tabs);
+    }
     var alignment = pPr.getElementsByTagNameNS(W_NS, 'jc')[0];
     if (!alignment) { alignment = xmlDoc.createElementNS(W_NS, 'w:jc'); pPr.appendChild(alignment); }
     alignment.setAttributeNS(W_NS, 'w:val', 'left');
@@ -991,16 +1109,37 @@
     var paragraphs = [];
     articleText.split(/\n+/).forEach(function(line) { if (line.trim()) paragraphs.push(line.trim()); });
     paragraphs.push('');
-    paragraphs.push('REFERENCES');
+    var headingIndex = paragraphs.length;
+    paragraphs.push(metadata && metadata.styleId === 'apa7' ? 'References' : 'REFERENCES');
     referenceText.split(/\n+/).forEach(function(line) { if (line.trim()) paragraphs.push(line.trim()); });
 
     function xesc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-    var body = paragraphs.map(function(line) {
-      return '<w:p><w:r><w:t xml:space="preserve">' + xesc(line) + '</w:t></w:r></w:p>';
+    var body = paragraphs.map(function(line, index) {
+      var heading = index === headingIndex && metadata && (metadata.styleId === 'apa7' || metadata.styleId === 'ieee');
+      return '<w:p>' + (heading ? '<w:pPr>' + (metadata.styleId === 'apa7' ? '<w:pageBreakBefore/>' : '') + '<w:jc w:val="center"/></w:pPr>' : '') +
+        '<w:r>' + (heading ? '<w:rPr><w:b/></w:rPr>' : '') + '<w:t xml:space="preserve">' + xesc(line) + '</w:t></w:r></w:p>';
     }).join('');
 
     var documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
       '<w:document xmlns:w="' + W_NS + '"><w:body>' + body + '<w:sectPr/></w:body></w:document>';
+    // Plain export means a new document, without the manuscript's layout. References that
+    // still match the conversion retain the target style's italics, spacing and indentation.
+    if (metadata && (metadata.styleId === 'apa7' || metadata.styleId === 'ieee')) {
+      var richDoc = new DOMParser().parseFromString(documentXml, 'application/xml');
+      var ps = Array.from(richDoc.getElementsByTagNameNS(W_NS, 'p'));
+      var referenceStart = headingIndex + 1;
+      ps.slice(referenceStart).forEach(function(p, index) {
+        var line = paragraphs[referenceStart + index];
+        var entries = (metadata.entries || []).filter(function(e) { return e.line === line; });
+        if (entries.length !== 1) return;
+        var model = entries[0].model;
+        var ref = { bibliography: model, isInstitutional: model.authors.every(function(a) { return a.institutional; }), authorCount: model.authorCount || model.authors.length };
+        var label = line.match(/^\[(\d+)\]/);
+        var rendered = CC._internal.renderBibliography(ref, metadata.styleId, label ? +label[1] : index + 1);
+        if (rendered && rendered.line === line) writeReferenceRuns(richDoc, p, rendered.runs, metadata.styleId);
+      });
+      documentXml = new XMLSerializer().serializeToString(richDoc);
+    }
     var contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' +
       '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
@@ -1031,7 +1170,7 @@
       .then(function(blob) {
         var dateStr = fileTimestamp();
         triggerDownload(blob, 'sitasi-konversi-' + dateStr + '.docx');
-        setExportStatus('✅ File .docx (teks polos) berhasil diunduh.', 'ok');
+        setExportStatus('✅ File .docx (dokumen baru) berhasil diunduh.', 'ok');
       })
       .catch(function(err) { setExportStatus('⚠️ Gagal membuat .docx: ' + err.message, 'err'); });
   });
