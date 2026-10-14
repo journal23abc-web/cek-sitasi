@@ -4,6 +4,8 @@
   var STYLES = CE.STYLES;
   var W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
   var XML_NS = 'http://www.w3.org/XML/1998/namespace';
+  var METADATA_PATH = 'customXml/citation-converter.xml';
+  var METADATA_NS = 'urn:cek-sitasi:citation-converter:v1';
 
   var els = {
     sourceStyleSelect: document.getElementById('sourceStyleSelect'),
@@ -59,6 +61,7 @@
     autoConvertedRefs: '',
     lastResult: null,
     lastSourceText: '',        // article text as it was at the moment "Konversi" was clicked (for the preview)
+    metadata: null,
   };
 
   function esc(s) { return CE.esc ? CE.esc(s) : String(s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -138,8 +141,8 @@
   }
   els.btnCopyArticle.addEventListener('click', function() { doCopy(els.convertedArticleOut.value, els.btnCopyArticle); });
   els.btnCopyRefs.addEventListener('click', function() { doCopy(els.convertedRefsOut.value, els.btnCopyRefs); });
-  els.btnResetArticle.addEventListener('click', function() { els.convertedArticleOut.value = state.autoConvertedArticle; showToast('Dikembalikan ke hasil otomatis'); });
-  els.btnResetRefs.addEventListener('click', function() { els.convertedRefsOut.value = state.autoConvertedRefs; showToast('Dikembalikan ke hasil otomatis'); });
+  els.btnResetArticle.addEventListener('click', function() { els.convertedArticleOut.value = state.autoConvertedArticle; refreshOriginalExportAvailability(); showToast('Dikembalikan ke hasil otomatis'); });
+  els.btnResetRefs.addEventListener('click', function() { els.convertedRefsOut.value = state.autoConvertedRefs; refreshOriginalExportAvailability(); showToast('Dikembalikan ke hasil otomatis'); });
 
   // ---------- Summary / unmatched / preview rendering ----------
   function renderSummary(result) {
@@ -148,6 +151,7 @@
       { n: result.changedCount, l: 'Berhasil Dikonversi', cls: 'ok' },
       { n: result.unmatched.length, l: 'Tidak Diubah', cls: result.unmatched.length > 0 ? 'warn' : '' },
       { n: result.referenceLines.length, l: 'Entri Referensi', cls: '' },
+      { n: (result.referenceIssues || []).length, l: 'Referensi Perlu Dicek', cls: (result.referenceIssues || []).length ? 'warn' : '' },
       { n: result.uncitedCount, l: 'Referensi Tak Disitasi', cls: result.uncitedCount > 0 ? 'warn' : '' },
       { n: STYLES[result.sourceStyleId].name + ' → ' + STYLES[result.targetStyleId].name, l: 'Arah Konversi', cls: 'fmt' },
     ];
@@ -164,13 +168,14 @@
   }
 
   function renderUnmatched(result) {
-    els.unmatchedCount.textContent = result.unmatched.length;
-    if (result.unmatched.length === 0) {
+    var issues = result.unmatched.concat(result.referenceIssues || []);
+    els.unmatchedCount.textContent = issues.length;
+    if (issues.length === 0) {
       els.unmatchedList.innerHTML = '<div style="font-size:12px;color:var(--text-dim);font-style:italic;">Semua sitasi berhasil dikonversi.</div>';
       els.unmatchedDetails.open = false;
       return;
     }
-    els.unmatchedList.innerHTML = result.unmatched.map(function(u) {
+    els.unmatchedList.innerHTML = issues.map(function(u) {
       var badge = u.crossFamily ? '<span class="mixed-badge">GAYA CAMPURAN</span> ' : '';
       return '<div class="issue-item"><div class="raw">' + badge + esc(u.raw) + '</div><div class="note">' + esc(u.note) + '</div></div>';
     }).join('');
@@ -223,7 +228,7 @@
 
       var result;
       try {
-        result = CC.convert(articleText, referenceText, sourceStyleId, targetStyleId);
+        result = CC.convert(articleText, referenceText, sourceStyleId, targetStyleId, { metadata: state.metadata });
       } catch (err) {
         els.loading.classList.remove('active');
         els.topStatus.textContent = '⚠️ ' + err.message;
@@ -248,7 +253,7 @@
 
       // The format-preserving .docx export only makes sense against the ORIGINAL uploaded
       // file's own text, not arbitrary pasted/manual text — enable it only when that lines up.
-      els.btnExportDocxOriginal.disabled = !(state.originalFile && state.docxOriginalArticleText != null);
+      refreshOriginalExportAvailability();
 
       if (els.results.scrollIntoView) els.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 10);
@@ -312,6 +317,7 @@
   els.fileRemove.addEventListener('click', function(e) {
     e.stopPropagation();
     state.originalFile = null; state.docxOriginalArticleText = null; state.docxOriginalReferenceText = null;
+    state.metadata = null; state.lastResult = null;
     els.fileChip.classList.remove('show');
     els.fileInput.value = '';
     els.uploadStatus.textContent = '';
@@ -349,11 +355,13 @@
     state.originalFile = file;
     state.docxOriginalArticleText = null;
     state.docxOriginalReferenceText = null;
+    state.lastResult = null; state.metadata = null;
+    els.btnExportDocxOriginal.disabled = true;
 
     loadDocxTextIndex(file)
       .then(function(index) {
         var fullText = index.text;
-        var split = CE.splitDocumentByReferences(fullText);
+        var split = splitDocxIndex(index);
         if (!split) {
           setUploadStatus('⚠️ Isi berhasil dibaca, tapi heading referensi ("References"/"Daftar Pustaka") tidak terdeteksi otomatis. Tempel manual di tab "Isi Manual", atau beri heading eksplisit di baris tersendiri lalu unggah ulang.', 'warn');
           els.articleText.value = fullText;
@@ -364,12 +372,13 @@
         els.referenceText.value = split.references;
         state.docxOriginalArticleText = split.article;
         state.docxOriginalReferenceText = split.references;
+        state.metadata = index.metadata || null;
 
         els.fileIcon.textContent = '📘';
         els.fileName.textContent = file.name;
         els.fileSize.textContent = '(' + formatSize(file.size) + ')';
         els.fileChip.classList.add('show');
-        setUploadStatus('✅ Terpisah pada heading "' + split.headingText + '" — dipindah ke tab "Isi Manual", silakan periksa/sunting sebelum klik Konversi.', 'ok');
+        setUploadStatus('✅ Terpisah pada heading "' + split.headingText + '".' + (state.metadata ? ' Metadata konversi ditemukan untuk memulihkan penulis lengkap.' : '') + ' Silakan periksa sebelum konversi.', 'ok');
         setInputMode('manual');
         if (els.articleText.scrollIntoView) els.articleText.scrollIntoView({ behavior: 'smooth', block: 'center' });
       })
@@ -390,12 +399,15 @@
     var segments = [];
     var paragraphInfo = [];
     var text = '';
-    var paragraphs = xmlDoc.getElementsByTagName('w:p');
+    var paragraphs = xmlDoc.getElementsByTagNameNS(W_NS, 'p');
     for (var p = 0; p < paragraphs.length; p++) {
       var paraStart = text.length;
-      var wts = paragraphs[p].getElementsByTagName('w:t');
+      var wts = paragraphs[p].getElementsByTagNameNS(W_NS, 't');
       for (var i = 0; i < wts.length; i++) {
         var node = wts[i];
+        var owner = node.parentNode;
+        while (owner && !(owner.localName === 'p' && owner.namespaceURI === W_NS)) owner = owner.parentNode;
+        if (owner !== paragraphs[p]) continue; // nested text-box paragraphs are indexed once
         var t = node.textContent || '';
         if (t.length === 0) continue;
         segments.push({ start: text.length, end: text.length + t.length, node: node });
@@ -405,6 +417,62 @@
       paragraphInfo.push({ element: paragraphs[p], start: paraStart, end: text.length });
     }
     return { text: text, segments: segments, paragraphs: paragraphInfo };
+  }
+
+  function splitDocxIndex(index) {
+    var heading = CE.findReferencesHeading(index.text);
+    if (!heading) return null;
+    var refStart = heading.offset + heading.lineLength;
+    var refEnd = CE.findReferencesListEnd(index.text, refStart);
+    var before = index.text.slice(0, heading.offset);
+    // DOCX already has real paragraph boundaries. PDF unwrapping would change its offsets.
+    return { article: before.trim(), articleOffset: before.length - before.trimStart().length,
+      references: index.text.slice(refStart, refEnd).split('\n').map(function(line) { return line.trim(); }).filter(Boolean).join('\n'),
+      refStart: refStart, refEnd: refEnd, headingText: heading.text };
+  }
+
+  function readConversionMetadata(zip) {
+    var part = zip.file(METADATA_PATH);
+    if (!part) return Promise.resolve(null);
+    return part.async('string').then(function(xml) {
+      var root = new DOMParser().parseFromString(xml, 'application/xml').documentElement;
+      if (root.namespaceURI !== METADATA_NS) return null;
+      try { var data = JSON.parse(root.textContent); return data.version === 1 ? data : null; }
+      catch (e) { return null; }
+    });
+  }
+
+  function writeConversionMetadata(zip, metadata) {
+    return readConversionMetadata(zip).then(function(existing) {
+      if (zip.file(METADATA_PATH) && !existing) throw new Error('Bagian metadata bernama sama sudah ada dan bukan milik konverter. File tidak ditimpa.');
+      var xml = document.implementation.createDocument(METADATA_NS, 'cc:metadata', null);
+      xml.documentElement.textContent = JSON.stringify(metadata);
+      zip.file(METADATA_PATH, new XMLSerializer().serializeToString(xml));
+      var relPath = 'word/_rels/document.xml.rels';
+      var relNS = 'http://schemas.openxmlformats.org/package/2006/relationships';
+      var relType = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml';
+      return (zip.file(relPath) ? zip.file(relPath).async('string') : Promise.resolve('<Relationships xmlns="' + relNS + '"/>')).then(function(raw) {
+        var relDoc = new DOMParser().parseFromString(raw, 'application/xml');
+        var rels = Array.from(relDoc.getElementsByTagNameNS(relNS, 'Relationship'));
+        var found = rels.some(function(r) { return r.getAttribute('Type') === relType && r.getAttribute('Target') === '../' + METADATA_PATH; });
+        if (!found) {
+          var id = 'rIdCitationConverterMetadata', n = 1;
+          while (rels.some(function(r) { return r.getAttribute('Id') === id; })) id = 'rIdCitationConverterMetadata' + n++;
+          var r = relDoc.createElementNS(relNS, 'Relationship');
+          r.setAttribute('Id', id); r.setAttribute('Type', relType); r.setAttribute('Target', '../' + METADATA_PATH);
+          relDoc.documentElement.appendChild(r);
+          zip.file(relPath, new XMLSerializer().serializeToString(relDoc));
+        }
+        return zip.file('[Content_Types].xml').async('string');
+      }).then(function(raw) {
+        var types = new DOMParser().parseFromString(raw, 'application/xml');
+        var ns = 'http://schemas.openxmlformats.org/package/2006/content-types';
+        if (!Array.from(types.getElementsByTagNameNS(ns, 'Default')).some(function(d) { return d.getAttribute('Extension') === 'xml'; })) {
+          var d = types.createElementNS(ns, 'Default'); d.setAttribute('Extension', 'xml'); d.setAttribute('ContentType', 'application/xml');
+          types.documentElement.appendChild(d); zip.file('[Content_Types].xml', new XMLSerializer().serializeToString(types));
+        }
+      });
+    });
   }
 
   // Finds the <w:p> element whose text range contains a given offset into the flat index text.
@@ -425,9 +493,12 @@
   function reorderParagraphs(xmlDoc, orderedElements) {
     var valid = orderedElements.filter(Boolean);
     if (valid.length === 0) return 0;
+    var parents = new Set(valid.map(function(el) { return el.parentNode; }));
+    if (parents.size !== 1 || new Set(valid).size !== valid.length) throw new Error('Referensi berada pada struktur yang berbeda atau span tumpang tindih. Urutan tidak diubah.');
     var first = valid[0];
     var parent = first.parentNode;
     if (!parent) return 0;
+    for (var i = 0; i < parent.childNodes.length; i++) { if (valid.indexOf(parent.childNodes[i]) !== -1) { first = parent.childNodes[i]; break; } }
     var placeholder = xmlDoc.createComment('ref-reorder-anchor');
     parent.insertBefore(placeholder, first);
     valid.forEach(function(el) { if (el.parentNode) el.parentNode.removeChild(el); });
@@ -445,14 +516,16 @@
         return zip.file(docPath).async('string').then(function(xmlString) {
           var xmlDoc = new DOMParser().parseFromString(xmlString, 'application/xml');
           if (xmlDoc.getElementsByTagName('parsererror').length > 0) throw new Error('Gagal membaca struktur XML .docx.');
-          return buildDocxTextIndex(xmlDoc);
+          return readConversionMetadata(zip).then(function(metadata) { var index = buildDocxTextIndex(xmlDoc); index.metadata = metadata; return index; });
         });
       });
   }
 
   function makeRun(xmlDoc, templateRunEl, textValue, forceItalic) {
     if (!textValue) return null;
-    var newRun = templateRunEl.cloneNode(true);
+    var newRun = xmlDoc.createElementNS(W_NS, 'w:r');
+    var properties = templateRunEl.getElementsByTagNameNS(W_NS, 'rPr')[0];
+    if (properties) newRun.appendChild(properties.cloneNode(true));
     // The template run is being reused PURELY for its formatting (rPr) — any actual content it
     // carried (a tab, a line break, a manual hyphen) must NOT be replicated into every new run
     // built from it, or a single hanging-indent tab meant to appear once, right at the start of
@@ -484,19 +557,19 @@
         rPr = xmlDoc.createElementNS(W_NS, 'w:rPr');
         newRun.insertBefore(rPr, newRun.firstChild);
       }
-      var existingI = rPr.getElementsByTagName('w:i')[0];
-      if (forceItalic && !existingI) {
-        rPr.appendChild(xmlDoc.createElementNS(W_NS, 'w:i'));
-      } else if (!forceItalic && existingI) {
-        existingI.parentNode.removeChild(existingI);
-      }
+      ['i', 'iCs'].forEach(function(tag) {
+        var item = rPr.getElementsByTagNameNS(W_NS, tag)[0];
+        if (!item) { item = xmlDoc.createElementNS(W_NS, 'w:' + tag); rPr.appendChild(item); }
+        item.setAttributeNS(W_NS, 'w:val', forceItalic ? '1' : '0');
+      });
     }
     return newRun;
   }
 
   function runIsItalic(runEl) {
     var rPr = runEl.getElementsByTagName('w:rPr')[0];
-    return !!(rPr && rPr.getElementsByTagName('w:i').length > 0);
+    var item = rPr && rPr.getElementsByTagName('w:i')[0];
+    return !!(item && !/^(0|false|off)$/i.test(item.getAttributeNS(W_NS, 'val')));
   }
 
   function directChildRuns(paraEl) {
@@ -737,8 +810,7 @@
     index.segments.forEach(function(seg, i) {
       var ms = segMatches[i];
       if (ms.length === 0) return;
-      var runEl = seg.node.parentNode;
-      if (!runEl || !runEl.parentNode) return;
+      if (!seg.node.parentNode) return;
       var fullText = seg.node.textContent;
       ms.sort(function(a, b) { return a.start - b.start; });
       var pieces = [];
@@ -756,12 +828,10 @@
         appliedKeys[key] = true;
       });
       if (cursor < fullText.length) pieces.push(fullText.slice(cursor));
-      var parent = runEl.parentNode;
-      pieces.forEach(function(piece) {
-        var r = makeRun(xmlDoc, runEl, piece);
-        if (r) parent.insertBefore(r, runEl);
-      });
-      parent.removeChild(runEl);
+      // Edit only this text node. Cloning/deleting its run loses sibling <w:t>, tabs,
+      // drawings, field markers and other non-text content sharing the same run.
+      seg.node.textContent = pieces.join('');
+      seg.node.setAttributeNS(XML_NS, 'xml:space', 'preserve');
     });
     return Object.keys(appliedKeys).length;
   }
@@ -789,184 +859,135 @@
     els.exportStatus.className = 'status ' + (kind || 'info');
   }
 
-  // ---------- Export: .docx with original formatting preserved ----------
-  els.btnExportDocxOriginal.addEventListener('click', function() {
-    if (!state.originalFile || state.docxOriginalArticleText == null) return;
-    if (typeof JSZip === 'undefined') { setExportStatus('⚠️ Library JSZip gagal dimuat.', 'err'); return; }
+  function refreshOriginalExportAvailability() {
+    var result = state.lastResult;
+    var ready = !!(state.originalFile && result &&
+      els.articleText.value.trim() === state.docxOriginalArticleText &&
+      els.referenceText.value.trim() === state.docxOriginalReferenceText &&
+      els.convertedArticleOut.value === state.autoConvertedArticle &&
+      els.convertedRefsOut.value === state.autoConvertedRefs &&
+      (els.sourceStyleSelect.value === 'auto' || els.sourceStyleSelect.value === result.sourceStyleId) &&
+      els.targetStyleSelect.value === result.targetStyleId);
+    els.btnExportDocxOriginal.disabled = !ready;
+    return ready;
+  }
+  [els.articleText, els.referenceText, els.convertedArticleOut, els.convertedRefsOut,
+    els.sourceStyleSelect, els.targetStyleSelect].forEach(function(el) {
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', function() {
+      if (!refreshOriginalExportAvailability() && state.originalFile && state.lastResult) {
+        setExportStatus('Input/gaya/hasil telah berubah. Jalankan konversi ulang; suntingan manual pada hasil tersedia dalam ekspor teks polos.', 'warn');
+      }
+    });
+  });
 
-    var sourceStyleId = els.sourceStyleSelect.value === 'auto'
-      ? CE.FormatDetector.detect(state.docxOriginalArticleText, state.docxOriginalReferenceText).styleId
-      : els.sourceStyleSelect.value;
-    var targetStyleId = els.targetStyleSelect.value;
-
-    var result;
-    try {
-      result = CC.convert(state.docxOriginalArticleText, state.docxOriginalReferenceText, sourceStyleId, targetStyleId);
-    } catch (err) {
-      setExportStatus('⚠️ ' + err.message, 'err');
-      return;
+  function writeReferenceRuns(xmlDoc, paraEl, richRuns, targetStyleId) {
+    var originalRuns = Array.from(paraEl.getElementsByTagNameNS(W_NS, 'r'));
+    if (!originalRuns.length) throw new Error('Paragraf referensi tidak mempunyai run teks.');
+    if (paraEl.getElementsByTagNameNS(W_NS, 'fldChar').length || paraEl.getElementsByTagNameNS(W_NS, 'sdt').length ||
+        paraEl.getElementsByTagNameNS(W_NS, 'drawing').length) {
+      throw new Error('Referensi masih memiliki field/content control/gambar aktif. Gunakan salinan dengan referensi berupa teks statis sebelum konversi.');
     }
+    var template = originalRuns[0];
+    var content = Array.from(paraEl.childNodes).filter(function(node) {
+      return node.nodeType === 1 && (node.localName === 'r' || node.localName === 'hyperlink');
+    });
+    var anchor = content[0];
+    if (!anchor) throw new Error('Struktur paragraf referensi belum didukung.');
+    richRuns.forEach(function(piece) {
+      var r = makeRun(xmlDoc, template, piece.text, piece.italic);
+      if (r) paraEl.insertBefore(r, anchor);
+    });
+    content.forEach(function(node) { paraEl.removeChild(node); });
+    var pPr = paraEl.getElementsByTagNameNS(W_NS, 'pPr')[0];
+    if (!pPr) { pPr = xmlDoc.createElementNS(W_NS, 'w:pPr'); paraEl.insertBefore(pPr, paraEl.firstChild); }
+    var numPr = pPr.getElementsByTagNameNS(W_NS, 'numPr')[0];
+    if (!numPr) { numPr = xmlDoc.createElementNS(W_NS, 'w:numPr'); pPr.appendChild(numPr); }
+    while (numPr.firstChild) numPr.removeChild(numPr.firstChild);
+    var numId = xmlDoc.createElementNS(W_NS, 'w:numId'); numId.setAttributeNS(W_NS, 'w:val', '0'); numPr.appendChild(numId);
+    // Disable inherited Word numbering too; IEEE numbers are already literal text.
+    var ind = pPr.getElementsByTagNameNS(W_NS, 'ind')[0];
+    if (!ind) { ind = xmlDoc.createElementNS(W_NS, 'w:ind'); pPr.appendChild(ind); }
+    ['firstLine', 'firstLineChars', 'hangingChars', 'leftChars', 'rightChars', 'startChars', 'endChars', 'start', 'end'].forEach(function(attr) { ind.removeAttributeNS(W_NS, attr); });
+    ind.setAttributeNS(W_NS, 'w:left', targetStyleId === 'apa7' ? '720' : '360');
+    ind.setAttributeNS(W_NS, 'w:hanging', targetStyleId === 'apa7' ? '720' : '360');
+    var alignment = pPr.getElementsByTagNameNS(W_NS, 'jc')[0];
+    if (!alignment) { alignment = xmlDoc.createElementNS(W_NS, 'w:jc'); pPr.appendChild(alignment); }
+    alignment.setAttributeNS(W_NS, 'w:val', 'left');
+    var spacing = pPr.getElementsByTagNameNS(W_NS, 'spacing')[0];
+    if (!spacing) { spacing = xmlDoc.createElementNS(W_NS, 'w:spacing'); pPr.appendChild(spacing); }
+    spacing.setAttributeNS(W_NS, 'w:line', targetStyleId === 'apa7' ? '480' : '240');
+    spacing.setAttributeNS(W_NS, 'w:lineRule', 'auto');
+    spacing.setAttributeNS(W_NS, 'w:before', '0'); spacing.setAttributeNS(W_NS, 'w:after', '0');
+    spacing.setAttributeNS(W_NS, 'w:beforeAutospacing', '0'); spacing.setAttributeNS(W_NS, 'w:afterAutospacing', '0');
+    var snap = pPr.getElementsByTagNameNS(W_NS, 'snapToGrid')[0];
+    if (!snap) { snap = xmlDoc.createElementNS(W_NS, 'w:snapToGrid'); pPr.appendChild(snap); }
+    snap.setAttributeNS(W_NS, 'w:val', '0');
+    // Keep paragraph properties in OOXML schema order, including any original properties.
+    var order = ['pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'framePr', 'widowControl', 'numPr', 'suppressLineNumbers', 'pBdr', 'shd', 'tabs', 'suppressAutoHyphens', 'kinsoku', 'wordWrap', 'overflowPunct', 'topLinePunct', 'autoSpaceDE', 'autoSpaceDN', 'bidi', 'adjustRightInd', 'snapToGrid', 'spacing', 'ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc', 'textDirection', 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr', 'sectPr', 'pPrChange'];
+    var properties = Array.from(pPr.childNodes).filter(function(node) { return node.nodeType === 1; });
+    properties.sort(function(a, b) { var ai = order.indexOf(a.localName), bi = order.indexOf(b.localName); return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi); });
+    properties.forEach(function(node) { pPr.appendChild(node); });
+  }
 
+  // The exact same result supplies the preview, TXT, plain DOCX and formatted DOCX.
+  // No hidden CrossRef request or alternate reference formatter runs during export.
+  els.btnExportDocxOriginal.addEventListener('click', function() {
+    if (!refreshOriginalExportAvailability()) return;
+    if (typeof JSZip === 'undefined') { setExportStatus('JSZip gagal dimuat.', 'err'); return; }
+    var result = state.lastResult;
+    var originalFile = state.originalFile;
     setExportStatus('Memproses file .docx...', 'info');
     els.btnExportDocxOriginal.disabled = true;
-
-    state.originalFile.arrayBuffer()
-      .then(function(buf) { return JSZip.loadAsync(buf); })
-      .then(function(zip) {
-        var docPath = 'word/document.xml';
-        return zip.file(docPath).async('string').then(function(xmlString) {
-          var xmlDoc = new DOMParser().parseFromString(xmlString, 'application/xml');
-          var index = buildDocxTextIndex(xmlDoc);
-          var fullText = index.text;
-
-          // Recompute the conversion directly against THIS text (straight from the XML's own
-          // <w:t> runs via buildDocxTextIndex), rather than reusing the `result` from the earlier
-          // "Convert" step (computed against mammoth's separate text extraction) and trying to
-          // relocate its offsets into fullText by searching for a text prefix. That relocation is
-          // fragile — mammoth's extraction and the direct-XML extraction can differ in small ways
-          // (e.g. how a superscript affiliation marker next to the author's name gets spaced),
-          // and even a single-character mismatch anywhere before a citation silently drops every
-          // match after it. Splitting fullText itself sidesteps the mismatch entirely: every
-          // offset this produces is already correct in fullText's own coordinate space.
-          var headingInfo = CE.findReferencesHeading(fullText);
-          var xmlArticleText = headingInfo ? fullText.slice(0, headingInfo.offset) : fullText;
-          // Bounded to where the reference list itself actually ends — NOT simply "everything to
-          // the end of the document". A reference list is very often followed by other sections
-          // (Abbreviations, Appendix, Acknowledgments, Author Contributions, ...), and for a
-          // reference list with no explicit "[N]" numbering of its own (numberingInferred), that
-          // trailing text would otherwise get parsed as MORE references too — including, in a
-          // real case that surfaced this, individual data-table cells in an Appendix that each
-          // happened to look enough like a fragment of a citation ("Author et al. (Year)", a
-          // bare year) to "successfully" parse — and then get physically reordered together with
-          // the genuine references, scattering both across the document.
-          var refZoneStart = headingInfo ? headingInfo.offset + headingInfo.lineLength : 0;
-          var refZoneEndBound = headingInfo ? CE.findReferencesListEnd(fullText, refZoneStart) : fullText.length;
-          var xmlReferenceText = headingInfo ? fullText.slice(refZoneStart, refZoneEndBound) : '';
-
-          // Before converting, check whether any source reference is already truncated with
-          // "et al." (never valid in a reference-LIST entry — see completeTruncatedAuthorsAsync)
-          // and has a DOI CrossRef can resolve. This only affects the FULL-REFORMAT rewrite
-          // below (which reference-list author text actually gets written) — `result` itself is
-          // still computed from the UNMODIFIED xmlReferenceText, because the paragraph-location
-          // step further down needs rl.original to match the actual XML text verbatim (which
-          // still literally says "et al.", regardless of what CrossRef found).
-          return CC.completeTruncatedAuthorsAsync(xmlReferenceText, sourceStyleId).then(function(completionReport) {
-          // Keyed by raw reference text, not numLabel — numLabel only survives when a reference
-          // is parsed as part of the full list (parseReferenceListDetailed can infer it from
-          // list order for a source that never wrote "[N]" at all); re-parsing this same
-          // reference's text in isolation below has no such context and numLabel comes back
-          // null, which would silently break a numLabel-keyed lookup for exactly the documents
-          // that most need numbering inferred in the first place.
-          var completedByRaw = {};
-          completionReport.completed.forEach(function(c) { completedByRaw[c.raw] = c; });
-
-          var result = CC.convert(xmlArticleText, xmlReferenceText, sourceStyleId, targetStyleId);
-
-          var matches = [];
-          result.citationSpans.forEach(function(s) {
-            if (!s.matched) return;
-            matches.push({ start: s.start, end: s.end, text: s.replacement });
+    originalFile.arrayBuffer().then(function(buf) { return JSZip.loadAsync(buf); }).then(function(zip) {
+      return zip.file('word/document.xml').async('string').then(function(xmlString) {
+        var xmlDoc = new DOMParser().parseFromString(xmlString, 'application/xml');
+        var index = buildDocxTextIndex(xmlDoc);
+        var split = splitDocxIndex(index);
+        if (!split || split.article !== state.lastSourceText || split.references !== state.docxOriginalReferenceText) {
+          throw new Error('Teks sumber DOCX berbeda dari pratinjau. Unggah ulang dan jalankan konversi.');
+        }
+        var locations = result.referenceLines.map(function(rl) {
+          var candidates = index.paragraphs.filter(function(pi) {
+            return pi.start >= split.refStart && pi.start < split.refEnd && index.text.slice(pi.start, pi.end).trim() === rl.original;
           });
-
-          // Reference list: find each original reference line verbatim in the reference zone,
-          // AND remember which <w:p> it lives in — captured BEFORE any text mutation, using the
-          // ORIGINAL positions, so the paragraph elements can be physically reordered afterward
-          // to match `referenceLines`' target order.
-          //
-          // From IEEE/Vancouver source TO apa7 specifically, each reference paragraph gets a
-          // full bibliographic reformat (year into parentheses, quotes off the title, volume
-          // number newly italicized, "vol./no./pp./doi:" -> "16(1), 39" / a doi.org URL) via
-          // rewriteReferenceParagraphToApa7 — not just the author-name swap used for every other
-          // style pair, because only for that specific pairing has this been taught to safely
-          // read and rebuild the run structure (author text, one italicized journal/book title,
-          // trailing volume/pages/doi) without guessing at formatting it can't see. If a given
-          // paragraph doesn't match that expected shape, it quietly falls back to the plain
-          // author-only swap below rather than being left half-edited.
-          var refParagraphsInTargetOrder = [];
-          var fullReformatAttempt = STYLES[sourceStyleId].family === 'numeric' && targetStyleId === 'apa7';
-          var fullReformatCount = 0, fullReformatEligible = 0;
-          result.referenceLines.forEach(function(rl) {
-            var idx = fullText.indexOf(rl.original, refZoneStart);
-            if (idx === -1) { refParagraphsInTargetOrder.push(null); return; }
-            var paraEl = paragraphAtOffset(index, idx);
-            refParagraphsInTargetOrder.push(paraEl);
-            if (paraEl && STYLES[sourceStyleId].family === 'numeric' && STYLES[targetStyleId].family !== 'numeric') {
-              removeListNumbering(paraEl);
-            }
-            var didFullRewrite = false;
-            if (fullReformatAttempt && paraEl) {
-              fullReformatEligible++;
-              var ref = CE.parseReferenceLine(rl.original, sourceStyleId);
-              if (ref) {
-                var completion = completedByRaw[rl.original];
-                if (completion) {
-                  // Use the CrossRef-completed author list instead of the truncated source one
-                  // — everything else about `ref` (title, journal, doi, etc.) is unaffected.
-                  ref.authors = CE.parseAuthorsForStyle(completion.after, sourceStyleId).authors;
-                }
-                var authorApa = CC._internal.renderAuthorListForReference(ref, sourceStyleId, targetStyleId);
-                didFullRewrite = rewriteReferenceParagraphToApa7(xmlDoc, paraEl, ref, authorApa);
-              }
-            }
-            if (didFullRewrite) {
-              fullReformatCount++;
-            } else {
-              matches.push({ start: idx, end: idx + rl.original.length, text: rl.line });
-            }
-          });
-
-          matches.sort(function(a, b) { return a.start - b.start; });
-          var clean = [], lastEnd = -1;
-          matches.forEach(function(m) { if (m.start >= lastEnd) { clean.push(m); lastEnd = m.end; } });
-
-          if (clean.length === 0 && fullReformatCount === 0) return { blob: null, count: 0, reordered: 0 };
-
-          var count = applyPlainReplacements(xmlDoc, index, clean);
-          // Physically move the reference paragraphs into the new target order (harmless if
-          // they already happen to be in that order — reorderParagraphs is a no-op-equivalent
-          // in that case, just re-inserting each element where an equivalent one already was).
-          var locatedCount = refParagraphsInTargetOrder.filter(Boolean).length;
-          var reorderedCount = locatedCount >= 2 ? reorderParagraphs(xmlDoc, refParagraphsInTargetOrder) : 0;
-
-          var newXml = new XMLSerializer().serializeToString(xmlDoc.documentElement);
-          if (!/^\s*<\?xml/i.test(newXml)) newXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n' + newXml;
-          zip.file(docPath, newXml);
-          return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' })
-            .then(function(blob) {
-              return { blob: blob, count: count, reordered: reorderedCount, totalRefs: result.referenceLines.length,
-                fullReformatCount: fullReformatCount, fullReformatEligible: fullReformatEligible,
-                completedAuthorsCount: completionReport.completed.length, completedAuthorsChecked: completionReport.checked };
-            });
-          });
+          if (candidates.length !== 1) throw new Error('Satu referensi tidak dapat dipetakan secara unik ke satu paragraf. Format asli belum dapat diekspor dengan aman.');
+          return candidates[0].element;
         });
-      })
-      .then(function(res) {
-        els.btnExportDocxOriginal.disabled = false;
-        if (!res.blob) { setExportStatus('⚠️ Tidak ada bagian yang bisa dicocokkan/diganti di file aslinya.', 'warn'); return; }
-        var dateStr = fileTimestamp();
-        triggerDownload(res.blob, (state.originalFile.name || 'naskah').replace(/\.docx$/i, '') + '-KONVERSI-' + dateStr + '.docx');
-        var msg = '✅ Berhasil — ' + res.count + ' bagian diganti di dalam file asli (format tetap terjaga).';
-        if (res.completedAuthorsChecked > 0) {
-          msg += ' ' + res.completedAuthorsCount + '/' + res.completedAuthorsChecked + ' referensi "et al." di naskah asli dilengkapi otomatis via CrossRef sebelum diformat.';
+        var matches = result.citationSpans.filter(function(s) { return s.matched; }).map(function(s) {
+          return { start: s.start + split.articleOffset, end: s.end + split.articleOffset, text: s.replacement };
+        });
+        var count = applyPlainReplacements(xmlDoc, index, matches);
+        if (count !== matches.length) throw new Error('Tidak semua sitasi dapat diterapkan. File keluaran dibatalkan.');
+        result.referenceLines.forEach(function(rl, i) {
+          if (rl.runs) writeReferenceRuns(xmlDoc, locations[i], rl.runs, result.targetStyleId);
+          else {
+            var current = buildDocxTextIndex(xmlDoc);
+            var pi = current.paragraphs.find(function(p) { return p.element === locations[i]; });
+            var raw = current.text.slice(pi.start, pi.end);
+            var offset = raw.indexOf(rl.original);
+            applyPlainReplacements(xmlDoc, current, [{ start: pi.start + offset, end: pi.start + offset + rl.original.length, text: rl.line }]);
+          }
+        });
+        reorderParagraphs(xmlDoc, locations);
+        var verification = splitDocxIndex(buildDocxTextIndex(xmlDoc));
+        if (verification.article !== result.convertedArticle || verification.references !== result.referenceLines.map(function(rl) { return rl.line; }).join('\n')) {
+          throw new Error('Hasil DOCX tidak sama dengan pratinjau. File keluaran dibatalkan.');
         }
-        if (res.fullReformatEligible > 0) {
-          msg += ' ' + res.fullReformatCount + '/' + res.fullReformatEligible + ' entri daftar pustaka diformat penuh ke APA7 (tahun, tanda kutip, cetak miring volume, DOI).';
-          if (res.fullReformatCount < res.fullReformatEligible) msg += ' Sisanya memakai format penulis-saja karena struktur paragrafnya tidak dikenali — cek manual.';
-        }
-        if (res.reordered > 0) {
-          msg += ' Urutan paragraf referensi disesuaikan (' + res.reordered + '/' + res.totalRefs + ' entri ditemukan & diurutkan ulang) supaya penomoran berurut dari 1 sesuai urutan tampil.';
-          if (res.reordered < res.totalRefs) msg += ' Sisanya tidak ditemukan persis di teks aslinya — cek posisinya manual.';
-        }
-        setExportStatus(msg, 'ok');
-      })
-      .catch(function(err) {
-        els.btnExportDocxOriginal.disabled = false;
-        setExportStatus('⚠️ Gagal memproses: ' + err.message, 'err');
+        zip.file('word/document.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + new XMLSerializer().serializeToString(xmlDoc.documentElement));
+        return writeConversionMetadata(zip, result.metadata).then(function() {
+          return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        });
       });
+    }).then(function(blob) {
+      triggerDownload(blob, originalFile.name.replace(/\.docx$/i, '') + '-' + result.targetStyleId.toUpperCase() + '-' + fileTimestamp() + '.docx');
+      setExportStatus('✅ DOCX cocok dengan pratinjau: ' + result.changedCount + ' sitasi berubah, ' + result.referenceLines.length + ' referensi. Metadata penulis lengkap disimpan untuk konversi balik.' +
+        (result.unmatched.length ? ' ' + result.unmatched.length + ' sitasi tanpa pasangan tetap dipertahankan.' : '') +
+        ((result.referenceIssues || []).length ? ' Ada referensi yang perlu dicek manual.' : ''), result.unmatched.length ? 'warn' : 'ok');
+    }).catch(function(err) { setExportStatus('⚠️ ' + err.message, 'err'); }).finally(refreshOriginalExportAvailability);
   });
 
   // ---------- Export: fresh plain .docx built from current (possibly edited) textareas ----------
-  function buildMinimalDocx(articleText, referenceText) {
+  function buildMinimalDocx(articleText, referenceText, metadata) {
     var paragraphs = [];
     articleText.split(/\n+/).forEach(function(line) { if (line.trim()) paragraphs.push(line.trim()); });
     paragraphs.push('');
@@ -995,7 +1016,9 @@
     zip.file('[Content_Types].xml', contentTypesXml);
     zip.file('_rels/.rels', relsXml);
     zip.file('word/document.xml', documentXml);
-    return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    return (metadata ? writeConversionMetadata(zip, metadata) : Promise.resolve()).then(function() {
+      return zip.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    });
   }
 
   els.btnExportDocxPlain.addEventListener('click', function() {
@@ -1004,7 +1027,7 @@
     var refs = els.convertedRefsOut.value.trim();
     if (!article) { setExportStatus('⚠️ Belum ada hasil konversi untuk diekspor.', 'warn'); return; }
     setExportStatus('Membuat file .docx...', 'info');
-    buildMinimalDocx(article, refs)
+    buildMinimalDocx(article, refs, state.lastResult && state.lastResult.metadata)
       .then(function(blob) {
         var dateStr = fileTimestamp();
         triggerDownload(blob, 'sitasi-konversi-' + dateStr + '.docx');

@@ -377,6 +377,72 @@ test('rewriteReferenceParagraphToApa7 fully reformats a book chapter with a name
   assert.strictEqual(paraEl.getElementsByTagName('w:tab').length, 0);
 });
 
+
+// Exercise the production unified rich-reference writer, rather than only the legacy helper.
+const richStart = src.indexOf('  function writeReferenceRuns(');
+const richEnd = src.indexOf('\n  // The exact same result', richStart);
+eval(src.slice(richStart, richEnd));
+
+function textOf(p) { return Array.from(p.getElementsByTagNameNS(W_NS, 't')).map(t => t.textContent).join(''); }
+
+test('replacements preserve multiple text nodes, tabs, breaks and drawings in the same run', () => {
+  const doc = parseDoc('<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>A [1]</w:t><w:tab/><w:t>B [2]</w:t><w:br/><w:drawing/></w:r></w:p>');
+  const index = buildDocxTextIndex(doc);
+  const first = index.text.indexOf('[1]'), second = index.text.indexOf('[2]');
+  assert.strictEqual(applyPlainReplacements(doc, index, [{ start: first, end: first + 3, text: '(Smith, 2020)' }, { start: second, end: second + 3, text: '(Jones, 2021)' }]), 2);
+  assert.strictEqual(textOf(doc.documentElement), 'A (Smith, 2020)B (Jones, 2021)');
+  assert.strictEqual(doc.getElementsByTagNameNS(W_NS, 'r').length, 1);
+  for (const tag of ['tab', 'br', 'drawing', 'b']) assert.strictEqual(doc.getElementsByTagNameNS(W_NS, tag).length, 1);
+});
+
+test('reference paragraphs reorder from their earliest source location, preserving intervening content', () => {
+  const doc = parseDoc('<w:p>' + run('Before', false) + '</w:p><w:p>' + run('Alpha', false) + '</w:p><w:p>' + run('Beta', false) + '</w:p><w:p>' + run('Gamma', false) + '</w:p><w:p>' + run('After', false) + '</w:p>');
+  const paras = Array.from(doc.getElementsByTagNameNS(W_NS, 'p'));
+  reorderParagraphs(doc, [paras[3], paras[1], paras[2]]);
+  assert.deepStrictEqual(Array.from(doc.getElementsByTagNameNS(W_NS, 'p')).map(textOf), ['Before', 'Gamma', 'Alpha', 'Beta', 'After']);
+});
+
+test('reference writer uses exactly the preview runs, with only APA journal and volume italic', () => {
+  const refs = '[1] J. Smith, "A study," Journal A, vol. 9, no. 2, pp. 1–3, 2020, doi: 10.1000/example.';
+  const result = CC.convert('A study [1].', refs, 'ieee', 'apa7');
+  const doc = parseDoc('<w:p><w:pPr><w:numPr><w:numId w:val="5"/></w:numPr><w:ind w:hangingChars="200" w:firstLineChars="120"/><w:snapToGrid/></w:pPr>' + run(refs, true) + '</w:p>');
+  const para = doc.getElementsByTagNameNS(W_NS, 'p')[0];
+  writeReferenceRuns(doc, para, result.referenceLines[0].runs, 'apa7');
+  assert.strictEqual(textOf(para), result.referenceLines[0].line);
+  const italics = Array.from(para.getElementsByTagNameNS(W_NS, 'r')).filter(runIsItalic).map(textOf);
+  assert.deepStrictEqual(italics, ['Journal A', '9']);
+  assert.strictEqual(para.getElementsByTagNameNS(W_NS, 'numId')[0].getAttributeNS(W_NS, 'val'), '0');
+  assert.strictEqual(para.getElementsByTagNameNS(W_NS, 'ind')[0].getAttributeNS(W_NS, 'hanging'), '720');
+  assert.strictEqual(para.getElementsByTagNameNS(W_NS, 'spacing')[0].getAttributeNS(W_NS, 'line'), '480');
+  assert.strictEqual(para.getElementsByTagNameNS(W_NS, 'jc')[0].getAttributeNS(W_NS, 'val'), 'left');
+  assert.strictEqual(para.getElementsByTagNameNS(W_NS, 'ind')[0].hasAttributeNS(W_NS, 'hangingChars'), false);
+  assert.strictEqual(para.getElementsByTagNameNS(W_NS, 'snapToGrid')[0].getAttributeNS(W_NS, 'val'), '0');
+});
+
+test('explicit false italic overrides inherited formatting and existing italic=false', () => {
+  const doc = parseDoc('<w:p><w:r><w:rPr><w:i w:val="0"/></w:rPr><w:t>old</w:t></w:r></w:p>');
+  const template = doc.getElementsByTagNameNS(W_NS, 'r')[0];
+  const on = makeRun(doc, template, 'italic', true), off = makeRun(doc, template, 'plain', false);
+  assert.strictEqual(runIsItalic(on), true);
+  assert.strictEqual(runIsItalic(off), false);
+  assert.strictEqual(off.getElementsByTagNameNS(W_NS, 'i')[0].getAttributeNS(W_NS, 'val'), '0');
+});
+
+test('reference writer refuses active fields without modifying the source paragraph', () => {
+  const doc = parseDoc('<w:p><w:r><w:fldChar w:fldCharType="begin"/><w:t>Managed reference</w:t></w:r></w:p>');
+  const para = doc.getElementsByTagNameNS(W_NS, 'p')[0], original = serialize(doc);
+  assert.throws(() => writeReferenceRuns(doc, para, [{ text: 'Changed', italic: false }], 'apa7'), /field\/content control/);
+  assert.strictEqual(serialize(doc), original);
+});
+
+test('DOCX paragraph splitting preserves long author lists and the appendix boundary', () => {
+  const doc = parseDoc('<w:p>' + run('Article body.\n', false) + '</w:p><w:p>' + run('References', false) + '</w:p><w:p>' + run('Alpha, A. (2020). One. Journal A, 1, 1–3.', false) + '</w:p><w:p>' + run('Beta, B., ' + 'Coauthor, C., '.repeat(30) + '(2021). Two. Journal B, 2, 4–6.', false) + '</w:p><w:p>' + run('Appendix A. Items', false) + '</w:p><w:p>' + run('Unchanged appendix content.', false) + '</w:p>');
+  const split = splitDocxIndex(buildDocxTextIndex(doc));
+  assert.strictEqual(split.references.split('\n').length, 2);
+  assert.ok(!split.references.includes('Appendix'));
+  assert.ok(split.references.includes('(2021). Two.'));
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   process.exitCode = 1;

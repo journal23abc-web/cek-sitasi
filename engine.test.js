@@ -1787,7 +1787,7 @@ test('convert() renders the book chapter in full, correct APA7 form end to end',
   const result = CC.convert(article, refs, 'ieee', 'apa7');
   assert.strictEqual(result.changedCount, 1);
   assert.strictEqual(result.referenceLines[0].line,
-    'Odia, J. O., & Odia, A. A. (2020). Accessibility to higher education in Nigeria: The pains, problems, and prospects. In Information Resources Management Association (Ed.), Accessibility and Diversity in Education: Breakthroughs in Research and Practice (pp. 80-100). IGI Global. https://doi.org/10.4018/978-1-7998-1213-5.ch005');
+    'Odia, J. O., & Odia, A. A. (2020). Accessibility to higher education in Nigeria: The pains, problems, and prospects. In Information Resources Management Association (Ed.), Accessibility and Diversity in Education: Breakthroughs in Research and Practice (pp. 80–100). IGI Global. https://doi.org/10.4018/978-1-7998-1213-5.ch005');
 });
 
 console.log('\n=== Regression: full publication dates and institutional coauthors ===');

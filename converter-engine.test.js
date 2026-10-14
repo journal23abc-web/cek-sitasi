@@ -163,9 +163,9 @@ test('formatNumeric: exactly two consecutive citations use a comma, not an en-da
   assert.strictEqual(out, '[1], [2]');
 });
 
-test('formatNumeric: three or more consecutive citations use an en-dash range', () => {
+test('formatNumeric: IEEE 2025 writes three or more references individually', () => {
   const out = CC._internal.formatNumeric([1, 2, 3], 'ieee');
-  assert.strictEqual(out, '[1]\u2013[3]');
+  assert.strictEqual(out, '[1], [2], [3]');
 });
 
 console.log('\n=== citationSpans (for UI preview) ===');
@@ -283,7 +283,7 @@ test('IEEE source author list "et al." truncation is preserved in the converted 
   const article = 'Prior work found positive effects [1].';
   const refs = '[1] A. R. Malik et al., "Exploring AI in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.';
   const r = CC.convert(article, refs, 'ieee', 'apa7');
-  assert.ok(r.referenceLines[0].line.startsWith('Malik, A. R., et al.,'), r.referenceLines[0].line);
+  assert.ok(r.referenceLines[0].line.startsWith('Malik, A. R., et al. (2023).'), r.referenceLines[0].line);
 });
 
 test('narrative "Wang et al." citation with un-comma\'d source "et al." also resolves (not left unmatched)', () => {
@@ -308,14 +308,12 @@ test('a non-quoted institutional/book reference does not lose its title when reb
   assert.ok(r.referenceLines[0].line.includes('Guidance for Generative AI in Education and Research'), r.referenceLines[0].line);
 });
 
-test('an ordinary quoted-title reference still keeps its opening quote at the right spot (no regression from the title-based boundary)', () => {
+test('IEEE quoted titles become unquoted APA titles with author and year', () => {
   const article = 'This was studied before [1].';
   const refs = '[1] A. R. Malik, "Exploring artificial intelligence in academic essay writing," International Journal of Educational Research Open, vol. 4, p. 100296, 2023. doi: 10.1016/j.ijedro.2023.100296.';
   const r = CC.convert(article, refs, 'ieee', 'apa7');
-  // convert()'s plain-text referenceLines only reformats the AUTHOR portion — the quoted title
-  // and everything after it is preserved verbatim, so the quote mark must survive right where
-  // it originally sat, immediately after the (now APA-formatted) author.
-  assert.ok(r.referenceLines[0].line.includes('Malik, A. R., "Exploring artificial intelligence in academic essay writing,"'), r.referenceLines[0].line);
+  assert.ok(r.referenceLines[0].line.startsWith('Malik, A. R. (2023). Exploring artificial intelligence in academic essay writing.'), r.referenceLines[0].line);
+  assert.ok(!r.referenceLines[0].line.includes('\"'), r.referenceLines[0].line);
 });
 
 
@@ -449,7 +447,7 @@ testAsync('completeTruncatedAuthorsAsync: end-to-end with a mocked fetch, number
     assert.strictEqual(result.changedCount, 1);
     assert.ok(result.convertedArticle.includes('(Malik et al., 2023)'), result.convertedArticle);
     const ref2Line = result.referenceLines.find(r => r.line.startsWith('Malik'));
-    assert.ok(ref2Line.line.startsWith('Malik, A. R., Pratiwi, Y., Andajani, K., Numertayasa, I. W., Suharti, S., Darwis, A., & Marzuki,'), ref2Line.line);
+    assert.ok(ref2Line.line.startsWith('Malik, A. R., Pratiwi, Y., Andajani, K., Numertayasa, I. W., Suharti, S., Darwis, A., & Marzuki (2023).'), ref2Line.line);
   } finally {
     global.fetch = realFetch;
   }
@@ -577,7 +575,7 @@ test('convert() passes an already-target-styled reference through nearly verbati
   assert.strictEqual(result.changedCount, 1);
   assert.ok(result.convertedArticle.includes('Hallgren (2012)'), result.convertedArticle);
   assert.strictEqual(result.referenceLines[0].line,
-    'Hallgren, K. A. (2012). Computing inter-rater reliability for observational data: An overview and tutorial. Tutorials in Quantitative Methods for Psychology, 8(1), 23–34. https://doi.org/10.20982/tqmp.08.1.p023'.replace('–', '-'));
+    'Hallgren, K. A. (2012). Computing inter-rater reliability for observational data: An overview and tutorial. Tutorials in Quantitative Methods for Psychology, 8(1), 23–34. https://doi.org/10.20982/tqmp.08.1.p023');
 });
 
 test('a source reference already using APA7\'s OWN 21+-author ellipsis renders with the ellipsis form, not a spurious "&" glued onto it', () => {
@@ -591,6 +589,99 @@ test('a source reference already using APA7\'s OWN 21+-author ellipsis renders w
   assert.ok(authorApa.endsWith(', . . . Moher, D.'), authorApa);
   assert.ok(!authorApa.includes('&'), authorApa);
   assert.ok(authorApa.startsWith('Page, M. J., McKenzie, J. E.'), authorApa);
+});
+
+
+console.log('\n=== APA 7 and IEEE reversible bibliographic conversion ===');
+
+const reversibleRefs = [
+  'Lo Bue, R., & Carraça, É. V. (2024). Why exercise? INQUIRY: The Journal of Health Care Organization, Provision, and Financing, 61, 1–12. https://doi.org/10.1000/test-one',
+  'Craig, C. L., Marshall, A. L., Sjöström, M., Bauman, A. E., Booth, M. L., Ainsworth, B. E., Pratt, M., Ekelund, U., Yngve, A., Sallis, J. F., & Oja, P. (2003). International physical activity questionnaire: 12-country reliability and validity. Medicine & Science in Sports & Exercise, 35(8), 1381–1395. https://doi.org/10.1249/01.MSS.0000078924.61453.FB',
+  'Goodyear, V. A., Wood, G., Skinner, B., & Thompson, J. L. (2021). The effect of social media interventions. International Journal of Behavioral Nutrition and Physical Activity, 18, Article 72. https://doi.org/10.1186/s12966-021-01138-3',
+].join('\n');
+const reversibleArticle = 'Lo Bue and Carraça (2024) found associations (Craig et al., 2003; Goodyear et al., 2021). A quotation (Lo Bue & Carraça, 2024, pp. 2–4) follows.';
+
+test('APA to IEEE retains year, compound surname, volume, pages, article ID and DOI', () => {
+  const r = CC.convert(reversibleArticle, reversibleRefs, 'apa7', 'ieee');
+  assert.strictEqual(r.unmatched.length, 0);
+  assert.ok(r.referenceLines[0].line.includes('R. Lo Bue and É. V. Carraça'));
+  assert.ok(r.referenceLines[0].line.includes('vol. 61, pp. 1–12, 2024, doi: 10.1000/test-one.'));
+  assert.ok(r.referenceLines[1].line.startsWith('[2] C. L. Craig et al.,'));
+  assert.ok(r.referenceLines[2].line.includes('Art. no. 72'));
+  assert.ok(r.convertedArticle.includes('[1, pp. 2–4]'));
+  assert.strictEqual(r.referenceLines[0].runs.map(x => x.text).join(''), r.referenceLines[0].line);
+});
+
+test('three APA to IEEE to APA cycles remain stable and restore all eleven Craig authors', () => {
+  let article = reversibleArticle, refs = reversibleRefs, metadata = null, firstAPA, firstIEEE;
+  for (let cycle = 0; cycle < 3; cycle++) {
+    const ieee = CC.convert(article, refs, 'apa7', 'ieee', { metadata });
+    const ieeeText = ieee.referenceLines.map(x => x.line).join('\n');
+    const apa = CC.convert(ieee.convertedArticle, ieeeText, 'ieee', 'apa7', { metadata: ieee.metadata });
+    assert.strictEqual(apa.restoredMetadataCount, 3);
+    assert.strictEqual(apa.unmatched.length, 0);
+    assert.ok(apa.convertedArticle.includes('Lo Bue and Carraça (2024)'));
+    assert.ok(apa.convertedArticle.includes('pp. 2–4'));
+    assert.strictEqual(apa.referenceLines.find(x => x.line.startsWith('Craig,')).model.authors.length, 11);
+    const value = { article: apa.convertedArticle, refs: apa.referenceLines.map(x => x.line).join('\n') };
+    if (cycle === 0) { firstAPA = value; firstIEEE = ieeeText; }
+    else { assert.deepStrictEqual(value, firstAPA); assert.strictEqual(ieeeText, firstIEEE); }
+    article = value.article; refs = value.refs; metadata = apa.metadata;
+  }
+});
+
+test('numeric author-date conversion never drops an unrelated capitalized word', () => {
+  const refs = '[1] J. Smith, "A study," Journal A, vol. 1, pp. 1–3, 2020.';
+  const r = CC.convert('However [1] this continues. Jones [1] also disagrees.', refs, 'ieee', 'apa7');
+  assert.strictEqual(r.convertedArticle, 'However (Smith, 2020) this continues. Jones (Smith, 2020) also disagrees.');
+});
+
+test('old numeric ranges and adjacent bracket groups restore one APA citation group', () => {
+  const refs = ['[1] J. Smith, "One," Journal A, vol. 1, pp. 1–3, 2020.', '[2] A. Jones, "Two," Journal B, vol. 2, pp. 4–6, 2021.', '[3] K. Lee, "Three," Journal C, vol. 3, pp. 7–9, 2022.'].join('\n');
+  const a = CC.convert('Studies [1]–[3] agree.', refs, 'ieee', 'apa7');
+  const b = CC.convert('Studies [1], [2], [3] agree.', refs, 'ieee', 'apa7');
+  assert.strictEqual(a.convertedArticle, 'Studies (Jones, 2021; Lee, 2022; Smith, 2020) agree.');
+  assert.strictEqual(a.convertedArticle, b.convertedArticle);
+  assert.strictEqual(a.totalCitationsFound, 1);
+});
+
+test('stale metadata cannot overwrite an edited year or title', () => {
+  const ieee = CC.convert(reversibleArticle, reversibleRefs, 'apa7', 'ieee');
+  const changed = ieee.referenceLines.map(x => x.line).join('\n').replace('2024, doi:', '2025, doi:');
+  const apa = CC.convert(ieee.convertedArticle, changed, 'ieee', 'apa7', { metadata: ieee.metadata });
+  assert.strictEqual(apa.restoredMetadataCount, 2);
+  assert.ok(apa.referenceLines.find(x => x.line.startsWith('Lo Bue')).line.includes('(2025)'));
+});
+
+test('text without metadata flags truncated IEEE authors rather than inventing them', () => {
+  const ieee = CC.convert(reversibleArticle, reversibleRefs, 'apa7', 'ieee');
+  const apa = CC.convert(ieee.convertedArticle, ieee.referenceLines.map(x => x.line).join('\n'), 'ieee', 'apa7');
+  assert.ok(apa.referenceIssues.some(x => /penulis sumber terpotong/.test(x.note)));
+  assert.ok(!apa.referenceLines.find(x => x.line.startsWith('Craig')).line.includes('Oja'));
+});
+
+test('unparseable references stop conversion rather than silently deleting an entry', () => {
+  assert.throws(() => CC.convert('A study (Smith, 2020).', 'Smith, J. (2020). A study. Journal A, 1(1), 1–3.\nUNPARSEABLE ENTRY', 'apa7', 'ieee'), /entri referensi tidak dapat dibaca/);
+});
+
+test('duplicate numeric labels cannot silently resolve to the last reference', () => {
+  const r = CC.convert('A study [1].', '[1] J. Smith, "One," Journal A, vol. 1, pp. 1–3, 2020.\n[1] A. Jones, "Two," Journal B, vol. 2, pp. 4–6, 2021.', 'ieee', 'apa7');
+  assert.strictEqual(r.convertedArticle, 'A study [1].');
+  assert.strictEqual(r.unmatched.length, 1);
+});
+
+test('single unlabeled locator is flagged without inventing a page or article interpretation', () => {
+  const r = CC.convert('A study (Smith, 2020).', 'Smith, J. (2020). A study. Journal A, 9, 78. https://doi.org/10.1000/example', 'apa7', 'ieee');
+  assert.ok(r.referenceLines[0].line.includes('vol. 9, 78, 2020'));
+  assert.ok(!r.referenceLines[0].line.includes('p. 78'));
+  assert.ok(r.referenceIssues.some(x => /Angka tunggal/.test(x.note)));
+});
+
+test('identical authors and years receive matching a/b suffixes in APA citations and entries', () => {
+  const refs = '[1] J. Smith, "Zulu," Journal A, vol. 1, pp. 1–3, 2020.\n[2] J. Smith, "Alpha," Journal A, vol. 1, pp. 4–6, 2020.';
+  const r = CC.convert('One [1] and two [2].', refs, 'ieee', 'apa7');
+  assert.strictEqual(r.convertedArticle, 'One (Smith, 2020b) and two (Smith, 2020a).');
+  assert.ok(r.referenceLines.find(x => x.line.includes('Alpha')).line.includes('(2020a)'));
 });
 
 (async () => {

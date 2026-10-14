@@ -147,7 +147,7 @@
   <div class="scope-note">
     <b>Yang dikonversi:</b> sitasi in-text (parenthetical maupun naratif) — nama penulis, "&"/"and", ambang "et al.", nomor referensi, dsb — dicocokkan ke daftar referensi seperti yang dipakai Validator Sitasi, supaya hasilnya konsisten.
     Sitasi yang <b>tidak bisa dicocokkan dengan pasti ke satu referensi tetap dibiarkan seperti aslinya</b> dan ditandai untuk dicek manual, daripada ditebak dan salah.
-    <b>Daftar referensi:</b> penomoran/urutan &amp; format nama penulis ikut disesuaikan; bagian judul/jurnal/halaman <b>sengaja tidak diubah</b> (lihat catatan di bawah hasil).
+    <b>Daftar referensi APA 7 ↔ IEEE:</b> penulis, penempatan tahun, tanda kutip judul, volume, issue, halaman/nomor artikel, DOI, dan cetak miring ikut disesuaikan untuk struktur yang dikenali. Detail yang tidak tersedia tidak ditambahkan; struktur yang belum didukung ditandai untuk pemeriksaan manual. Singkatan resmi nama jurnal tetap perlu diperiksa dari sumber asli.
     <br><br>
     <b>Gaya campuran:</b> kalau naskah aslinya sudah bercampur — misalnya sebagian besar APA tapi ada beberapa sitasi yang sudah kadung ditulis dalam format IEEE/numerik, atau sebaliknya — sistem otomatis mendeteksi &amp; ikut mengonversi sitasi "nyasar" itu juga (bukan cuma sitasi bergaya sumber yang dipilih), supaya hasil akhirnya benar-benar seragam satu gaya. Yang berhasil dicocokkan otomatis ikut dikonversi; yang tidak, ditandai jelas dengan label <b>GAYA CAMPURAN</b> di daftar "Tidak Diubah" supaya mudah dicek manual.
     <br><br>
@@ -251,7 +251,7 @@
     <div class="summary-grid" id="summaryGrid"></div>
 
     <details class="collapsible" id="unmatchedDetails">
-      <summary>⚠️ Sitasi Tidak Diubah (perlu dicek manual) — <span id="unmatchedCount">0</span></summary>
+      <summary>⚠️ Sitasi dan Referensi Perlu Dicek Manual — <span id="unmatchedCount">0</span></summary>
       <div class="collapsible-content"><div class="issue-list" id="unmatchedList"></div></div>
     </details>
 
@@ -269,7 +269,7 @@
 
       <div class="field-label">Teks Bisa Disunting Manual</div>
       <textarea id="convertedArticleOut" style="min-height:280px;"></textarea>
-      <div class="edit-note">💡 Kotak di atas bisa diedit langsung — misalnya kalau ada sitasi yang tidak berhasil dicocokkan dan Anda mau perbaiki manual. Pratinjau berwarna di atasnya dibuat saat tombol Konversi ditekan dan tidak ikut berubah otomatis kalau Anda mengedit teks di kotak ini.</div>
+      <div class="edit-note">💡 Kotak di atas bisa diedit langsung — misalnya kalau ada sitasi yang tidak berhasil dicocokkan dan Anda mau perbaiki manual. Pratinjau berwarna dibuat saat Konversi ditekan. Suntingan manual menonaktifkan ekspor format asli; gunakan ekspor teks polos untuk membawa suntingan tersebut.</div>
       <div class="export-row">
         <button class="ghost" id="btnResetArticle">↺ Kembalikan ke Hasil Otomatis</button>
       </div>
@@ -277,7 +277,7 @@
 
     <div class="panel">
       <div class="output-header">
-        <div class="field-label" style="margin-bottom:0;">Daftar Referensi — Diberi Nomor/Urutan &amp; Format Nama Penulis Baru</div>
+        <div class="field-label" style="margin-bottom:0;">Daftar Referensi — Format Bibliografi Tujuan</div>
         <button class="ghost" id="btnCopyRefs">📋 Copy Daftar Referensi</button>
       </div>
       <textarea id="convertedRefsOut" style="min-height:200px;"></textarea>
@@ -286,13 +286,10 @@
         <button class="ghost" id="btnResetRefs">↺ Kembalikan ke Hasil Otomatis</button>
       </div>
       <div class="disclaimer">
-        <b>Yang diubah pada daftar referensi:</b>
-        <ul>
-          <li>Urutan entri — alfabetis untuk APA/Harvard/Chicago/MLA, urutan kemunculan sitasi pertama di teks untuk IEEE/Vancouver.</li>
-          <li>Penomoran <code>[1]</code>/<code>1.</code> untuk gaya numerik (IEEE/Vancouver).</li>
-          <li>Format nama penulis — urutan "Nama Belakang, Inisial" ⇄ "Inisial Nama Belakang" ⇄ "Nama Belakang IN", pemisah "&amp;"/"and", ambang "et al." sesuai gaya tujuan.</li>
-        </ul>
-        <b>Yang TIDAK diubah (perlu disunting manual):</b> penempatan tahun, tanda kutip judul, format volume/nomor/halaman, dan detail lain — karena itu berbeda-beda per jenis sumber dan berisiko salah kalau dibuat otomatis tanpa nama depan lengkap penulis (yang tidak selalu tersedia dari gaya sumber). Setelah disunting manual, jalankan lagi lewat <a href="validator-copy.html">Validator Sitasi</a> untuk memastikan formatnya benar.
+        <b>APA 7 ↔ IEEE:</b> struktur bibliografi yang dikenali memakai hasil yang sama untuk pratinjau dan semua ekspor. APA 7 menggunakan author–date, daftar alfabetis, judul tanpa tanda kutip, jurnal dan volume bercetak miring, hanging indent 0,5 inci, spasi ganda, serta DOI sebagai URL. IEEE menggunakan nomor menurut kemunculan pertama, inisial sebelum nama belakang, judul artikel bertanda kutip, label <code>vol.</code>/<code>no.</code>/<code>pp.</code>/<code>Art. no.</code>, dan <code>doi:</code>.
+        <p>Nomor sitasi IEEE ditulis satu per satu, termasuk kelompok tiga nomor atau lebih, sesuai <a href="https://journals.ieeeauthorcenter.ieee.org/create-your-ieee-journal-article/create-the-text-of-your-article/ieee-editorial-style-manual/" target="_blank" rel="noopener noreferrer">IEEE Reference Guide</a> 2025. Rentang nomor pada input lama tetap dapat dibaca.</p>
+        <p><b>Konversi balik:</b> kedua ekspor DOCX menyimpan nama penulis lengkap dan metadata yang tersedia. IEEE menampilkan penulis pertama dan <i>et al.</i> untuk lebih dari enam penulis, tetapi nama lengkap dapat dipulihkan saat DOCX hasil diunggah kembali. Teks yang disalin dan TXT tidak membawa metadata ini; nama yang sudah terpotong harus dilengkapi dari sumber asli.</p>
+        <p>Jenis sumber yang tidak dikenali, angka tunggal yang belum jelas sebagai halaman atau nomor artikel, serta informasi yang tidak tersedia ditandai. Nama jurnal dipertahankan, tanpa menebak singkatan atau memperluas singkatan sumber. Gaya selain APA 7/IEEE masih memakai penyesuaian penulis dan urutan; format bibliografi lengkapnya perlu diperiksa manual.</p>
       </div>
     </div>
 
@@ -305,8 +302,8 @@
       </div>
       <span id="exportStatus" class="status info" role="status" aria-live="polite"></span>
       <div class="export-note">
-        <b>.docx format asli dipertahankan</b> — hanya aktif kalau naskah diunggah lewat tab "Upload .docx". Sitasi diganti langsung di dalam XML aslinya (heading, font, bold/italic, dsb. tidak tersentuh), tapi ini SELALU mencerminkan hasil konversi <b>otomatis</b> — perubahan manual yang Anda ketik di kotak teks di atas <b>tidak ikut terbawa</b> ke file ini. Paragraf daftar referensi juga <b>disusun ulang urutannya</b> supaya penomoran berurut dari 1 sesuai urutan tampil di halaman (alfabetis untuk APA/Harvard/Chicago/MLA, urutan kemunculan sitasi pertama untuk IEEE/Vancouver) — entri yang tidak ditemukan persis di teks aslinya (mis. karena diedit manual) tidak ikut dipindah, dan status setelah unduh akan memberi tahu kalau itu terjadi.<br>
-        <b>.docx / .txt teks polos</b> — dibuat baru dari isi kotak teks saat ini (jadi IKUT membawa perubahan manual Anda), tapi tanpa format asli naskah (heading, bold, italic, dst. — cuma teks).
+        <b>.docx format asli dipertahankan</b> tersedia untuk unggahan yang input dan hasilnya masih cocok dengan pratinjau. Sitasi dan paragraf referensi diubah; tabel, gambar, heading, dan bagian lain dipertahankan. Semua referensi harus dapat dipetakan secara unik ke paragraf sumber. Suntingan manual atau perubahan gaya menonaktifkan ekspor ini sampai hasil yang sesuai dibuat kembali.<br>
+        <b>.docx / .txt teks polos</b> mengikuti isi kotak hasil, termasuk suntingan manual, tanpa format naskah asli. DOCX menyimpan metadata untuk entri yang masih cocok; TXT hanya membawa teks. Metadata tidak memverifikasi kebenaran DOI atau menambah sumber yang hilang.
       </div>
     </div>
   </div>
@@ -333,9 +330,9 @@ initOnboarding({
   ],
 });
 </script>
-<script src="engine.js?v=14"></script>
-<script src="converter-engine.js?v=1"></script>
+<script src="engine.js?v=15"></script>
+<script src="converter-engine.js?v=2"></script>
 <script src="shared-file.js?v=1"></script>
-<script src="convert-ui.js?v=1"></script>
+<script src="convert-ui.js?v=2"></script>
 </body>
 </html>

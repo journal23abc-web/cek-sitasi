@@ -8,11 +8,10 @@
 //  - Sitasi yang AMBIGU atau TIDAK COCOK dengan referensi manapun TIDAK diubah sama sekali —
 //    dibiarkan seperti aslinya dan ditandai supaya pengguna bisa cek manual. Lebih baik tidak
 //    mengonversi daripada mengonversi dengan salah tebak.
-//  - Untuk daftar referensi: HANYA bagian format nama penulis + penomoran/urutan entri yang
-//    diubah. Bagian setelah penulis (tahun, judul, jurnal, halaman) SENGAJA tidak disentuh,
-//    karena penempatan tahun & gaya tanda kutip judul berbeda-beda per gaya dan mengubahnya
-//    otomatis berisiko salah tanpa nama depan lengkap / template per jenis sumber yang lengkap.
-//    Ini konsisten dengan filosofi "jujur soal keterbatasan" yang sudah dipakai di README.
+//  - APA 7 / IEEE memakai model bibliografi yang sama untuk teks dan ekspor Word, termasuk
+//    tahun, judul, volume, issue, locator, DOI, serta rentang cetak miring. Struktur yang
+//    tidak dikenali diberi peringatan. Metadata lengkap tetap tersedia ketika IEEE menyingkat
+//    penulis, sehingga konversi balik tidak mengarang nama yang sudah hilang dari tampilan.
 
 (function() {
   function loadEngine() {
@@ -34,6 +33,8 @@
     var s = (fragment || '').trim();
     if (!s) return { last: '', given: [] };
     if (style.authorForm === 'non-inverted') { // "F. M. Last"
+      var initialPrefix = s.match(/^((?:(?:\p{Lu}\.(?:-\p{Lu}\.)?)\s*)+)\s+(.+)$/u);
+      if (initialPrefix) return { last: initialPrefix[2], given: initialPrefix[1].trim().split(/\s+/) };
       var toks = s.split(/\s+/);
       if (toks.length === 1) return { last: toks[0], given: [] };
       return { last: toks[toks.length - 1], given: toks.slice(0, -1) };
@@ -71,6 +72,7 @@
   function formatInitialToken(t) {
     var raw = (t || '').trim();
     if (!raw) return '';
+    if (/^(?:\p{Lu}\.){2,}$/u.test(raw)) return raw.match(/\p{Lu}/gu).map(function(c) { return c + '.'; }).join(' ');
     if (raw.indexOf('-') !== -1) {
       return raw.split('-').map(function(part) {
         var c = part.replace(/\./g, '').trim();
@@ -139,7 +141,8 @@
   function isEtAlFragment(fragment) { return /^et\s+al\.?$/i.test((fragment || '').trim()); }
 
   function canonicalAuthorsFromRef(ref, sourceStyleId) {
-    if (ref.isInstitutional) return [{ last: ref.firstAuthor, given: [], institutional: true }];
+    if (ref.bibliography) return ref.bibliography.authors;
+    if (ref.isInstitutional) return (ref.authors || [ref.firstAuthor]).map(function(name) { return { last: name, given: [], institutional: true }; });
     // Use THIS reference's own actual format (ref.styleId) when known, not necessarily the
     // style declared for the whole list — a single entry can be written in a different style
     // than its neighbors (see looksLikeEmbeddedAuthorDateReference in engine.js: an "et al."
@@ -155,6 +158,7 @@
   }
 
   function surnamesFromRef(ref, sourceStyleId) {
+    if (ref.bibliography) return ref.bibliography.authors.map(function(a) { return a.last; });
     if (ref.isInstitutional) return [ref.firstAuthor];
     var effectiveStyleId = ref.styleId || sourceStyleId;
     return (ref.authors || []).filter(function(a) { return !isEtAlFragment(a); }).map(function(a) { return CE.surnameOf(a, effectiveStyleId); });
@@ -169,39 +173,44 @@
 
   // The surname string shown in-text for one reference in an author-date/author-page target,
   // respecting that style's et-al threshold (APA/Harvard: 3+, Chicago: 4+, MLA: 3+).
-  function inTextDisplayName(ref, sourceStyleId, targetStyleId) {
+  function inTextDisplayName(ref, sourceStyleId, targetStyleId, mode) {
     var style = STYLES[targetStyleId];
     var surnames = surnamesFromRef(ref, sourceStyleId);
     var count = ref.authorCount || surnames.length;
     var threshold = style.etAlThreshold || 3;
     if (count >= threshold) return (surnames[0] || ref.firstAuthor || '?') + ' et al.';
-    var sep = style.sep === '&' ? '&' : (style.sep === 'and' ? 'and' : 'and');
+    var sep = style.sep === '&' && mode !== 'narrative' ? '&' : 'and';
     return joinList(surnames.slice(0, Math.max(1, Math.min(surnames.length, count))), sep);
   }
 
   function formatAuthorDateSingle(ref, sourceStyleId, targetStyleId, mode, pageInfo) {
-    var name = inTextDisplayName(ref, sourceStyleId, targetStyleId);
-    var year = ref.year || 'n.d.';
+    if (targetStyleId === 'apa7' && !ref.isInstitutional && ref.apaPlan) {
+      var planned = CE.formatApa7CitationForReference(ref, ref.styleId || sourceStyleId, ref.apaPlan, mode === 'narrative', pageInfo ? (/[-–]/.test(pageInfo) ? 'pp. ' : 'p. ') + pageInfo : null);
+      if (mode === 'narrative' && pageInfo) planned = planned.replace(/\)$/, ', ' + (/[-–]/.test(pageInfo) ? 'pp. ' : 'p. ') + pageInfo + ')');
+      return planned;
+    }
+    var name = inTextDisplayName(ref, sourceStyleId, targetStyleId, mode);
+    var year = ref.citationYear || ref.year || 'n.d.';
     var isChicago = targetStyleId === 'chicago';
     if (mode === 'narrative') {
-      var tailN = pageInfo ? ', ' + pageInfo : '';
+      var tailN = pageInfo ? ', ' + (targetStyleId === 'apa7' ? (/[-–]/.test(pageInfo) ? 'pp. ' : 'p. ') : '') + pageInfo : '';
       return name + ' (' + year + tailN + ')';
     }
     if (isChicago) { // Chicago author-date parenthetical: (Author Year, page) — no comma before year
       var tailC = pageInfo ? ', ' + pageInfo : '';
       return '(' + name + ' ' + year + tailC + ')';
     }
-    var tail = pageInfo ? ', p. ' + pageInfo : '';
+    var tail = pageInfo ? ', ' + (/[-–]/.test(pageInfo) ? 'pp. ' : 'p. ') + pageInfo : '';
     return '(' + name + ', ' + year + tail + ')';
   }
 
   function formatAuthorDateGroup(refs, sourceStyleId, targetStyleId) {
     var isChicago = targetStyleId === 'chicago';
     var items = refs.map(function(ref) {
-      var name = inTextDisplayName(ref, sourceStyleId, targetStyleId);
-      var year = ref.year || 'n.d.';
+      var name = inTextDisplayName(ref, sourceStyleId, targetStyleId, 'parenthetical');
+      var year = ref.citationYear || ref.year || 'n.d.';
       var sortKey = (surnamesFromRef(ref, sourceStyleId)[0] || ref.firstAuthor || '').toLowerCase();
-      return { sortKey: sortKey, text: isChicago ? (name + ' ' + year) : (name + ', ' + year) };
+      return { sortKey: sortKey + '\u0000' + year, text: targetStyleId === 'apa7' && ref.apaPlan ? formatAuthorDateSingle(ref, sourceStyleId, targetStyleId, 'parenthetical', null).slice(1, -1) : isChicago ? (name + ' ' + year) : (name + ', ' + year) };
     });
     items.sort(function(a, b) { return a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0; });
     return '(' + items.map(function(i) { return i.text; }).join('; ') + ')';
@@ -252,13 +261,12 @@
   }
 
   function formatNumeric(nums, targetStyleId) {
-    var groups = compressRanges(nums);
+    nums = Array.from(new Set(nums));
     if (targetStyleId === 'ieee') {
-      return groups.map(function(g) {
-        if (g.indexOf('-') !== -1) { var p = g.split('-'); return '[' + p[0] + ']\u2013[' + p[1] + ']'; }
-        return '[' + g + ']';
-      }).join(', ');
+      // IEEE Reference Guide, 2025: write every number, including former ranges.
+      return nums.slice().sort(function(a, b) { return a - b; }).map(function(n) { return '[' + n + ']'; }).join(', ');
     }
+    var groups = compressRanges(nums);
     // vancouver
     return '(' + groups.join(',') + ')';
   }
@@ -281,10 +289,13 @@
     }
     // numeric target
     var nums = refs.map(numberOf);
+    var numericText = extra.pageInfo && targetStyleId === 'ieee' && nums.length === 1
+      ? '[' + nums[0] + ', ' + (/[-–]/.test(extra.pageInfo) ? 'pp. ' : 'p. ') + extra.pageInfo + ']'
+      : formatNumeric(nums, targetStyleId);
     if (mode === 'narrative' && literalNarrativeAuthors) {
-      return literalNarrativeAuthors + ' ' + formatNumeric(nums, targetStyleId);
+      return inTextDisplayName(refs[0], sourceStyleId, targetStyleId, 'narrative') + ' ' + numericText;
     }
-    return formatNumeric(nums, targetStyleId);
+    return numericText;
   }
 
   // Finds the true end of a narrative "Author (Year...)" match in the ORIGINAL article text.
@@ -294,7 +305,7 @@
   // span starting at the citation's reported position instead of trusting the reassembled raw.
   function computeNarrativeSpan(text, position, expectedYear) {
     var openIdx = text.indexOf('(', position);
-    if (openIdx === -1 || openIdx - position > 40) return null; // sanity bound
+    if (openIdx === -1 || openIdx - position > 250) return null;
     var closeIdx = text.indexOf(')', openIdx);
     if (closeIdx === -1) return null;
     var raw = text.substring(position, closeIdx + 1);
@@ -488,7 +499,149 @@
     });
   }
 
-  function convert(articleText, referenceText, sourceStyleId, targetStyleId) {
+  // Keep a complete, style-independent record. IEEE display truncation must never erase
+  // authors from this record. DOCX exports persist these records, bound to the exact displayed
+  // reference text; a changed entry cannot accidentally reuse stale metadata.
+  function bibliographyFromRef(ref, sourceStyleId) {
+    var effectiveStyle = ref.styleId || sourceStyleId;
+    var authors = canonicalAuthorsFromRef(ref, effectiveStyle);
+    var ellipsis = (ref.authors || []).some(isEllipsisTruncatedFragment);
+    authors = authors.map(function(a) { return { last: a.last.replace(/^(?:\.\s*\.\s*\.|…)\s*/u, ''), given: a.given, institutional: a.institutional }; });
+    var truncated = (ref.authors || []).some(isEtAlFragment);
+    var model = {
+      authors: authors, completeAuthors: !truncated && !ellipsis, ellipsis: ellipsis,
+      authorCount: ellipsis ? Math.max(21, ref.authorCount || 0) : ref.authorCount,
+      year: ref.year, title: ref.title, journal: ref.journal, volume: ref.volume,
+      issue: ref.issue, pages: ref.pages, articleNumber: ref.articleNumber, doi: ref.doi,
+      publisher: ref.publisher, editor: ref.editor, editorIsPlural: ref.editorIsPlural,
+      type: ref.sourceType, isBookChapter: ref.isBookChapter || false,
+      url: null, originalStyle: effectiveStyle,
+      ambiguousLocator: false, publicationDate: null,
+    };
+    var url = ref.raw.match(/https?:\/\/[^\s]+/ig);
+    if (url) model.url = url.filter(function(u) { return !/^https?:\/\/(?:dx\.)?doi\.org\//i.test(u); })[0] || null;
+    // Scope the fallback to the source details, so numbers in an article title cannot become
+    // volume/page fields. Handles ranges beginning at page 1, which the shared parser misses.
+    var titleAt = ref.title ? ref.raw.indexOf(ref.title) : -1;
+    var tail = titleAt >= 0 ? ref.raw.slice(titleAt + ref.title.length) : '';
+    if (STYLES[effectiveStyle].family === 'author-date') {
+      var suffix = tail.match(/,\s*(\d+)\s*(?:\(([^()]+)\))?\s*,\s*(Article\s+)?([A-Za-z]?\d+(?:\s*[-–]\s*\d+)?)\.?\s*(?:https?:\/\/\S+)?\s*$/i);
+      if (suffix) {
+        model.volume = suffix[1]; model.issue = suffix[2] || null;
+        var locator = suffix[4].replace(/\s*[-–]\s*/g, '–');
+        if (suffix[3] || /^e\d+/i.test(locator) || (!/[-–]/.test(locator) && locator.length >= 5)) {
+          model.articleNumber = locator; model.pages = null;
+        } else { model.pages = locator; model.articleNumber = null; model.ambiguousLocator = !/[-–]/.test(locator); }
+      }
+    }
+    if (STYLES[effectiveStyle].family === 'numeric' && model.year) {
+      var date = tail.split(/\bdoi\s*:|https?:\/\//i)[0].match(new RegExp('(?:^|,\\s*)((?:[A-Z][a-z]+\\.?/?){1,2}\\s+(?:\\d{1,2},\\s*)?' + model.year + ')(?=[.,\\s]|$)'));
+      if (date) model.publicationDate = date[1];
+    }
+    if (model.pages) model.pages = model.pages.replace(/-/g, '–');
+    return model;
+  }
+
+  function restoreBibliography(refs, metadata, sourceStyleId) {
+    var entries = metadata && metadata.version === 1 && metadata.styleId === sourceStyleId && Array.isArray(metadata.entries) ? metadata.entries : [];
+    var restored = 0;
+    refs.forEach(function(ref) {
+      var entry = entries.find(function(e) { return e.line === ref.raw && e.model && Array.isArray(e.model.authors) && e.model.authors.length; });
+      ref.bibliography = entry ? JSON.parse(JSON.stringify(entry.model)) : bibliographyFromRef(ref, sourceStyleId);
+      if (entry) restored++;
+      // Resolve citations against all the known names, including names suppressed in IEEE.
+      ref.authors = ref.bibliography.authors.map(function(a, i) { return a.institutional ? a.last : renderAuthorForStyle(a.last, a.given, sourceStyleId, i ? 'other' : 'first'); });
+      ref.firstAuthor = ref.authors[0]; ref.styleId = sourceStyleId;
+      ref.authorCount = Math.max(ref.bibliography.authorCount || 0, ref.authors.length);
+      ref.year = ref.bibliography.year;
+    });
+    return restored;
+  }
+
+  function renderBibliography(ref, targetStyleId, number) {
+    var m = ref.bibliography;
+    if (!m || !m.title || !m.authors.length || (targetStyleId !== 'apa7' && targetStyleId !== 'ieee')) return null;
+    var journal = m.type === 'journal-article' && m.journal && (m.volume || m.pages || m.articleNumber);
+    var book = (m.type === 'book' || m.type === 'report') && m.publisher && !m.isBookChapter;
+    var chapter = m.isBookChapter && m.journal && m.editor && m.publisher;
+    if (!journal && !book && !chapter) return null;
+    var runs = [];
+    function add(text, italic) { if (text) runs.push({ text: text, italic: !!italic }); }
+    var authors = renderAuthorListForReference(ref, 'apa7', targetStyleId);
+    var year = ref.citationYear || m.year || 'n.d.';
+    var title = m.title.replace(/\.$/, '');
+    if (targetStyleId === 'apa7') {
+      add(authors + ' (' + year + '). ');
+      if (book) { add(title, true); add(/[?!]$/.test(title) ? ' ' : '. '); add(m.publisher + '.'); }
+      else {
+        add(title + (/[?!]$/.test(title) ? ' ' : '. '));
+        if (chapter) {
+          add('In ' + m.editor + (m.editorIsPlural ? ' (Eds.), ' : ' (Ed.), '));
+          add(m.journal, true); add((m.pages ? ' (pp. ' + m.pages + ')' : '') + '. ' + m.publisher + '.');
+        } else {
+          add(m.journal, true);
+          if (m.volume) { add(', '); add(m.volume, true); }
+          if (m.issue) add('(' + m.issue + ')');
+          if (m.articleNumber) add(', Article ' + m.articleNumber);
+          else if (m.pages) add(', ' + m.pages);
+          add('.');
+        }
+      }
+      if (m.doi) add(' https://doi.org/' + m.doi);
+      else if (m.url) add(' ' + m.url);
+    } else {
+      add('[' + number + '] ' + authors + ', ');
+      if (book) { add(title, true); add('. ' + m.publisher); }
+      else {
+        add('"' + title + (/[?!]$/.test(title) ? '", ' : '," '));
+        if (chapter) add('in ');
+        add(m.journal, true);
+        if (chapter) add(', ' + m.editor + (m.editorIsPlural ? ', Eds. ' : ', Ed. ') + m.publisher);
+        if (m.volume) add(', vol. ' + m.volume);
+        if (m.issue) add(', no. ' + m.issue);
+        if (m.pages) add(', ' + (m.ambiguousLocator ? '' : /[-–]/.test(m.pages) ? 'pp. ' : 'p. ') + m.pages);
+        if (m.articleNumber) add(', Art. no. ' + m.articleNumber);
+      }
+      add(', ' + (m.publicationDate || year.replace(/^(\d{4})[a-z]+$/, '$1')));
+      if (m.doi) add(', doi: ' + m.doi);
+      add('.');
+      if (m.url && !m.doi) add(' [Online]. Available: ' + m.url);
+    }
+    return { line: runs.map(function(r) { return r.text; }).join(''), runs: runs };
+  }
+
+  function extractNumericForConversion(text) {
+    var items = CE.extractNumericCitations(text).filter(function(c) { return c.form === 'bracket'; });
+    // A quoted page locator belongs to its reference, rather than a second reference number.
+    var re = /\[(\d+)\s*,\s*(pp?\.)\s*(\d+(?:\s*[-–]\s*\d+)?)\]/g, match;
+    while ((match = re.exec(text))) items.push({ raw: match[0], numbers: [+match[1]], position: match.index, form: 'bracket', pageInfo: match[3].replace(/\s*[-–]\s*/g, '–') });
+    items.sort(function(a, b) { return a.position - b.position; });
+    var groups = [];
+    items.forEach(function(c) {
+      var last = groups[groups.length - 1];
+      var gap = last ? text.slice(last.position + last.raw.length, c.position) : '';
+      if (last && !last.pageInfo && !c.pageInfo && /^\s*,\s*$/.test(gap)) {
+        last.raw = text.slice(last.position, c.position + c.raw.length);
+        last.numbers = Array.from(new Set(last.numbers.concat(c.numbers)));
+      } else groups.push(Object.assign({}, c));
+    });
+    return groups;
+  }
+
+  function verifiedNarrativeName(text, position, ref, sourceStyleId) {
+    var before = text.slice(Math.max(0, position - 250), position);
+    var names = [inTextDisplayName(ref, sourceStyleId, 'apa7', 'narrative')];
+    if (ref.isInstitutional) names.push(ref.firstAuthor);
+    for (var i = 0; i < names.length; i++) {
+      var candidate = names[i];
+      // Compare a full author sequence, never an arbitrary capitalized preceding word.
+      var trimmed = before.trimEnd();
+      if (trimmed.endsWith(candidate) && (trimmed.length === candidate.length || !/[\p{L}\p{N}]/u.test(trimmed[trimmed.length - candidate.length - 1]))) return candidate;
+    }
+    return null;
+  }
+
+  function convert(articleText, referenceText, sourceStyleId, targetStyleId, options) {
     if (!STYLES[sourceStyleId]) throw new Error('Gaya sumber tidak dikenal: ' + sourceStyleId);
     if (!STYLES[targetStyleId]) throw new Error('Gaya tujuan tidak dikenal: ' + targetStyleId);
     articleText = articleText || '';
@@ -497,6 +650,15 @@
     var sourceStyle = STYLES[sourceStyleId];
     var v = new CE.MultiFormatValidator(articleText, referenceText, sourceStyleId);
     v.validate(); // populates v.references, v.citations, v.acronymMap (family-specific refMap/refByNumber not relied on below)
+    if (v.parseStats && v.parseStats.failedCount) {
+      throw new Error(v.parseStats.failedCount + ' entri referensi tidak dapat dibaca. Perbaiki entri/heading yang tercampur agar tidak ada referensi yang hilang saat konversi.');
+    }
+    var restoredMetadataCount = restoreBibliography(v.references, options && options.metadata, sourceStyleId);
+    if (targetStyleId === 'apa7') {
+      var apaPlans = CE.buildApa7DisambiguationPlan(v.references, sourceStyleId).planByRef;
+      v.references.forEach(function(ref) { ref.apaPlan = apaPlans.get(ref) || null; ref.citationYear = ref.apaPlan && ref.apaPlan.assignedYear || ref.year; });
+    }
+    if (sourceStyleId === 'ieee') v.citations = extractNumericForConversion(articleText);
 
     // ---- Universal reference maps (built regardless of the declared source family) ----
     // v.references always carries author/year/numLabel fields no matter which family
@@ -512,7 +674,10 @@
       var keyAP = v.keyFromRefAuthor(r);
       if (!authorPageMap.has(keyAP)) authorPageMap.set(keyAP, []);
       authorPageMap.get(keyAP).push(r);
-      if (r.numLabel != null) numberMap[r.numLabel] = r;
+      if (r.numLabel != null) {
+        if (!numberMap[r.numLabel]) numberMap[r.numLabel] = [];
+        numberMap[r.numLabel].push(r);
+      }
     });
 
     var matchedOrder = [];
@@ -538,7 +703,7 @@
       return fuzzy ? { status: 'ok', ref: fuzzy } : { status: 'nomatch' };
     }
     function resolveNumbers(numbers) {
-      var refs = numbers.map(function(n) { return numberMap[n]; });
+      var refs = numbers.map(function(n) { return numberMap[n] && numberMap[n].length === 1 ? numberMap[n][0] : null; });
       if (refs.every(Boolean) && refs.length > 0) return { status: 'ok', refs: refs };
       return { status: 'nomatch' };
     }
@@ -563,13 +728,7 @@
     //    avoid false hits like "(Table 5)" or "(Figure 3)".
     function scanCrossFamilyBracketNumeric(text) {
       var out = [];
-      var re = /\[(\d+(?:\s*[,\-\u2013]\s*\d+)*)\]/g;
-      var m;
-      while ((m = re.exec(text)) !== null) {
-        var nums = m[1].split(/\s*[,\-\u2013]\s*/).map(function(n) { return parseInt(n, 10); }).filter(function(n) { return !isNaN(n); });
-        if (nums.length) out.push({ raw: m[0], numbers: nums, position: m.index, form: 'bracket', type: 'numeric-cross' });
-      }
-      return out;
+      return extractNumericForConversion(text);
     }
     var crossFamilyCitations = [];
     if (sourceStyle.family !== 'numeric') {
@@ -642,7 +801,9 @@
             });
             if (ok && refs.length > 0) {
               refs.forEach(register);
-              replacement = renderForTarget(refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
+              if (c.parts.some(function(part) { return part.pageInfo; })) {
+                replacement = refs.map(function(ref, i) { return renderForTarget([ref], sourceStyleId, targetStyleId, 'parenthetical', { pageInfo: normalizePageInfo(c.parts[i].pageInfo) }, numberOf, null); }).join(STYLES[targetStyleId].family === 'numeric' ? ', ' : '; ');
+              } else replacement = renderForTarget(refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
               matched = true;
             } else {
               note = mismatchNote + 'Salah satu atau lebih sitasi dalam grup ini tidak cocok dengan referensi — seluruh grup tidak diubah.';
@@ -658,7 +819,8 @@
             var res2 = authorsArr.length ? resolveAuthorYear(authorsArr[0], authorsArr, c.year, /et\s+al/i.test(c.authors)) : { status: 'nomatch' };
             if (res2.status === 'ok') {
               register(res2.ref);
-              replacement = renderForTarget([res2.ref], sourceStyleId, targetStyleId, 'narrative', {}, numberOf, c.authors);
+              var locator = raw.match(/,\s*pp?\.\s*([\d–-]+)\s*\)$/);
+              replacement = renderForTarget([res2.ref], sourceStyleId, targetStyleId, 'narrative', { pageInfo: locator ? locator[1] : null }, numberOf, c.authors);
               matched = true;
             } else {
               note = res2.status === 'ambiguous' ? mismatchNote + 'Sitasi ambigu — tidak diubah, cek manual.' : mismatchNote + 'Tidak ditemukan referensi yang cocok — tidak diubah.';
@@ -702,11 +864,11 @@
           // that name — emit a year-only parenthetical instead (see precedingNarrativeName).
           var targetFamily = STYLES[targetStyleId].family;
           var narrativeName = c.numbers.length === 1 && targetFamily === 'author-date'
-            ? precedingNarrativeName(articleText, c.position) : null;
+            ? verifiedNarrativeName(articleText, c.position, numRes.refs[0], sourceStyleId) : null;
           if (narrativeName) {
-            replacement = '(' + (numRes.refs[0].year || 'n.d.') + ')';
+            replacement = '(' + (numRes.refs[0].citationYear || numRes.refs[0].year || 'n.d.') + (c.pageInfo ? ', ' + (/[-–]/.test(c.pageInfo) ? 'pp. ' : 'p. ') + c.pageInfo : '') + ')';
           } else {
-            replacement = renderForTarget(numRes.refs, sourceStyleId, targetStyleId, 'parenthetical', {}, numberOf, null);
+            replacement = renderForTarget(numRes.refs, sourceStyleId, targetStyleId, 'parenthetical', { pageInfo: c.pageInfo }, numberOf, null);
           }
           matched = true;
         } else {
@@ -761,13 +923,18 @@
         var kb = (b.isInstitutional ? v.resolveInstitutionalName(b.firstAuthor) : CE.surnameOf(b.firstAuthor, b.styleId || sourceStyleId)) || '';
         ka = ka.toLowerCase().replace(/^(the|a|an)\s+/i, ''); kb = kb.toLowerCase().replace(/^(the|a|an)\s+/i, '');
         if (ka < kb) return -1; if (ka > kb) return 1;
-        return (a.year || '').localeCompare(b.year || '');
+        var authorsA = canonicalAuthorsFromRef(a, sourceStyleId).map(function(x) { return x.last + ', ' + x.given.join(' '); }).join('; ').toLowerCase();
+        var authorsB = canonicalAuthorsFromRef(b, sourceStyleId).map(function(x) { return x.last + ', ' + x.given.join(' '); }).join('; ').toLowerCase();
+        return authorsA.localeCompare(authorsB, 'en') || (a.citationYear || a.year || '').localeCompare(b.citationYear || b.year || '') || (a.title || '').localeCompare(b.title || '', 'en');
       });
     }
 
     var referenceLines = orderedRefs.map(function(ref, idx) {
       var line;
-      if (ref.styleId && ref.styleId === targetStyleId && ref.styleId !== sourceStyleId) {
+      var rendered = renderBibliography(ref, targetStyleId, idx + 1);
+      if (rendered) {
+        line = rendered.line;
+      } else if (ref.bibliography && ref.bibliography.originalStyle === targetStyleId && targetStyleId !== sourceStyleId) {
         // Already written in exactly the target style (see looksLikeEmbeddedAuthorDateReference
         // in engine.js — a reference pasted straight from a different-styled source into an
         // otherwise-uniform list). There's nothing to convert, and the usual author-render +
@@ -811,8 +978,20 @@
         if (targetStyle.family === 'numeric') prefix = targetStyle.refPrefix === 'bracket' ? '[' + (idx + 1) + '] ' : (idx + 1) + '. ';
         line = prefix + authorPart + connector + rest;
       }
-      return { line: line, wasCited: matchedOrder.indexOf(ref) !== -1, numLabel: targetStyle.family === 'numeric' ? idx + 1 : null, original: ref.raw };
+      var model = JSON.parse(JSON.stringify(ref.bibliography));
+      if (targetStyleId === 'apa7') model.year = ref.citationYear || model.year;
+      return { line: line, runs: rendered ? rendered.runs : null, model: model, fullyFormatted: !!rendered,
+        wasCited: matchedOrder.indexOf(ref) !== -1, numLabel: targetStyle.family === 'numeric' ? idx + 1 : null, original: ref.raw };
     });
+
+    var referenceIssues = [];
+    referenceLines.forEach(function(rl) {
+      if ((targetStyleId === 'apa7' || targetStyleId === 'ieee') && !rl.fullyFormatted) referenceIssues.push({ raw: rl.original, note: 'Jenis/struktur sumber belum dikenali sepenuhnya. Detail asli dipertahankan; format bibliografi perlu diperiksa manual.' });
+      if (targetStyleId === 'apa7' && !rl.model.completeAuthors && !rl.model.ellipsis) referenceIssues.push({ raw: rl.original, note: 'Daftar penulis sumber terpotong. APA 7 memerlukan nama lengkap; unggah DOCX keluaran alat ini yang menyimpan metadata, atau lengkapi dari sumber asli.' });
+      if (targetStyleId === 'ieee' && (rl.model.type === 'book' || rl.model.isBookChapter)) referenceIssues.push({ raw: rl.original, note: 'Lokasi penerbit tidak tersedia dalam APA 7. Periksa dan lengkapi lokasi untuk IEEE dari sumber asli.' });
+      if (rl.model.ambiguousLocator) referenceIssues.push({ raw: rl.original, note: 'Angka tunggal pada sumber belum membedakan halaman dan nomor artikel. Angka dipertahankan tanpa menebak; jika ini nomor artikel, tambahkan kata Article pada referensi sumber lalu konversi ulang.' });
+    });
+    if (v.parseStats && v.parseStats.failedLines) v.parseStats.failedLines.forEach(function(raw) { referenceIssues.push({ raw: typeof raw === 'string' ? raw : JSON.stringify(raw), note: 'Entri tidak dapat diparsing dan tidak boleh dihapus otomatis. Periksa daftar sumber.' }); });
 
     return {
       sourceStyleId: sourceStyleId, targetStyleId: targetStyleId,
@@ -822,6 +1001,9 @@
       unmatched: unmatchedList,
       citationSpans: citationSpans,
       referenceLines: referenceLines,
+      referenceIssues: referenceIssues,
+      metadata: { version: 1, styleId: targetStyleId, entries: referenceLines.map(function(rl) { return { line: rl.line, model: rl.model }; }) },
+      restoredMetadataCount: restoredMetadataCount,
       uncitedCount: uncitedRefs.length,
       parseStats: v.parseStats,
       mixedStyleFoundCount: mixedStyleFound.length,
@@ -845,18 +1027,25 @@
 
   function renderAuthorListForReference(ref, sourceStyleId, targetStyleId) {
     var style = STYLES[targetStyleId];
-    if (ref.isInstitutional) return ref.firstAuthor;
+    if (ref.isInstitutional) {
+      var institutions = canonicalAuthorsFromRef(ref, sourceStyleId).map(function(a) { return a.last; });
+      if (institutions.length === 2 && targetStyleId === 'apa7') return institutions[0] + ', & ' + institutions[1];
+      return joinList(institutions, targetStyleId === 'apa7' ? '&' : 'and');
+    }
 
     var rawAuthors = ref.authors || [];
-    var sourceHasEllipsis = rawAuthors.length > 0 && isEllipsisTruncatedFragment(rawAuthors[rawAuthors.length - 1]);
+    var sourceHasEllipsis = ref.bibliography ? ref.bibliography.ellipsis : rawAuthors.length > 0 && isEllipsisTruncatedFragment(rawAuthors[rawAuthors.length - 1]);
     var effectiveRef = ref;
-    if (sourceHasEllipsis) {
+    if (sourceHasEllipsis && !ref.bibliography) {
       var cleanedLast = rawAuthors[rawAuthors.length - 1].replace(/^(?:\.\s*\.\s*\.|…)\s*/u, '');
       effectiveRef = { authors: rawAuthors.slice(0, -1).concat([cleanedLast]), isInstitutional: ref.isInstitutional, firstAuthor: ref.firstAuthor, styleId: ref.styleId };
     }
 
     var canon = canonicalAuthorsFromRef(effectiveRef, sourceStyleId);
     var n = canon.length;
+    if (targetStyleId === 'ieee' && (n > 6 || sourceHasEllipsis || (ref.bibliography && !ref.bibliography.completeAuthors))) {
+      return renderAuthorForStyle(canon[0].last, canon[0].given, targetStyleId, 'first') + ' et al.';
+    }
     if ((targetStyleId === 'apa7' && n > 20) || (sourceHasEllipsis && n >= 2)) { // APA7: first 19, ellipsis, last author
       var headCount = Math.min(n - 1, 19);
       var head = canon.slice(0, headCount).map(function(a, i) { return renderAuthorForStyle(a.last, a.given, targetStyleId, i === 0 ? 'first' : 'other'); });
@@ -868,7 +1057,7 @@
     // name), so `canon` only holds the names that were actually spelled out — but we still need
     // to carry the "there were more" signal through to the rendered line, or a 1-name truncated
     // source silently turns into what looks like a genuine single-author work.
-    var sourceTruncated = (ref.authors || []).length > 0 && isEtAlFragment(ref.authors[ref.authors.length - 1]);
+    var sourceTruncated = ref.bibliography ? !ref.bibliography.completeAuthors && !ref.bibliography.ellipsis : (ref.authors || []).length > 0 && isEtAlFragment(ref.authors[ref.authors.length - 1]);
     var threshold = style.refListFullUpTo;
     var list = canon, truncated = sourceTruncated;
     if (threshold && n > threshold) { list = canon.slice(0, threshold); truncated = true; }
@@ -912,6 +1101,11 @@
   function findAuthorSegBoundary(ref, styleId) {
     var style = STYLES[styleId];
     var text = (ref.raw || '').trim();
+    // The date lies between the authors and title in APA. It belongs to the preserved body.
+    if (style.family === 'author-date' && style.yearInParens !== false) {
+      var leadingDate = text.match(/\((?:\d{4}[a-z]?|n\.d\.)(?:,[^)]*)?\)/);
+      if (leadingDate) return leadingDate.index;
+    }
     if (ref.title) {
       var titleIdx = text.indexOf(ref.title);
       if (titleIdx !== -1) {
@@ -957,6 +1151,9 @@
       deriveBookPublisher: deriveBookPublisher,
       formatCrossRefAuthorsForSourceStyle: formatCrossRefAuthorsForSourceStyle,
       evaluateAuthorCompletion: evaluateAuthorCompletion,
+      bibliographyFromRef: bibliographyFromRef,
+      renderBibliography: renderBibliography,
+      extractNumericForConversion: extractNumericForConversion,
     },
   };
 

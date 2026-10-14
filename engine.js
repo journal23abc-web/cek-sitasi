@@ -928,7 +928,9 @@ function surnameOf(authorFragment, styleId) {
   var s = (authorFragment || '').trim();
   if (!s) return '';
   if (style.authorForm === 'non-inverted') {
-    // "F. M. Last" -> surname is last token
+    // Initials identify the boundary; keep compound surnames such as "Lo Bue" intact.
+    var initialPrefix = s.match(/^(?:(?:\p{Lu}\.(?:-\p{Lu}\.)?)\s*)+\s+(.+)$/u);
+    if (initialPrefix) return initialPrefix[1];
     var toks = s.split(/\s+/);
     return toks[toks.length - 1];
   }
@@ -3169,6 +3171,9 @@ function findReferencesListEnd(fullText, searchFromOffset) {
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i];
     var trimmed = line.trim();
+    // Labelled appendices often include a subtitle, e.g. "Appendix A. Complete item wording".
+    // A bare-heading-only check lets their tables leak into the reference parser.
+    if (trimmed.length > 0 && trimmed.length <= 160 && /^(?:appendix|appendices|lampiran)(?:\s+[A-Z0-9]+)?(?:[.:]\s*.*|\s+.+)?$/i.test(trimmed)) return offset;
     if (trimmed.length > 0 && trimmed.length <= 60) {
       var stripped = trimmed.replace(/^[\dIVXLC]+[.\)]\s*/i, '').replace(/[:.\s]+$/, '');
       var wordCount = stripped.split(/\s+/).filter(Boolean).length;
