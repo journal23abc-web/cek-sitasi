@@ -166,7 +166,7 @@
       lastStyleId = styleId;
       lastConfidence = confidence;
 
-      var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
+      var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId, { referenceDetails: window.BibliographyReview ? window.BibliographyReview.read() : [], metadata: null });
       var result = validator.validate();
 
       lastResult = result;
@@ -261,6 +261,9 @@
   }
 
   function renderParseStatus(result) {
+    var bibliographyBanner = document.getElementById('bibliographyStatusBanner');
+    if (bibliographyBanner) bibliographyBanner.textContent = CE.bibliographyStatusText(result);
+    if (window.BibliographyReview) window.BibliographyReview.render(result.references);
     var stats = result.parseStats || { totalFound: result.references.length, succeededCount: result.references.length, failedCount: 0 };
     var failed = result.failedLines || [];
     var el = els.parseStatusBanner;
@@ -396,6 +399,7 @@
     var html = '';
 
     html += '<h1>Laporan Validasi Sitasi</h1>';
+    html += '<p class="rp-meta">' + esc(CE.bibliographyStatusText(result)) + '</p>';
     html += '<div class="rp-meta">Gaya sitasi: <b>' + esc(style.name) + '</b>' + (lastConfidence != null ? ' (auto-detect, keyakinan ' + lastConfidence + '%)' : '') + '</div>';
     html += '<div class="rp-meta">Dibuat: ' + esc(new Date().toLocaleString('id-ID')) + '</div>';
 
@@ -824,6 +828,7 @@
       html += '<button class="issue-dismiss" data-issue-key="' + escAttr(key) + '" title="' + dismissLabel + '">' + dismissText + '</button>';
       html += '</div>';
       html += '<div class="issue-desc">' + esc(displayIssue.description) + '</div>';
+      if (issue.sourceUrl && /^https:\/\//.test(issue.sourceUrl)) html += '<div class="issue-desc"><a href="' + escAttr(issue.sourceUrl) + '" target="_blank" rel="noopener noreferrer">Panduan format yang diperiksa</a></div>';
       var copyLabel = currentLang === 'en' ? 'Copy to clipboard' : 'Salin ke clipboard';
       if (displayIssue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(displayIssue.code) + '">' + esc(displayIssue.code) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
       if (displayIssue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(displayIssue.correction) + '">✓ ' + esc(displayIssue.correction) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
@@ -918,6 +923,7 @@
       html += '<div class="issue-item ' + (sc==='success'?'suggestion':sc) + '">';
       html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span>' + instTag + '<span class="issue-title">' + esc(displayIssue.title) + '</span></div>';
       html += '<div class="issue-desc">' + esc(displayIssue.description) + '</div>';
+      if (issue.sourceUrl && /^https:\/\//.test(issue.sourceUrl)) html += '<div class="issue-desc"><a href="' + escAttr(issue.sourceUrl) + '" target="_blank" rel="noopener noreferrer">Panduan format yang diperiksa</a></div>';
       var copyLabel = currentLang === 'en' ? 'Copy to clipboard' : 'Salin ke clipboard';
       if (displayIssue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(displayIssue.code) + '">' + esc(displayIssue.code) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
       if (displayIssue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(displayIssue.correction) + '">✓ ' + esc(displayIssue.correction) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
@@ -1254,6 +1260,7 @@
     var r = lastResult;
     var style = STYLES[r.styleId];
     var rpt = '========================================\n  LAPORAN VALIDASI SITASI — ' + style.name.toUpperCase() + '\n========================================\n\n';
+    rpt += CE.bibliographyStatusText(r) + '\n\n';
     rpt += 'RINGKASAN:\n  Perlu Diperbaiki: ' + r.errors.length + '\n  Saran: ' + r.suggestions.length + '\n  Referensi: ' + r.references.length + '\n\n';
     if (currentYearRange && r.references.length) {
       var yrStats = computeYearRange(r.references, currentYearRange.from, currentYearRange.to);

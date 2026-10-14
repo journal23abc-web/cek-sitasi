@@ -29,6 +29,12 @@
   .format-row{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px; }
   .format-row label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); }
   select{ font-family:var(--font-mono); font-size:13px; color:var(--text); background:var(--input-bg); border:1px solid var(--hairline); border-radius:6px; padding:8px 10px; outline:none; }
+  #sourceDetails fieldset{ min-width:0; border:1px solid var(--hairline); border-radius:6px; padding:12px; }
+  #sourceDetails legend{ overflow-wrap:anywhere; }
+  #sourceDetails input{ display:block; box-sizing:border-box; width:100%; max-width:640px; margin-top:4px; padding:8px; color:var(--text); background:var(--input-bg); border:1px solid var(--hairline); border-radius:4px; }
+  #sourceDetails select{ max-width:100%; }
+  #scenarioResults ul{ max-height:420px; overflow:auto; padding-left:22px; }
+  #scenarioResults li{ margin:6px 0; }
   select:focus{ border-color:var(--cyan); }
   .confidence-badge{ font-family:var(--font-mono); font-size:11px; padding:4px 10px; border-radius:12px; border:1px solid var(--hairline); color:var(--text-dim); display:none; }
   .confidence-badge.show{ display:inline-flex; align-items:center; gap:6px; }
@@ -147,11 +153,11 @@
   <div class="scope-note">
     <b>Yang dikonversi:</b> sitasi in-text (parenthetical maupun naratif) — nama penulis, "&"/"and", ambang "et al.", nomor referensi, dsb — dicocokkan ke daftar referensi seperti yang dipakai Validator Sitasi, supaya hasilnya konsisten.
     Sitasi yang <b>tidak bisa dicocokkan dengan pasti ke satu referensi tetap dibiarkan seperti aslinya</b> dan ditandai untuk dicek manual, daripada ditebak dan salah.
-    <b>Daftar referensi APA 7 ↔ IEEE:</b> penulis, penempatan tahun, tanda kutip judul, volume, issue, halaman/nomor artikel, DOI, dan cetak miring ikut disesuaikan untuk struktur yang dikenali. Detail yang tidak tersedia tidak ditambahkan; struktur yang belum didukung ditandai untuk pemeriksaan manual. Singkatan resmi nama jurnal tetap perlu diperiksa dari sumber asli.
+    <b>Daftar referensi enam gaya:</b> penulis, penempatan tahun, tanda kutip judul, volume, issue, halaman/nomor artikel, DOI, dan cetak miring ikut disesuaikan untuk struktur yang dikenali. Detail yang tidak tersedia tidak ditambahkan; struktur yang belum didukung ditandai untuk pemeriksaan manual. Singkatan resmi nama jurnal tetap perlu diperiksa dari sumber asli. Harvard memakai profil umum; sumber khusus pada MLA, Chicago, dan Vancouver dapat memakai adaptasi yang ditandai untuk tinjauan.
     <br><br>
     <b>Gaya campuran:</b> kalau naskah aslinya sudah bercampur — misalnya sebagian besar APA tapi ada beberapa sitasi yang sudah kadung ditulis dalam format IEEE/numerik, atau sebaliknya — sistem otomatis mendeteksi &amp; ikut mengonversi sitasi "nyasar" itu juga (bukan cuma sitasi bergaya sumber yang dipilih), supaya hasil akhirnya benar-benar seragam satu gaya. Yang berhasil dicocokkan otomatis ikut dikonversi; yang tidak, ditandai jelas dengan label <b>GAYA CAMPURAN</b> di daftar "Tidak Diubah" supaya mudah dicek manual.
     <br><br>
-    Bisa <b>tempel teks</b>, <b>unggah .docx</b>, atau isi manual. Hasilnya ada <b>pratinjau berwarna</b> (sitasi yang berubah vs yang tidak), dan kedua kotak hasil <b>bisa disunting langsung</b> sebelum diekspor. Ekspor tersedia sebagai .docx (format asli dipertahankan, khusus dari unggahan), .docx teks polos, atau .txt.
+    Bisa <b>tempel teks</b>, <b>unggah .docx</b>, atau isi manual. Hasilnya ada <b>pratinjau berwarna</b> (sitasi yang berubah vs yang tidak), dan kedua kotak hasil <b>bisa disunting langsung</b> sebelum diekspor. Ekspor tersedia sebagai .docx (format asli dipertahankan, khusus dari unggahan), .docx dokumen baru, atau .txt.
   </div>
 
   <div class="panel">
@@ -163,7 +169,7 @@
         <option value="auto">🔍 Auto-detect</option>
         <option value="apa7" selected>APA 7th Edition</option>
         <option value="mla9">MLA 9th Edition</option>
-        <option value="chicago">Chicago (Author-Date)</option>
+        <option value="chicago">Chicago 18 (Author-Date)</option>
         <option value="harvard">Harvard</option>
         <option value="ieee">IEEE</option>
         <option value="vancouver">Vancouver</option>
@@ -177,7 +183,7 @@
       <select id="targetStyleSelect">
         <option value="apa7">APA 7th Edition</option>
         <option value="mla9">MLA 9th Edition</option>
-        <option value="chicago">Chicago (Author-Date)</option>
+        <option value="chicago">Chicago 18 (Author-Date)</option>
         <option value="harvard">Harvard</option>
         <option value="ieee" selected>IEEE</option>
         <option value="vancouver">Vancouver</option>
@@ -235,6 +241,24 @@
       </div>
     </div>
 
+    <details class="collapsible">
+      <summary>Lengkapi jenis dan detail sumber</summary>
+      <div class="collapsible-content">
+        <p>APA 7 sering tidak mencantumkan lokasi penerbit atau tanggal akses yang diperlukan IEEE. Isi hanya berdasarkan sumber asli. Detail disimpan untuk entri yang teksnya masih sama.</p>
+        <button class="ghost" id="btnSourceDetails">Tampilkan detail referensi</button>
+        <div id="sourceDetails" aria-live="polite"></div>
+      </div>
+    </details>
+
+    <details class="collapsible">
+      <summary>Uji contoh APA 7 → IEEE → APA 7</summary>
+      <div class="collapsible-content">
+        <p>Contoh sintetis berbagai jenis sumber, masing-masing diuji lima putaran. Pemeriksaan membandingkan format acuan, sitasi, dan pemulihan metadata. Contoh ini bukan referensi penelitian nyata. Media dengan adaptasi IEEE tetap memerlukan tinjauan editorial.</p>
+        <button class="ghost" id="btnRunScenarios">Jalankan uji lima putaran</button>
+        <div id="scenarioResults" role="status" aria-live="polite"></div>
+      </div>
+    </details>
+
     <div class="actions">
       <button class="primary" id="convertBtn">Konversi Sitasi</button>
       <span id="topStatus" style="font-family:var(--font-mono);font-size:11.5px;color:var(--text-dim);"></span>
@@ -249,6 +273,7 @@
 
   <div class="results" id="results">
     <div class="summary-grid" id="summaryGrid"></div>
+    <div class="actions"><button class="ghost" id="btnUseResult">Gunakan hasil untuk konversi balik</button></div>
 
     <details class="collapsible" id="unmatchedDetails">
       <summary>⚠️ Sitasi dan Referensi Perlu Dicek Manual — <span id="unmatchedCount">0</span></summary>
@@ -289,7 +314,7 @@
         <b>APA 7 ↔ IEEE:</b> struktur bibliografi yang dikenali memakai hasil yang sama untuk pratinjau dan semua ekspor. APA 7 menggunakan author–date, daftar alfabetis, judul tanpa tanda kutip, jurnal dan volume bercetak miring, hanging indent 0,5 inci, spasi ganda, serta DOI sebagai URL. IEEE menggunakan nomor menurut kemunculan pertama, inisial sebelum nama belakang, judul artikel bertanda kutip, label <code>vol.</code>/<code>no.</code>/<code>pp.</code>/<code>Art. no.</code>, dan <code>doi:</code>.
         <p>Nomor sitasi IEEE ditulis satu per satu, termasuk kelompok tiga nomor atau lebih, sesuai <a href="https://journals.ieeeauthorcenter.ieee.org/create-your-ieee-journal-article/create-the-text-of-your-article/ieee-editorial-style-manual/" target="_blank" rel="noopener noreferrer">IEEE Reference Guide</a> 2025. Rentang nomor pada input lama tetap dapat dibaca.</p>
         <p><b>Konversi balik:</b> kedua ekspor DOCX menyimpan nama penulis lengkap dan metadata yang tersedia. IEEE menampilkan penulis pertama dan <i>et al.</i> untuk lebih dari enam penulis, tetapi nama lengkap dapat dipulihkan saat DOCX hasil diunggah kembali. Teks yang disalin dan TXT tidak membawa metadata ini; nama yang sudah terpotong harus dilengkapi dari sumber asli.</p>
-        <p>Jenis sumber yang tidak dikenali, angka tunggal yang belum jelas sebagai halaman atau nomor artikel, serta informasi yang tidak tersedia ditandai. Nama jurnal dipertahankan, tanpa menebak singkatan atau memperluas singkatan sumber. Gaya selain APA 7/IEEE masih memakai penyesuaian penulis dan urutan; format bibliografi lengkapnya perlu diperiksa manual.</p>
+        <p>Templat dibedakan menurut jenis sumber: jurnal, buku/bab, laporan, prosiding, tesis, data, perangkat lunak, standar, paten, serta sumber web. Singkatan jurnal memakai daftar yang dikenali dan aturan singkatan IEEE; nama lengkap disimpan dalam metadata. Singkatan dari teks IEEE tanpa metadata tidak diperluas secara otomatis. Media yang tidak memiliki templat IEEE khusus ditandai sebagai adaptasi; jenis yang belum dikenali tetap memerlukan pemeriksaan manual.</p>
       </div>
     </div>
 
@@ -297,13 +322,13 @@
       <div class="field-label">Ekspor Hasil</div>
       <div class="export-row">
         <button class="ghost" id="btnExportDocxOriginal" disabled>📘 Unduh .docx (format asli dipertahankan)</button>
-        <button class="ghost" id="btnExportDocxPlain">📘 Unduh .docx (teks polos)</button>
+        <button class="ghost" id="btnExportDocxPlain">📘 Unduh .docx (dokumen baru)</button>
         <button class="ghost" id="btnExportTxt">📄 Unduh .txt</button>
       </div>
       <span id="exportStatus" class="status info" role="status" aria-live="polite"></span>
       <div class="export-note">
         <b>.docx format asli dipertahankan</b> tersedia untuk unggahan yang input dan hasilnya masih cocok dengan pratinjau. Sitasi dan paragraf referensi diubah; tabel, gambar, heading, dan bagian lain dipertahankan. Semua referensi harus dapat dipetakan secara unik ke paragraf sumber. Suntingan manual atau perubahan gaya menonaktifkan ekspor ini sampai hasil yang sesuai dibuat kembali.<br>
-        <b>.docx / .txt teks polos</b> mengikuti isi kotak hasil, termasuk suntingan manual, tanpa format naskah asli. DOCX menyimpan metadata untuk entri yang masih cocok; TXT hanya membawa teks. Metadata tidak memverifikasi kebenaran DOI atau menambah sumber yang hilang.
+        <b>DOCX baru dan TXT</b> mengikuti isi kotak hasil, termasuk suntingan manual, tanpa format naskah asli. DOCX menyimpan metadata untuk entri yang masih cocok; TXT hanya membawa teks. Metadata tidak memverifikasi kebenaran DOI atau menambah sumber yang hilang.
       </div>
     </div>
   </div>
@@ -330,9 +355,10 @@ initOnboarding({
   ],
 });
 </script>
-<script src="engine.js?v=15"></script>
-<script src="converter-engine.js?v=2"></script>
+<script src="engine.js?v=17"></script>
+<script src="bibliography-engine.js?v=2"></script>
+<script src="converter-engine.js?v=4"></script>
 <script src="shared-file.js?v=1"></script>
-<script src="convert-ui.js?v=2"></script>
+<script src="convert-ui.js?v=4"></script>
 </body>
 </html>

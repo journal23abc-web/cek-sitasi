@@ -1119,13 +1119,13 @@ test('a fully complete journal-article reference gets no completeness suggestion
   assert.strictEqual(r.suggestions.some((s) => s.title === 'Metadata referensi tampak tidak lengkap'), false);
 });
 
-test('a journal-article reference missing volume/pages gets a clear completeness suggestion naming exactly what is missing', () => {
+test('a journal without a locator gets a review suggestion without treating absent volume as an error', () => {
   const r = validate('Studi (Green, 2020) menunjukkan hal ini.',
     'Green, B. (2020). Some title here. Journal of Agriculture Science.');
-  const s = r.suggestions.find((x) => x.title === 'Metadata referensi tampak tidak lengkap');
+  const s = r.suggestions.find((x) => /locator-review$/.test(x.ruleId || ''));
   assert.ok(s);
-  assert.ok(s.description.includes('nomor volume'));
-  assert.ok(s.description.includes('halaman atau nomor artikel'));
+  assert.ok(s.description.includes('Halaman/nomor artikel'));
+  assert.ok(!r.errors.some(x => /volume/.test(x.description)));
 });
 
 test('a fully complete book reference (with publisher) gets no completeness suggestion', () => {
@@ -1137,15 +1137,15 @@ test('a fully complete book reference (with publisher) gets no completeness sugg
 test('a book reference missing its publisher is correctly flagged — the publisher field must not wrongly capture the title itself when no publisher segment actually exists (regression)', () => {
   const r = validate('Studi (Adams, 2019) menunjukkan hal ini.',
     'Adams, C. (2019). Book Title.');
-  const s = r.suggestions.find((x) => x.title === 'Metadata referensi tampak tidak lengkap');
+  const s = r.suggestions.find((x) => /missing-publisher$/.test(x.ruleId || ''));
   assert.ok(s);
-  assert.ok(s.description.includes('nama penerbit'));
+  assert.ok(s.description.includes('Penerbit/institusi'));
 });
 
 test('a website reference with no URL at all is flagged as missing its URL/link', () => {
   const r = validate('Studi (Smith, 2020) menunjukkan hal ini.',
     'Smith, J. (2020). Retrieved from some page title.');
-  const s = r.suggestions.find((x) => x.title === 'Metadata referensi tampak tidak lengkap');
+  const s = r.suggestions.find((x) => /missing-url$/.test(x.ruleId || ''));
   assert.ok(s);
   assert.ok(s.description.includes('URL'));
 });

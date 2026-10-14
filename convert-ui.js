@@ -91,7 +91,7 @@
       Object.keys(BE.TYPES).forEach(function(type) { var o = document.createElement('option'); o.value = type; o.textContent = BE.TYPES[type]; select.appendChild(o); });
       select.value = extra.type || ''; label.appendChild(select); row.appendChild(label);
       [['place', 'Lokasi penerbit / institusi'], ['accessed', 'Tanggal akses (mis. 2024, July 10)'],
-        ['journalAbbreviation', 'Singkatan jurnal terverifikasi'], ['journal', 'Nama lengkap jurnal terverifikasi'], ['publisher', 'Nama penerbit / instansi terverifikasi'], ['articleNumber', 'Nomor artikel terverifikasi'],
+        ['journalAbbreviation', 'Singkatan jurnal IEEE terverifikasi'], ['nlmAbbreviation', 'Singkatan jurnal NLM terverifikasi'], ['journal', 'Nama lengkap jurnal terverifikasi'], ['publisher', 'Nama penerbit / instansi terverifikasi'], ['articleNumber', 'Nomor artikel terverifikasi'],
         ['date', 'Tanggal terbit edisi (mis. 2024, June 12)']].forEach(function(field) {
         var l = document.createElement('label'); l.style.display = 'block'; l.style.marginTop = '8px'; l.textContent = field[1] + ' ';
         var input = document.createElement('input'); input.type = 'text'; input.dataset.field = field[0];
@@ -994,8 +994,8 @@
     if (!anchor) throw new Error('Struktur paragraf referensi belum didukung.');
     richRuns.forEach(function(piece, index) {
       var value = piece.text;
-      if (targetStyleId === 'ieee' && index === 0) {
-        var label = value.match(/^\[\d+\] /);
+      if ((targetStyleId === 'ieee' || targetStyleId === 'vancouver') && index === 0) {
+        var label = value.match(targetStyleId === 'ieee' ? /^\[\d+\] / : /^\d+\. /);
         if (label) {
           var labelRun = makeRun(xmlDoc, template, label[0], false);
           labelRun.appendChild(xmlDoc.createElementNS(W_NS, 'w:tab'));
@@ -1022,7 +1022,7 @@
     // a quarter-inch stop can be overrun by [10] and send it to a different tab stop.
     var tabs = pPr.getElementsByTagNameNS(W_NS, 'tabs')[0];
     if (tabs) pPr.removeChild(tabs);
-    if (targetStyleId === 'ieee') {
+    if (targetStyleId === 'ieee' || targetStyleId === 'vancouver') {
       tabs = xmlDoc.createElementNS(W_NS, 'w:tabs');
       var tab = xmlDoc.createElementNS(W_NS, 'w:tab');
       tab.setAttributeNS(W_NS, 'w:val', 'left'); tab.setAttributeNS(W_NS, 'w:pos', '720');
@@ -1033,7 +1033,7 @@
     alignment.setAttributeNS(W_NS, 'w:val', 'left');
     var spacing = pPr.getElementsByTagNameNS(W_NS, 'spacing')[0];
     if (!spacing) { spacing = xmlDoc.createElementNS(W_NS, 'w:spacing'); pPr.appendChild(spacing); }
-    spacing.setAttributeNS(W_NS, 'w:line', targetStyleId === 'apa7' ? '480' : '240');
+    spacing.setAttributeNS(W_NS, 'w:line', targetStyleId === 'apa7' || targetStyleId === 'mla9' ? '480' : '240');
     spacing.setAttributeNS(W_NS, 'w:lineRule', 'auto');
     spacing.setAttributeNS(W_NS, 'w:before', '0'); spacing.setAttributeNS(W_NS, 'w:after', '0');
     spacing.setAttributeNS(W_NS, 'w:beforeAutospacing', '0'); spacing.setAttributeNS(W_NS, 'w:afterAutospacing', '0');
@@ -1124,7 +1124,7 @@
       '<w:document xmlns:w="' + W_NS + '"><w:body>' + body + '<w:sectPr/></w:body></w:document>';
     // Plain export means a new document, without the manuscript's layout. References that
     // still match the conversion retain the target style's italics, spacing and indentation.
-    if (metadata && (metadata.styleId === 'apa7' || metadata.styleId === 'ieee')) {
+    if (metadata && BE.PROFILES[metadata.styleId]) {
       var richDoc = new DOMParser().parseFromString(documentXml, 'application/xml');
       var ps = Array.from(richDoc.getElementsByTagNameNS(W_NS, 'p'));
       var referenceStart = headingIndex + 1;

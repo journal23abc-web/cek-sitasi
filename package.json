@@ -2,7 +2,7 @@
   "name": "cek-sitasi",
   "private": true,
   "scripts": {
-    "test": "npm run test:engine && npm run test:link && npm run test:converter && npm run test:convert-ui && npm run test:docstats && npm run test:journal-rules && npm run test:scopus && npm run test:terms",
+    "test": "npm run test:engine && npm run test:link && npm run test:converter && npm run test:convert-ui && npm run test:docstats && npm run test:journal-rules && npm run test:scopus && npm run test:terms && npm run test:bibliography && npm run test:roundtrip && npm run test:bibliography-validation && npm run test:validator-ui",
     "test:engine": "node engine.test.js",
     "test:convert-ui": "node convert-ui.test.js",
     "test:link": "node link-engine.test.js",
@@ -10,9 +10,16 @@
     "test:docstats": "node docstats-engine.test.js",
     "test:journal-rules": "node journal-rules-engine.test.js",
     "test:scopus": "node scopus-engine.test.js",
-    "test:terms": "node term-consistency-engine.test.js"
+    "test:terms": "node term-consistency-engine.test.js",
+    "test:bibliography": "node bibliography-engine.test.js",
+    "test:roundtrip": "node roundtrip-docx.test.js",
+    "test:bibliography-validation": "node bibliography-validation.test.js",
+    "test:validator-ui": "node validator-ui.test.js"
   },
   "devDependencies": {
-    "@xmldom/xmldom": "0.9.12"
+    "@xmldom/xmldom": "0.9.12",
+    "jsdom": "26.1.0",
+    "jszip": "3.10.1",
+    "mammoth": "1.6.0"
   }
 }

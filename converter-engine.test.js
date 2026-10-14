@@ -123,7 +123,7 @@ test('parenthetical: no comma between author & year (Chicago rule)', () => {
   assert.ok(!r.convertedArticle.includes('(Smith, 2020)'), r.convertedArticle);
 });
 
-test('4+ authors trigger et al. (Chicago threshold is 4, not 3)', () => {
+test('3+ authors trigger et al. under Chicago 18', () => {
   const article = 'Studi ini (Doe, Lee, Kim, & Park, 2021) menunjukkan hal serupa.';
   const refs = 'Doe, A., Lee, B., Kim, C., & Park, D. (2021). Title. Journal A, 5(1), 1-9.';
   const r = CC.convert(article, refs, 'apa7', 'chicago');

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const JSZip = require('jszip');
+const mammoth = require('mammoth');
 const fixtures = require('./fixtures/apa-ieee-scenarios.json');
 const root = __dirname;
 const dom = new JSDOM(fs.readFileSync(path.join(root, 'citation-converter.html'), 'utf8'), { runScripts: 'outside-only', url: 'https://test.example/citation-converter.html' });
@@ -130,6 +131,35 @@ async function uiFeatures() {
   assert.ok(el('scenarioResults').textContent.startsWith(fixtures.cases.length + '/' + fixtures.cases.length), el('scenarioResults').textContent);
   console.log('  PASS page controls: reverse conversion, edited-reference invalidation, local five-cycle scenario runner');
 }
+async function allStyleDocx() {
+  const sample = fixtures.cases.find(c => c.id === 'book-edition');
+  const initial = w.CitationConverter.convert(sample.article, sample.apa, 'apa7', 'apa7', { referenceDetails: [Object.assign({ line: sample.apa }, sample.details)] });
+  const source = await bytes(await api.buildMinimalDocx(initial.convertedArticle, initial.referenceLines[0].line, initial.metadata));
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  for (const style of ['apa7', 'ieee', 'mla9', 'chicago', 'harvard', 'vancouver']) {
+    await upload(source, 'apa7', style); const converted = await convert();
+    const original = await exportOriginal();
+    const fresh = await bytes(await api.buildMinimalDocx(converted.convertedArticle, converted.referenceLines[0].line, converted.metadata));
+    for (const buffer of [original, fresh]) {
+      const z = await JSZip.loadAsync(buffer), xml = await z.file('word/document.xml').async('string');
+      const doc = new w.DOMParser().parseFromString(xml, 'application/xml');
+      const p = Array.from(doc.getElementsByTagNameNS(W, 'p')).find(p => Array.from(p.getElementsByTagNameNS(W, 't')).map(t => t.textContent).join('') === converted.referenceLines[0].line);
+      assert.ok(p, style + ': reference matches preview');
+      const italic = Array.from(p.getElementsByTagNameNS(W, 'r')).some(r => Array.from(r.getElementsByTagNameNS(W, 'i')).some(i => i.getAttributeNS(W, 'val') === '1'));
+      assert.equal(italic, style !== 'vancouver');
+      assert.equal(p.getElementsByTagNameNS(W, 'spacing')[0].getAttributeNS(W, 'line'), style === 'apa7' || style === 'mla9' ? '480' : '240');
+      const extracted = await mammoth.extractRawText({ buffer }), split = w.CitationEngine.splitDocumentByReferences(extracted.value);
+      const parsed = w.CitationEngine.parseReferenceList(split.references, style);
+      assert.equal(parsed.length, 1);
+      const checked = w.BibliographyEngine.validateReference(parsed[0], style, { metadata: converted.metadata });
+      assert.equal(checked.model.type, 'book'); assert.equal(checked.model.place, sample.details.place);
+      assert.equal(checked.model.title, 'Research methods', 'Archive retains source case through the actual upload text extractor');
+    }
+    await upload(original, style, 'apa7'); const back = await convert();
+    assert.equal(back.referenceLines[0].line, sample.expectedAPA); assert.equal(back.convertedArticle, sample.article);
+  }
+  console.log('  PASS all six styles: original/fresh DOCX typography, real Mammoth extraction, metadata binding, return to APA');
+}
 async function sampleDocument() {
   const i = process.argv.indexOf('--sample'); if (i < 0) return;
   let buffer = fs.readFileSync(path.resolve(process.argv[i + 1])), metadataCount;
@@ -151,7 +181,7 @@ async function sampleDocument() {
   console.log('  PASS supplied manuscript: 13 references, 53 authors, three unresolved citations retained, five DOCX cycles, all other package parts unchanged');
 }
 (async () => {
-  try { await synthetic(); await uiFeatures(); await sampleDocument(); console.log('\n' + (process.argv.includes('--sample') ? 3 : 2) + ' passed, 0 failed (DOCX/UI integration).'); }
+  try { await synthetic(); await uiFeatures(); await allStyleDocx(); await sampleDocument(); console.log('\n' + (process.argv.includes('--sample') ? 4 : 3) + ' passed, 0 failed (DOCX/UI integration).'); }
   catch (e) { console.error(e.stack); process.exitCode = 1; }
   finally { w.close(); }
 })();

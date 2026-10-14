@@ -54,6 +54,7 @@
 
   var state = {
     fileText: null,
+    metadata: null,
     fileName: null,
     originalFile: null, // the raw File object, kept only for .docx uploads (needed to preserve original formatting on export)
     yearRange: CE.YearRange.presetToRange(5),
@@ -141,6 +142,7 @@
     if (file.size > WARN_FILE_SIZE) setStatus('Membaca file besar (' + formatSize(file.size) + ')... mungkin perlu beberapa detik.', 'info');
     els.processBtn.disabled = true;
     state.originalFile = null;
+    state.metadata = null;
 
     var reader = new FileReader();
     reader.onerror = function() { setStatus('⚠️ Gagal membaca file.', 'err'); };
@@ -148,8 +150,9 @@
     if (name.endsWith('.docx')) {
       state.originalFile = file;
       reader.onload = function() {
-        mammoth.extractRawText({ arrayBuffer: reader.result })
-          .then(function(res) {
+        Promise.all([mammoth.extractRawText({ arrayBuffer: reader.result }), readBibliographyMetadata(reader.result)])
+          .then(function(values) {
+            var res = values[0]; state.metadata = values[1];
             state.fileText = res.value;
             state.fileName = file.name;
             onFileReady(file);
@@ -167,6 +170,20 @@
       };
       reader.readAsText(file);
     }
+  }
+
+  function readBibliographyMetadata(buffer) {
+    if (typeof JSZip === 'undefined') return Promise.resolve(null);
+    return JSZip.loadAsync(buffer).then(function(zip) {
+      var part = zip.file('customXml/citation-converter.xml');
+      if (!part) return null;
+      return part.async('string').then(function(text) {
+        var xml = new DOMParser().parseFromString(text, 'application/xml');
+        if (xml.getElementsByTagName('parsererror').length || !xml.documentElement || xml.documentElement.namespaceURI !== 'urn:cek-sitasi:citation-converter:v1') return null;
+        var data = JSON.parse(xml.documentElement.textContent);
+        return data && data.version === 1 && Array.isArray(data.entries) ? data : null;
+      });
+    }).catch(function() { return null; });
   }
 
   function onFileReady(file) {
@@ -243,13 +260,13 @@
   var validatorWorker = null;
   function getWorker() {
     if (validatorWorker) return validatorWorker;
-    try { validatorWorker = new Worker('validator-worker.js?v=3'); return validatorWorker; }
+    try { validatorWorker = new Worker('validator-worker.js?v=4'); return validatorWorker; }
     catch (e) { return null; }
   }
   function runValidation(articleText, referenceText, styleId) {
     var combined = (articleText || '').length + (referenceText || '').length;
     function runOnMainThread() {
-      var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId);
+      var validator = new CE.MultiFormatValidator(articleText, referenceText, styleId, { referenceDetails: window.BibliographyReview ? window.BibliographyReview.read() : [], metadata: state.metadata });
       var result = validator.validate();
       state.lastValidator = validator; // kept for potential debugging use — no longer read by renderCitationMap() (see engine.js's precomputed matched/cited flags instead)
       return result;
@@ -284,7 +301,7 @@
         clearTimeout(timeoutId);
         resolve(runOnMainThread());
       };
-      worker.postMessage({ articleText: articleText, referenceText: referenceText, styleId: styleId });
+      worker.postMessage({ articleText: articleText, referenceText: referenceText, styleId: styleId, referenceDetails: window.BibliographyReview ? window.BibliographyReview.read() : [], metadata: state.metadata });
     });
   }
 
@@ -381,6 +398,9 @@
   }
 
   function renderParseStatus(result) {
+    var bibliographyBanner = document.getElementById('bibliographyStatusBanner');
+    if (bibliographyBanner) bibliographyBanner.textContent = CE.bibliographyStatusText(result);
+    if (window.BibliographyReview) window.BibliographyReview.render(result.references);
     var stats = result.parseStats || { totalFound: result.references.length, succeededCount: result.references.length, failedCount: 0 };
     var failed = result.failedLines || [];
     var el = els.parseStatusBanner;
@@ -696,6 +716,7 @@
       html += '<button class="issue-dismiss" data-issue-key="' + escAttr(key) + '" title="' + dismissLabel + '">' + dismissText + '</button>';
       html += '</div>';
       html += '<div class="issue-desc">' + esc(displayIssue.description) + '</div>';
+      if (issue.sourceUrl && /^https:\/\//.test(issue.sourceUrl)) html += '<div class="issue-desc"><a href="' + escAttr(issue.sourceUrl) + '" target="_blank" rel="noopener noreferrer">Panduan format yang diperiksa</a></div>';
       var copyLabel = currentLang === 'en' ? 'Copy to clipboard' : 'Salin ke clipboard';
       if (displayIssue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(displayIssue.code) + '">' + esc(displayIssue.code) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
       if (displayIssue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(displayIssue.correction) + '">✓ ' + esc(displayIssue.correction) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
@@ -799,6 +820,7 @@
       html += '<div class="issue-item ' + (sc==='success'?'suggestion':sc) + '">';
       html += '<div class="issue-header"><span class="issue-sev">' + sl + '</span>' + instTag + '<span class="issue-title">' + esc(displayIssue.title) + '</span></div>';
       html += '<div class="issue-desc">' + esc(displayIssue.description) + '</div>';
+      if (issue.sourceUrl && /^https:\/\//.test(issue.sourceUrl)) html += '<div class="issue-desc"><a href="' + escAttr(issue.sourceUrl) + '" target="_blank" rel="noopener noreferrer">Panduan format yang diperiksa</a></div>';
       var copyLabel = currentLang === 'en' ? 'Copy to clipboard' : 'Salin ke clipboard';
       if (displayIssue.code) html += '<div class="code-block code-issue" data-copy="' + escAttr(displayIssue.code) + '">' + esc(displayIssue.code) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
       if (displayIssue.correction) html += '<div class="code-block code-fix" data-copy="' + escAttr(displayIssue.correction) + '">✓ ' + esc(displayIssue.correction) + '<button class="copy-inline" aria-label="' + copyLabel + '">📋</button></div>';
@@ -1143,6 +1165,7 @@
     var html = '';
 
     html += '<h1>Laporan Validasi Sitasi</h1>';
+    html += '<p class="rp-meta">' + esc(CE.bibliographyStatusText(result)) + '</p>';
     html += '<div class="rp-meta">Gaya sitasi: <b>' + esc(style.name) + '</b>' + (confidence != null ? ' (auto-detect, keyakinan ' + confidence + '%)' : '') + '</div>';
     html += '<div class="rp-meta">Sumber dokumen: ' + esc(state.fileName || '-') + '  |  Dibuat: ' + esc(new Date().toLocaleString('id-ID')) + '</div>';
 

@@ -280,7 +280,7 @@
       <option value="auto">🔍 Auto-detect</option>
       <option value="apa7">APA 7th Edition</option>
       <option value="mla9">MLA 9th Edition</option>
-      <option value="chicago">Chicago (Author-Date)</option>
+      <option value="chicago">Chicago 18 (Author-Date)</option>
       <option value="harvard">Harvard</option>
       <option value="ieee">IEEE</option>
       <option value="vancouver">Vancouver</option>
@@ -322,7 +322,7 @@
       </div>
     </div>
 
-    <div class="privacy-note">🔒 File Anda tidak pernah dikirim ke server — parsing (.docx via Mammoth.js) dan seluruh analisis sitasi berjalan langsung di browser Anda. Pratinjau &amp; PDF juga dibuat di sisi klien menggunakan fitur cetak bawaan browser (tanpa library tambahan yang berat). Maksimum ukuran file 25MB; untuk naskah besar, proses analisis dijalankan di background (Web Worker) supaya tab browser tidak macet.<br><br>✅ Khusus untuk file <b>.docx</b>: sistem otomatis mengecek format <i>italic</i> (nama jurnal/judul buku) dan huruf besar-kecil judul (sentence case vs Title Case) — dibaca <b>langsung dari format asli file Word</b>, bukan dari copy-paste, jadi hasilnya akurat. Muncul di tab "Saran" setelah proses selesai.</div>
+    <div class="privacy-note">🔒 File Anda tidak pernah dikirim ke server — parsing (.docx via Mammoth.js) dan seluruh analisis sitasi berjalan langsung di browser Anda. Pratinjau &amp; PDF juga dibuat di sisi klien menggunakan fitur cetak bawaan browser (tanpa library tambahan yang berat). Maksimum ukuran file 25MB; untuk naskah besar, proses analisis dijalankan di background (Web Worker) supaya tab browser tidak macet.<br><br>✅ Khusus untuk file <b>.docx</b>: sistem otomatis mengecek format <i>italic</i> (nama jurnal/judul buku) dan huruf besar-kecil judul (sentence case vs Title Case) — dibaca <b>langsung dari format asli file Word</b>, bukan dari copy-paste. Temuan tipografi bersifat saran dan tetap perlu diperiksa, terutama untuk gaya Word yang diwariskan. Muncul di tab "Saran" setelah proses selesai.</div>
   </div>
 
   <details class="collapsible" id="scopusPanel">
@@ -351,7 +351,9 @@
   <div class="results" id="results">
     <div class="panel">
       <div class="field-label">Ringkasan Hasil</div>
-      <div id="parseStatusBanner" role="status" aria-live="polite"></div>
+      <div id="bibliographyStatusBanner" class="privacy-note" role="status"></div>
+    <details class="panel" id="bibliographyReviewPanel"><summary>Tinjau Jenis Sumber dan Detail Bibliografi</summary><p>Setelah validasi, periksa sumber yang ambigu di sini. Isi hanya informasi dari sumber asli, lalu jalankan validasi ulang. Detail berlaku untuk teks referensi yang sama persis.</p><div id="bibliographyReview"></div></details>
+    <div id="parseStatusBanner" role="status" aria-live="polite"></div>
       <div class="summary-grid" id="summaryGrid"></div>
       <div id="yearRangeSummary"></div>
       <div class="row" style="margin-top:14px;">
@@ -496,11 +498,13 @@ initOnboarding({
 </script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js" integrity="sha384-nFoSjZIoH3CCp8W639jJyQkuPHinJ2NHe7on1xvlUA7SuGfJAfvMldrsoAVm6ECz" crossorigin="anonymous"></script>
-<script src="engine.js?v=16"></script>
+<script src="engine.js?v=17"></script>
+<script src="bibliography-engine.js?v=2"></script>
+<script src="bibliography-review.js?v=1"></script>
 <script src="i18n-translate.js?v=1"></script>
 <script src="journal-rules-engine.js?v=1"></script>
 <script src="scopus-engine.js?v=1"></script>
 <script src="shared-file.js?v=1"></script>
-<script src="upload.js?v=16"></script>
+<script src="upload.js?v=19"></script>
 </body>
 </html>

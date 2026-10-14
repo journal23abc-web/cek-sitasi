@@ -1,4 +1,4 @@
-// APA 7 / IEEE bibliography models and source-specific templates.
+// Shared bibliography models, source-specific templates, and conservative validation.
 // No network requests. Missing facts stay missing; details must come from the source.
 // Rules and the independently written test cases: CONVERSION-COVERAGE.md.
 (function(root) {
@@ -19,8 +19,29 @@
     'tv-episode': 'Episode televisi', podcast: 'Podcast', 'podcast-episode': 'Episode podcast',
     'radio-broadcast': 'Siaran radio', artwork: 'Karya seni / gambar',
     'musical-score': 'Partitur', 'social-media': 'Media sosial / forum',
-    webpage: 'Halaman web', legal: 'Dokumen hukum (perlu tinjauan)', unknown: 'Belum ditentukan'
+    webpage: 'Halaman web', 'ai-chat': 'Percakapan AI yang dapat diakses',
+    'diagnostic-manual': 'Manual diagnostik', 'religious-work': 'Karya keagamaan',
+    'audiobook': 'Buku audio', transcript: 'Transkrip audiovisual',
+    review: 'Ulasan karya', 'measurement-instrument': 'Tes / instrumen pengukuran',
+    coursepack: 'Paket materi kuliah', interview: 'Wawancara', archival: 'Arsip / manuskrip historis',
+    'personal-communication': 'Komunikasi pribadi', 'whole-website': 'Situs secara keseluruhan',
+    legal: 'Dokumen hukum (perlu tinjauan)', unknown: 'Belum ditentukan'
   };
+  // A profile names the convention actually checked. Harvard has institutional variants;
+  // Vancouver here follows the NLM sample's first-six-author option, not every journal variant.
+  var PROFILES = {
+    apa7: { name: 'APA 7', url: 'https://apastyle.apa.org/style-grammar-guidelines/references/examples' },
+    ieee: { name: 'IEEE Reference Guide (2025)', url: 'https://journals.ieeeauthorcenter.ieee.org/create-your-ieee-journal-article/create-the-text-of-your-article/ieee-editorial-style-manual/' },
+    mla9: { name: 'MLA 9', url: 'https://style.mla.org/works-cited/works-cited-a-quick-guide/' },
+    chicago: { name: 'Chicago 18 Author-Date', url: 'https://www.chicagomanualofstyle.org/tools_citationguide/citation-guide-2.html' },
+    harvard: { name: 'Harvard umum (varian institusi perlu diperiksa)', url: 'https://library.leeds.ac.uk/info/1402/referencing/50/leeds-harvard-introduction' },
+    vancouver: { name: 'Vancouver / contoh NLM, opsi enam penulis', url: 'https://www.nlm.nih.gov/bsd/uniform_requirements.html' }
+  };
+  var MANUAL_TYPES = /^(?:unknown|legal|review|measurement-instrument|coursepack|interview|archival|personal-communication|whole-website)$/;
+  var PERIODICAL_TYPES = /^(?:journal-article|magazine-article|newspaper-article|blog)$/;
+  var CHAPTER_TYPES = /^(?:book-chapter|conference|dictionary-entry)$/;
+  var BOOK_TYPES = /^(?:book|edited-book|manual|diagnostic-manual|religious-work|audiobook)$/;
+  var REPORT_TYPES = /^(?:report|brochure|fact-sheet|press-release|white-paper|ethics-code)$/;
   var APA_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   var IEEE_MONTHS = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.', 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
   // Exact words listed in IEEE Reference Guide, IV.A. Unknown words stay spelled out.
@@ -111,16 +132,62 @@
     }
     return clean(s);
   }
-  function parseNames(s, styleId) {
+  function parseNames(s, styleId, personal) {
     var parsed = CE.parseAuthorsForStyle(s, styleId);
     return parsed.authors.filter(function(a) { return !/^et al\.?$/i.test(a); }).map(function(a) {
-      if (parsed.isInstitutional) return { last: a.replace(/\.$/, ''), given: [], institutional: true };
-      if (styleId === 'apa7' && a.indexOf(',') >= 0) {
+      if (parsed.isInstitutional && !personal) return { last: a.replace(/\.$/, ''), given: [], institutional: true };
+      if (CE.STYLES[styleId].authorForm === 'vancouver') {
+        var van = a.match(/^(.+?)\s+([A-Z]{1,4})$/);
+        return { last: van ? van[1] : a, given: van ? van[2].split('') : [], institutional: false };
+      }
+      if (a.indexOf(',') >= 0 && CE.STYLES[styleId].authorForm !== 'non-inverted') {
         var parts = a.split(','); return { last: parts.shift().trim(), given: parts.join(',').trim().split(/\s+/).filter(Boolean), institutional: false };
       }
       var match = a.match(/^((?:\p{Lu}\.(?:-\p{Lu}\.)?\s*)+)\s+(.+)$/u);
-      return match ? { last: match[2], given: match[1].trim().split(/\s+/), institutional: false } : { last: a, given: [], institutional: true };
+      if (match) return { last: match[2], given: match[1].trim().split(/\s+/), institutional: false };
+      var tokens = a.split(/\s+/);
+      return { last: tokens.pop(), given: tokens, institutional: false };
     });
+  }
+  function seedFromReference(ref, sourceStyleId, authors) {
+    var style = ref.styleId || sourceStyleId;
+    var ellipsis = (ref.authors || []).some(function(a) { return /^(?:\.\s*\.\s*\.|…)\s*/u.test(a); });
+    var truncated = /\bet\s+al\.?\b/i.test((ref.authors || []).join(' '));
+    var names = authors || (ref.isInstitutional
+      ? (ref.authors || []).map(function(a) { return { last: a, given: [], institutional: true }; })
+      : (ref.authors || []).filter(function(a) { return !/^et\s+al\.?$/i.test(a); }).map(function(a) {
+        return parseNames(a, style, true)[0] || { last: a, given: [], institutional: false };
+      }));
+    var model = {
+      authors: names.map(function(a) { return { last: a.last.replace(/^(?:\.\s*\.\s*\.|…)\s*/u, ''), given: a.given, institutional: a.institutional }; }),
+      completeAuthors: !truncated && !ellipsis, ellipsis: ellipsis,
+      authorCount: ellipsis ? Math.max(21, ref.authorCount || 0) : ref.authorCount,
+      year: ref.year, title: ref.title, journal: ref.journal, volume: ref.volume,
+      issue: ref.issue, pages: ref.pages, articleNumber: ref.articleNumber, doi: ref.doi,
+      publisher: ref.publisher, editor: ref.editor, editorIsPlural: ref.editorIsPlural,
+      type: ref.sourceType, isBookChapter: ref.isBookChapter || false,
+      url: null, originalStyle: style, ambiguousLocator: false, publicationDate: null
+    };
+    var links = ref.raw.match(/https?:\/\/\S+/ig);
+    if (links) model.url = links.filter(function(u) { return !/^https?:\/\/(?:dx\.)?doi\.org\//i.test(u); })[0] || null;
+    var at = ref.title ? ref.raw.indexOf(ref.title) : -1;
+    var tail = at >= 0 ? ref.raw.slice(at + ref.title.length) : '';
+    if (CE.STYLES[style].family === 'author-date') {
+      var suffix = tail.match(/,\s*(\d+)\s*(?:\(([^()]+)\))?\s*,\s*(Article\s+)?([A-Za-z]?\d+(?:\s*[-–]\s*\d+)?)\.?\s*(?:https?:\/\/\S+)?\s*$/i);
+      if (suffix) {
+        model.volume = suffix[1]; model.issue = suffix[2] || null;
+        var locator = suffix[4].replace(/\s*[-–]\s*/g, '–');
+        if (suffix[3] || /^e\d+/i.test(locator) || (!/[-–]/.test(locator) && locator.length >= 5)) { model.articleNumber = locator; model.pages = null; }
+        else { model.pages = locator; model.articleNumber = null; model.ambiguousLocator = !/[-–]/.test(locator); }
+      }
+    }
+    if (CE.STYLES[style].family === 'numeric' && model.year) {
+      var month = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?';
+      var date = tail.split(/\bdoi\s*:|https?:\/\//i)[0].match(new RegExp('(?:^|,\\s*)(' + month + '(?:/' + month + ')?\\s+(?:\\d{1,2},\\s*)?' + model.year + ')(?=[.,\\s]|$)', 'i'));
+      if (date) model.publicationDate = date[1];
+    }
+    if (model.pages) model.pages = model.pages.replace(/-/g, '–');
+    return model;
   }
   function ieeeEditors(s) {
     return s.replace(/,\s*&\s*/g, ' and ').replace(/\s*&\s*/g, ' and ');
@@ -145,6 +212,9 @@
     [/^(?:Unpublished )?(?:Doctoral dissertation|Master[’']s thesis|Ph\.D\. thesis|Undergraduate.*thesis|Skripsi|Tesis|Disertasi)/i, 'thesis'],
     [/^(?:Conference|Paper|Poster|Keynote).*(?:presentation|session|address|abstract)/i, 'conference-presentation'],
     [/^Data set/i, 'dataset'], [/^(?:Computer software|Mobile app|Software|Large language model)/i, 'software'],
+    [/^Generative AI chat/i, 'ai-chat'], [/^(?:Transcript|.*transcript)$/i, 'transcript'],
+    [/^Audiobook/i, 'audiobook'],
+    [/^Personal communication/i, 'personal-communication'], [/^Whole website/i, 'whole-website'],
     [/^(?:PowerPoint slides|Lecture notes)/i, 'lecture-notes'], [/^(?:MOOC|Online course)/i, 'course'],
     [/^(?:Video|Online video|TED Talk)$/i, 'video'], [/^Film$/i, 'film'], [/^TV series episode/i, 'tv-episode'],
     [/^TV series$/i, 'tv-series'], [/^(?:Audio|Video) podcast episode/i, 'podcast-episode'],
@@ -168,6 +238,7 @@
     if (m.year === 'in press' && /Journal|Transactions|\bJ\./i.test(source)) return 'journal-article';
     if (/\b(?:Journal|Transactions)\b/.test(source) || /,\s*\d+(?:\([^)]*\))?(?:,|$)/.test(source) || /Advance online publication|In press/i.test(source)) return 'journal-article';
     if (/^(?:Ed\.|Eds\.)$/.test(m.role || '')) return 'edited-book';
+    if (/^(?:Diagnostic and statistical manual|International statistical classification of diseases)/i.test(m.title || '')) return 'diagnostic-manual';
     if (m.description) return 'unknown';
     if (m.url) return 'webpage';
     if (source) return 'book';
@@ -183,7 +254,7 @@
         if (!m.source && m.publisher) m.source = m.publisher;
         return applyDetails(m, opt);
       }
-      return applyDetails(parseIEEE(raw, m), opt);
+      return applyDetails(styleId === 'ieee' ? parseIEEE(raw, m) : parseOtherStyle(raw, styleId, m), opt);
     }
     var date = raw.match(/\((\d{4}[a-z]?(?:[–-](?:\d{4}|present))?|n\.d\.[a-z]?|in press)(?:,\s*([^()]+))?\)\s*\.?\s*/i);
     if (!date) { m.type = 'unknown'; m.notes.push('Tanggal atau struktur APA tidak dikenali.'); return applyDetails(m, opt); }
@@ -199,7 +270,7 @@
     if (!m.ellipsis && !/et\s+al\./i.test(authorText)) m.authors = parseNames(authorText, 'apa7');
     if (allRoles.length > 1 && allRoles.length === m.authors.length) { m.authorRoles = allRoles; m.role = null; }
     // A title in the author position is not turned into an invented person's name.
-    if (!/,\s*(?:\p{Lu}\.)/u.test(authorText) && !CE.isInstitutionalAuthor(authorText.replace(/\.$/, '')) && /\s/.test(authorText)) {
+    if (!/,\s*(?:\p{Lu}\.)/u.test(authorText) && ((!CE.isInstitutionalAuthor(authorText.replace(/\.$/, '')) && /\s/.test(authorText)) || (opt.type === 'religious-work' && !m.role))) {
       m.noAuthor = true; m.authors = []; m.authorTitle = clean(authorText);
     }
     var body = raw.slice(date.index + date[0].length).trim();
@@ -208,6 +279,12 @@
     body = stripLink(body, m);
     var parts = splitSentence(body);
     parseDetails(parts[0], m);
+    // APA assigns the company to the author slot for AI tools/chats. Uppercase short
+    // tokens in a company name can otherwise resemble Vancouver personal initials.
+    if (/^(?:Generative AI chat|Large language model)$/i.test(m.description || '') && !/,\s*\p{Lu}\./u.test(authorText)) {
+      m.noAuthor = false; delete m.authorTitle;
+      m.authors = [{ last: clean(authorText), given: [], institutional: true }];
+    }
     m.source = parts[1];
     m.type = identify(m, m.source, opt.type);
     // No-author works put the TITLE before the date, so the remaining first element is source.
@@ -244,7 +321,7 @@
       var th = (m.description || '').match(/^(Unpublished\s+)?(.+?(?:thesis|dissertation))\s*(?:,\s*(.+))?$/i);
       if (th) { m.unpublished = !!th[1]; m.degree = th[2]; m.institution = th[3] || (m.unpublished ? m.source : null); }
       m.repository = m.unpublished ? null : m.source;
-    } else if (/^(?:book|edited-book|report|brochure|fact-sheet|press-release|white-paper|ethics-code|manual)$/.test(m.type)) m.publisher = m.source || null;
+    } else if (BOOK_TYPES.test(m.type) || REPORT_TYPES.test(m.type)) m.publisher = m.source || null;
     else if (m.type === 'dataset' || m.type === 'software') m.publisher = m.source || null;
     else if (m.type === 'preprint') {
       m.repository = m.source;
@@ -261,7 +338,7 @@
   function applyDetails(m, opt) {
     // Only explicit, style-independent facts may be supplied by the user. Bindings are
     // exact reference text, so changing the input invalidates the row's old details.
-    ['place', 'accessed', 'journalAbbreviation', 'journal', 'publisher', 'institution', 'department', 'degree', 'date', 'articleNumber'].forEach(function(k) {
+    ['place', 'accessed', 'journalAbbreviation', 'nlmAbbreviation', 'journal', 'publisher', 'institution', 'department', 'degree', 'date', 'articleNumber'].forEach(function(k) {
       if (typeof opt[k] === 'string' && opt[k].trim()) {
         if (k === 'date' && /^\d{4}/.test(opt[k]) && opt[k].slice(0, 4) !== String(m.year).slice(0, 4)) {
           m.notes = m.notes || []; m.notes.push('Tahun detail berbeda dari tahun sumber. Perbaiki tahun pada referensi sumber terlebih dahulu.');
@@ -332,26 +409,298 @@
     if (m.noAuthor) notes.push('Sumber tanpa penulis: sitasi berdasarkan judul harus diperiksa manual.');
     if (target === 'apa7' && m.abbreviatedSource) notes.push('Nama jurnal sumber berupa singkatan; nama lengkap APA harus diverifikasi dari sumber asli.');
     if (target === 'ieee') {
-      if (/^(?:book|edited-book|book-chapter|report|brochure|fact-sheet|press-release|white-paper|ethics-code|thesis|manual)$/.test(m.type) && !m.place) notes.push('Lokasi penerbit/institusi tidak tersedia. Lengkapi dari sumber asli untuk IEEE.');
+      if ((BOOK_TYPES.test(m.type) || /^(?:book-chapter|report|brochure|fact-sheet|press-release|white-paper|ethics-code|thesis)$/.test(m.type)) && !m.place) notes.push('Lokasi penerbit/institusi tidak tersedia. Lengkapi dari sumber asli untuk IEEE.');
       if ((m.type === 'conference' || m.type === 'dictionary-entry') && m.publisher && !m.place) notes.push('Lokasi penerbit prosiding/kamus belum tersedia. Lengkapi dari sumber asli untuk IEEE.');
       if (m.type === 'journal-article' && m.journal && !m.journalAbbreviation && !JOURNALS[m.journal] && /\s/.test(m.journal) && !m.abbreviatedSource) notes.push('Singkatan jurnal dibentuk dari daftar kata IEEE; periksa singkatan resmi terbitan bila tersedia.');
       if ((m.type === 'webpage' || m.type === 'social-media' || m.type === 'video') && !m.accessed) notes.push('Tanggal akses belum tersedia. Isi tanggal saat sumber benar-benar diakses untuk IEEE.');
       if (m.type === 'patent' && !/\d{4},\s*\w+\s+\d+/.test(m.date || '')) notes.push('Paten memerlukan tanggal pemberian (issued date), termasuk hari; periksa sumber asli.');
       if (/^(?:film|tv-series|tv-episode|podcast|podcast-episode|radio-broadcast|artwork|musical-score|course)$/.test(m.type)) notes.push('IEEE tidak memberi templat khusus untuk subjenis media ini; adaptasi bibliografi memerlukan tinjauan editorial.');
+      if (/^(?:audiobook|transcript|ai-chat)$/.test(m.type)) notes.push('Subjenis ini memakai adaptasi unsur bibliografi IEEE dan perlu tinjauan editorial.');
       if (m.type === 'legal') notes.push('Format dokumen hukum bergantung yurisdiksi; perlu tinjauan manual.');
     }
     if (m.type === 'webpage' && !m.description) notes.push('Pastikan jenis sumber: bentuk teks ini juga dapat berupa laporan, berita, atau buku daring. Pilih jenis sumber bila perlu.');
+    if (/^(?:mla9|chicago)$/.test(target) && m.authors.some(function(a) { return !a.institutional && a.given.some(function(g) { return /^\p{Lu}\.?$/u.test(g); }); })) notes.push('Nama depan sumber hanya tersedia sebagai inisial. Nama lengkap untuk ' + PROFILES[target].name + ' harus diverifikasi dari sumber asli; tidak ditebak.');
+    if (target === 'harvard') notes.push('Harvard memiliki varian institusi. Templat umum ini perlu disesuaikan dengan pedoman jurnal/kampus.');
+    if (target === 'vancouver' && m.type === 'journal-article' && m.journal && /\s/.test(m.journal) && !m.nlmAbbreviation && !m.abbreviatedSource) notes.push('Singkatan jurnal NLM belum diverifikasi. Nama yang tersedia dipertahankan; periksa NLM Catalog, bukan daftar singkatan IEEE.');
+    if (/^(?:mla9|chicago|vancouver|harvard)$/.test(target) && !/^(?:journal-article|magazine-article|newspaper-article|blog|book|edited-book|book-chapter|conference|dictionary-entry|report|thesis|webpage)$/.test(m.type)) notes.push('Templat ' + PROFILES[target].name + ' untuk subjenis ini merupakan adaptasi unsur bibliografi; perlu tinjauan editorial.');
+    if (m.type === 'ai-chat' && target !== 'apa7') notes.push('Percakapan AI perlu ditinjau menurut kebijakan penerbit, akses transkrip, dan gaya tujuan.');
     return notes;
   }
+  function parseOtherStyle(raw, styleId, m) {
+    var s = raw.replace(/^(?:\[\d+\]|\d+\.)\s*/, '');
+    m.type = m.type === 'website' ? 'webpage' : m.type;
+    m.date = m.year || 'n.d.'; m.notes = m.notes || [];
+    var link = s.match(/https?:\/\/\S+/g);
+    if (link) m.url = link.filter(function(x) { return !/\/doi\.org\//i.test(x); }).map(function(x) { return x.replace(/[.,]$/, ''); })[0] || null;
+    var accessed = s.match(/(?:Accessed:?|cited)\s+([^\]]+?)(?=\]|\.|$)/i);
+    if (accessed) m.accessed = apaDate(accessed[1].trim());
+    var scope = s.replace(/https?:\/\/\S+/g, '').replace(/\bdoi:\s*\S+/i, '');
+    if (styleId === 'vancouver') {
+      // NLM's year;volume(issue):pages block is a reliable delimiter. Years in titles,
+      // DOIs, or access dates must not be used as publication dates.
+      var vj = scope.match(/\b(\d{4})(?:\s+([A-Za-z]{3,9})(?:\s+(\d{1,2}))?)?\s*;\s*(\d*)\s*(?:\(([^)]+)\))?\s*:\s*([A-Za-z]?\d+(?:[-–][A-Za-z]?\d+)?|[ivxlcdm]+(?:[-–][ivxlcdm]+)?)/i);
+      if (vj) {
+        m.type = 'journal-article'; m.year = vj[1];
+        m.date = m.year + (vj[2] ? ', ' + vj[2] + (vj[3] ? ' ' + vj[3] : '') : '');
+        m.volume = vj[4] || null; m.issue = vj[5] || null; m.pages = vj[6].replace(/-/g, '–');
+        var titleAt = m.title ? s.indexOf(m.title) : -1;
+        if (titleAt >= 0) m.journal = clean(scope.slice(titleAt + m.title.length, vj.index).replace(/\[Internet\]/i, ''));
+      } else {
+        var vb = scope.match(/([^.;]+):\s*([^;]+);\s*(\d{4})/);
+        if (vb) { m.type = m.type === 'unknown' ? 'book' : m.type; m.place = clean(vb[1]); m.publisher = clean(vb[2]); m.year = vb[3]; }
+      }
+      var ved = scope.match(/\b(\d+(?:st|nd|rd|th)\s+ed\.)/i); if (ved) { m.edition = ved[1]; m.details = m.edition; }
+      var vd = scope.match(/\[(dissertation|master[’']s thesis|dataset|computer program|software|Internet)\]/i);
+      if (vd && !/^Internet$/i.test(vd[1])) {
+        m.description = vd[1]; m.type = /dissertation|thesis/i.test(vd[1]) ? 'thesis' : /dataset/i.test(vd[1]) ? 'dataset' : 'software';
+      }
+    } else {
+      var quote = scope.match(/[“"]([^”"]+)[”"]/) || (styleId === 'harvard' ? scope.match(/[‘'](.+?)[’'](?=\s*[,\.])/): null);
+      var tail;
+      if (quote) {
+        m.title = quote[1].replace(/[.,]$/, ''); tail = clean(scope.slice(quote.index + quote[0].length));
+      } else {
+        var at = m.title ? scope.indexOf(m.title) : -1;
+        tail = at >= 0 ? clean(scope.slice(at + m.title.length)) : '';
+      }
+      var j = styleId === 'chicago' ? tail.match(/^(.*?)\s+(\d+)\s*(?:\(([^)]+)\))?\s*:\s*([\w]+(?:[-–][\w]+)?)/)
+        : styleId === 'mla9' ? tail.match(/^(.*?),\s*vol\.\s*(\d+)(?:,\s*no\.\s*([^,]+))?/i)
+        : tail.match(/^(.*?),\s*(\d+)\s*(?:\(([^)]+)\))?/);
+      if (j) {
+        m.type = 'journal-article'; m.journal = clean(j[1]); m.volume = j[2]; m.issue = j[3] || null;
+        if (styleId === 'chicago' && j[4]) m.pages = j[4].replace(/-/g, '–');
+        var pg = tail.match(/\bpp?\.\s*([A-Za-z]?\d+(?:[-–][A-Za-z]?\d+)?)/i);
+        if (pg) m.pages = pg[1].replace(/-/g, '–');
+        var ai = tail.match(/(?:Article\s+|:\s*)(e\d+|\d{5,})/i);
+        if (ai) { m.articleNumber = ai[1]; m.pages = null; }
+      } else if (quote && /^(?:In\s|.*?edited by\s)/i.test(tail)) {
+        m.type = /\bProceedings\b|\bProc\./.test(tail) ? 'conference' : 'book-chapter';
+        var ch = tail.replace(/^In\s+/i, '').match(/^(.*?)(?:,\s*edited by\s+(.+?))?(?:,\s*(?:pp\.\s*)?([\d]+[-–][\d]+))?\.\s*(.*)$/i);
+        if (ch) { m.journal = ch[1]; m.editor = ch[2] || null; m.pages = ch[3] || null; m.publisher = clean(ch[4]); }
+      } else if (quote && /(?:PhD diss\.|Ph\.D\.|thesis|dissertation)/i.test(tail)) {
+        m.type = 'thesis'; var th = tail.match(/^(.+?(?:diss\.|thesis|dissertation)),\s*([^.]*)/i);
+        if (th) { m.degree = th[1]; m.institution = th[2]; }
+      } else if (quote && m.url && (m.type === 'unknown' || m.type === 'webpage')) {
+        m.type = 'webpage'; m.source = clean(tail.replace(/(?:Accessed|Last modified|\b\d{4}\b).*$/i, ''));
+      } else if (!quote && tail) {
+        var edition = tail.match(/^(\d+(?:st|nd|rd|th)\s+ed\.)[,\s]*/i);
+        if (edition) { m.edition = edition[1]; m.details = m.edition; tail = tail.slice(edition[0].length); }
+        var pub = clean(tail.replace(/,?\s*\b\d{4}\b\.?\s*$/, ''));
+        if (pub.indexOf(':') >= 0) { m.place = clean(pub.slice(0, pub.indexOf(':'))); pub = clean(pub.slice(pub.indexOf(':') + 1)); }
+        if (pub && !/\b(?:vol\.|pp\.|Available|Accessed)\b/i.test(pub)) { m.publisher = pub; if (m.type === 'unknown' || m.type === 'webpage') m.type = 'book'; }
+      }
+    }
+    if (m.publisher) m.source = m.publisher;
+    if (m.journal && /\b(?:J\.|Trans\.|Int\.|Comput\.|Proc\.)/.test(m.journal)) m.abbreviatedSource = true;
+    if (/^(?:mla9|chicago)$/.test(styleId)) m.notes.push('Nama depan lengkap dan sentence case tidak dapat dipulihkan dari inisial atau title case saja; periksa sumber asli bila gaya tujuan memerlukannya.');
+    return m;
+  }
+
+  function validateReference(ref, styleId, options) {
+    var opt = options || {}, profile = PROFILES[styleId], diagnostics = [];
+    if (!profile) return { model: null, diagnostics: [], coverage: 'manual' };
+    var display = seedFromReference(ref, styleId);
+    var entries = opt.metadata && opt.metadata.version === 1 && opt.metadata.styleId === styleId && Array.isArray(opt.metadata.entries) ? opt.metadata.entries : [];
+    var matched = entries.filter(function(e) { return e.line === bindingLine(ref.raw) && validModel(e.model); });
+    var trusted = matched.length === 1;
+    var m = enrich(ref.raw, ref.styleId || styleId, trusted ? matched[0].model : display, opt.details || null, trusted);
+    if (m.type === 'unknown' && !m.description && !(opt.details && opt.details.type) && ref.sourceType !== 'unknown') m.type = ref.sourceType === 'website' ? 'webpage' : ref.sourceType;
+    var raw = ref.raw, type = m.type || 'unknown';
+    var coverage = !TYPES[type] || MANUAL_TYPES.test(type) || m.noAuthor ? 'manual' : styleId === 'harvard' ? 'basic' : 'structured';
+    function add(id, title, description, severity, field) {
+      if (diagnostics.some(function(x) { return x.ruleId === 'bibliography.' + styleId + '.' + id; })) return;
+      diagnostics.push({ ruleId: 'bibliography.' + styleId + '.' + id, title: title,
+        description: description, severity: severity || 'suggestion', field: field || 'bibliography',
+        code: raw, sourceUrl: profile.url, sourceType: type });
+    }
+    function missing(field, label, value) {
+      if (!value) add('missing-' + field, 'Unsur ' + TYPES[type] + ' perlu diperiksa', label + ' belum terbaca pada referensi. Cocokkan dengan sumber asli; jangan mengisi data perkiraan.', 'suggestion', field);
+    }
+    if (coverage === 'manual') add('manual-type', 'Jenis referensi memerlukan tinjauan manual', 'Jenis: ' + (TYPES[type] || type) + '. Pencocokan sitasi tetap dijalankan, tetapi templat bibliografi khusus belum dapat dipastikan.');
+    if (styleId === 'harvard') add('harvard-variant', 'Varian Harvard perlu disesuaikan', 'Pemeriksaan ini memakai unsur bibliografi umum. Tanda baca, tanggal akses, dan format rinci mengikuti pedoman institusi/jurnal yang Anda gunakan.');
+    missing('title', 'Judul', m.title);
+    // No-author works and n.d. are legitimate. Never require an invented author or date.
+    if (!m.year && styleId !== 'mla9') add('missing-date', 'Tanggal sumber belum terbaca', 'Periksa tanggal terbit. Gunakan penanda tanpa tanggal sesuai gaya bila sumber memang tidak mencantumkannya.');
+    if (/https?:\/\/(?:dx\.)?doi\.org\/https?:\/\//i.test(raw)) add('doi-url', 'URL DOI berulang', 'Awalan https://doi.org/ tidak boleh diikuti URL DOI lain.', 'error', 'doi');
+    if (m.doi && styleId === 'apa7' && !/https:\/\/doi\.org\/10\./i.test(raw)) add('doi-format', 'Format DOI APA 7', 'Tuliskan DOI sebagai URL https://doi.org/' + m.doi + '.', 'suggestion', 'doi');
+    if (BOOK_TYPES.test(type) || REPORT_TYPES.test(type)) {
+      var sameOrgPossible = m.authors.length === 1 && m.authors[0].institutional && styleId === 'apa7';
+      if (!sameOrgPossible) missing('publisher', 'Penerbit/institusi', m.publisher || m.source);
+      if (/^(?:ieee|vancouver)$/.test(styleId)) missing('place', 'Lokasi penerbit/institusi', m.place);
+    }
+    if (PERIODICAL_TYPES.test(type)) {
+      missing('container', 'Nama jurnal/majalah/surat kabar/blog', m.journal || (type === 'blog' ? m.source : null));
+      // A journal may legitimately have no volume, issue, or page range (online-first,
+      // article IDs). Such absences are never universal format errors.
+      if (type === 'journal-article' && !m.pages && !m.articleNumber && !m.status && m.year !== 'in press') add('locator-review', 'Lokasi artikel perlu diperiksa', 'Halaman/nomor artikel belum terbaca. Periksa apakah sumber menggunakan nomor artikel, publikasi daring awal, atau memang tidak memiliki penomoran.');
+    }
+    if (CHAPTER_TYPES.test(type)) { missing('container', 'Judul buku induk/prosiding/kamus', m.journal); if (type === 'book-chapter') missing('editor', 'Editor buku suntingan', m.editor); }
+    if (type === 'thesis') { missing('institution', 'Institusi pemberi gelar', m.institution); missing('degree', 'Jenis tesis/disertasi atau gelar', m.degree); }
+    if (type === 'dataset' || type === 'software') missing('provider', 'Repositori/penerbit/penyedia', m.publisher || m.source || m.url || m.doi);
+    if (type === 'standard') missing('number', 'Nomor standar', m.standardNumber);
+    if (type === 'patent') missing('number', 'Nomor paten', m.patentNumber);
+    if (/^(?:webpage|social-media|video|ai-chat)$/.test(type)) missing('url', 'URL sumber', m.url || m.doi);
+    if (type === 'conference-presentation') missing('event', 'Nama konferensi/pertemuan', m.source);
+    if (type === 'preprint') missing('repository', 'Nama repositori preprint atau identifikator', m.repository || m.arxiv || m.source || m.doi);
+    if (/^(?:film|tv-series|podcast|radio-broadcast|musical-score)$/.test(type)) missing('provider', 'Perusahaan produksi/penerbit/penyedia media', m.source || m.publisher || m.url);
+    if (/^(?:tv-episode|podcast-episode)$/.test(type)) missing('series', 'Judul serial/podcast induk', m.series);
+    if (/^(?:lecture-notes|course|transcript)$/.test(type)) missing('provider', 'Institusi/platform/sumber materi', m.source || m.url || m.doi);
+    if (styleId === 'apa7' && /^(?:dataset|software|film|tv-series|tv-episode|podcast|podcast-episode|radio-broadcast|artwork|lecture-notes|ai-chat|transcript)$/.test(type) && !m.description) add('medium-description', 'Deskripsi jenis karya APA 7', 'Periksa deskripsi dalam kurung siku, misalnya [Data set], [Computer software], atau [Film], sesuai jenis karya yang sebenarnya.');
+    if (type === 'ai-chat' && styleId === 'apa7' && !/^\d{4},\s*[A-Za-z]+\s+\d/.test(m.date || '')) add('chat-date', 'Tanggal percakapan AI belum lengkap', 'APA 7 untuk percakapan AI memakai tanggal percakapan, termasuk bulan dan hari.');
+    if (type === 'personal-communication' && /^(?:apa7|chicago)$/.test(styleId)) add('no-bibliography', 'Komunikasi pribadi biasanya hanya disitasi dalam teks', 'Komunikasi yang tidak dapat diakses pembaca umumnya tidak dimasukkan ke daftar referensi. Periksa sifat akses sumber.');
+    if (type === 'whole-website' && styleId === 'apa7') add('no-bibliography', 'Situs secara keseluruhan tidak memerlukan entri APA', 'Sebutkan nama situs dan URL dalam teks. Informasi dari halaman tertentu tetap memerlukan referensi halaman/karya tersebut.');
+    if (m.ambiguousLocator) add('ambiguous-locator', 'Halaman atau nomor artikel belum jelas', 'Angka tunggal belum membedakan halaman dengan nomor artikel. Periksa sumber asli sebelum menambahkan Article atau Art. no.');
+    var authorScope = raw.slice(0, Math.max(0, raw.indexOf(m.title)));
+    if (styleId === 'apa7') {
+      if (/\bet\s+al\.?/i.test(authorScope)) add('authors-truncated', 'Daftar penulis APA 7 terpotong', 'Daftar referensi APA 7 mencantumkan semua penulis hingga 20; untuk 21 atau lebih, gunakan 19 pertama, elipsis, dan penulis terakhir. Nama yang hilang harus diperoleh dari sumber asli.', 'error', 'authors');
+      if (display.completeAuthors && display.authors.length > 20) add('authors-over20', 'Daftar penulis APA 7 lebih dari 20', 'Gunakan 19 penulis pertama, elipsis, dan penulis terakhir.', 'error', 'authors');
+      if (/\band\b\s+[\p{Lu}][\p{L}'’-]+,\s*\p{Lu}\./u.test(authorScope) && !ref.isInstitutional) add('author-connector', 'Penghubung penulis referensi APA 7', 'Gunakan & sebelum penulis terakhir pada daftar referensi.', 'suggestion', 'authors');
+    }
+    if (styleId === 'ieee') {
+      if (!/^\[\d+\]\s/.test(raw)) add('label', 'Label referensi IEEE', 'Awali setiap entri dengan nomor dalam kurung siku, misalnya [1].', 'error', 'number');
+      if (!ref.isInstitutional && /\p{L}{2,},\s*\p{Lu}\./u.test(authorScope)) add('author-order', 'Urutan nama penulis IEEE', 'IEEE memakai inisial di depan nama keluarga, misalnya J. Smith.', 'suggestion', 'authors');
+      if (display.completeAuthors && display.authors.length > 6) add('authors-over6', 'Daftar penulis IEEE lebih dari enam', 'Gunakan nama penulis pertama diikuti et al. Simpan daftar lengkap dalam metadata untuk konversi balik.', 'suggestion', 'authors');
+      if (!display.completeAuthors && display.authors.length > 1) add('authors-truncated', 'Pemendekan nama penulis IEEE', 'Untuk lebih dari enam penulis, IEEE memakai penulis pertama diikuti et al.; bukan enam nama diikuti et al.', 'suggestion', 'authors');
+      if ((PERIODICAL_TYPES.test(type) || CHAPTER_TYPES.test(type) || type === 'report' || type === 'thesis') && !/[“"][^”"]+[”"]/.test(raw)) add('title-quotes', 'Tanda kutip judul IEEE', 'Judul artikel/bab/makalah/laporan/tesis biasanya diletakkan dalam tanda kutip; judul karya induk diperiksa terpisah.', 'suggestion', 'title');
+      if (raw.indexOf('http') < 0 && !/\.$/.test(raw)) add('terminal-period', 'Tanda akhir referensi IEEE', 'Entri IEEE yang tidak berakhir dengan URL diakhiri titik.', 'suggestion', 'punctuation');
+    }
+    if (styleId === 'mla9' && display.completeAuthors && display.authors.length > 2) add('authors-over2', 'Daftar penulis MLA 9', 'Untuk tiga penulis atau lebih, cantumkan penulis pertama diikuti et al.', 'suggestion', 'authors');
+    if (styleId === 'chicago' && display.completeAuthors && display.authors.length > 6) add('authors-over6', 'Daftar penulis Chicago 18', 'Untuk lebih dari enam penulis, cantumkan tiga penulis pertama diikuti et al.', 'suggestion', 'authors');
+    if (styleId === 'vancouver' && /\b(?:vol\.|pp\.)/i.test(raw) && type === 'journal-article') add('journal-block', 'Blok jurnal Vancouver', 'Periksa susunan tahun;volume(nomor):halaman, bukan label vol. dan pp. seperti IEEE.');
+    if (styleId === 'vancouver' && display.completeAuthors && display.authors.length > 6) add('authors-over6', 'Opsi daftar penulis Vancouver', 'Profil ini menggunakan enam nama pertama diikuti et al. NLM juga mengizinkan daftar lengkap; ikuti ketentuan jurnal.', 'suggestion', 'authors');
+    if (styleId === 'chicago' && type === 'webpage' && /^n\.d\./i.test(m.year || '') && !m.accessed) add('access-date', 'Tanggal akses halaman tanpa tanggal', 'Chicago Author-Date memakai tanggal akses untuk halaman web tanpa tanggal. Isi tanggal akses yang sebenarnya.');
+    issues(m, styleId).forEach(function(note, i) {
+      // Conversion-only uncertainties (restoring initials/title case) are not evidence that
+      // a correctly written source-style reference is erroneous.
+      if (/sentence case|Nama depan lengkap/.test(note)) return;
+      add('review-' + i, 'Detail bibliografi perlu diverifikasi', note);
+      if (/adaptasi|yurisdiksi/.test(note)) coverage = 'manual';
+    });
+    return { model: m, diagnostics: diagnostics, coverage: coverage, profile: profile.name };
+  }
+  function validModel(m) {
+    return !!(m && typeof m.title === 'string' && Array.isArray(m.authors) && (m.authors.length || m.noAuthor) && m.authors.every(function(a) {
+      return a && typeof a.last === 'string' && Array.isArray(a.given) && a.given.every(function(g) { return typeof g === 'string'; });
+    }));
+  }
+  function bindingLine(raw) {
+    // The converter writes one layout-only Word tab after its literal numeric label.
+    // Mammoth exposes that tab, while custom XML stores visible reference text without it.
+    // Remove only that exact delimiter; changes inside bibliographic fields stay significant.
+    return String(raw).replace(/^(\[\d+\] |\d+\. )\t/, '$1');
+  }
+  function formattingSpans(m, styleId, raw) {
+    if (!m || MANUAL_TYPES.test(m.type) || styleId === 'vancouver') return [];
+    var spans = [], periodical = PERIODICAL_TYPES.test(m.type), chapter = CHAPTER_TYPES.test(m.type);
+    var part = periodical || chapter || /^(?:podcast-episode|tv-episode|social-media)$/.test(m.type);
+    var titleItalic = !part;
+    if (/^(?:mla9|chicago)$/.test(styleId) && /^(?:webpage|thesis|ai-chat)$/.test(m.type)) titleItalic = styleId === 'mla9' && m.type === 'thesis';
+    if (styleId === 'ieee' && /^(?:report|brochure|fact-sheet|press-release|white-paper|ethics-code|thesis|conference-presentation|dataset|preprint|unpublished|webpage|ai-chat)$/.test(m.type)) titleItalic = false;
+    function span(text, italic, field, from) {
+      if (!text) return null;
+      var at = raw.indexOf(text, from || 0);
+      if (at < 0) return null;
+      var found = { start: at, end: at + text.length, text: text, italic: italic, field: field }; spans.push(found); return found;
+    }
+    var title = span(m.title, titleItalic, 'title');
+    var container = part ? span(m.journalAbbreviation && styleId === 'ieee' ? m.journalAbbreviation : (periodical || chapter ? m.journal || m.source : m.series), true, 'container', title ? title.end : 0) : null;
+    if (styleId === 'apa7' && periodical && m.volume && container) span(m.volume, true, 'volume', container.end);
+    return spans;
+  }
+  function renderOtherStyle(m, target, number, authors, year) {
+    var runs = [], type = m.type, journal = type === 'journal-article';
+    var periodical = PERIODICAL_TYPES.test(type), chapter = CHAPTER_TYPES.test(type), book = BOOK_TYPES.test(type);
+    function add(text, italic) { if (text) runs.push({ text: String(text), italic: !!italic }); }
+    function end() { if (runs.length && !/[.!?]\s*$/.test(runs[runs.length - 1].text)) add('.'); }
+    function link() { var url = m.doi ? 'https://doi.org/' + m.doi : m.url; if (url) add(' ' + url + (/^(?:chicago|mla9)$/.test(target) ? '.' : '')); }
+    function fullDate() { var d = m.date || year; return d.replace(/^\d{4}[a-z]?,?\s*/, ''); }
+    function mlaDate() { var d = fullDate(), hit = d.match(/^([A-Za-z]+)\s+(\d{1,2})$/); return hit ? hit[2] + ' ' + hit[1] + ' ' + year : (d && d !== year ? d + ' ' : '') + year; }
+    var title = /^(?:mla9|chicago)$/.test(target) ? titleCase(m.title) : m.title;
+    var container = /^(?:mla9|chicago)$/.test(target) && !periodical ? titleCase(m.journal || '') : m.journal;
+    if (target === 'vancouver') {
+      add(number + '. '); if (authors) add(period(authors) + ' ');
+      add(m.title); if (m.edition && book) add('. ' + m.edition.replace(/\.$/, ''));
+      if (!periodical && !chapter && !book && m.description) add(' [' + m.description.toLowerCase() + ']');
+      add('. ');
+      var vd = ieeeDate(m.date || year).replace(/\./g, '').replace(/,\s*(\d{4})$/, ' $1');
+      var dm = vd.match(/^([A-Za-z]+)\s*(\d+)?,?\s*(\d{4})$/); if (dm) vd = dm[3] + ' ' + dm[1] + (dm[2] ? ' ' + dm[2] : '');
+      if (journal || periodical) {
+        // NLM abbreviations differ from IEEE. Use an explicitly supplied NLM abbreviation
+        // or keep the actual title, with an editorial note; never reuse IEEE's word table.
+        add(m.nlmAbbreviation || m.journal || m.source); add('. ' + vd);
+        if (m.volume || m.issue || m.pages || m.articleNumber) add(';');
+        add(m.volume); if (m.issue) add('(' + m.issue + ')');
+        if (m.pages || m.articleNumber) add(':' + (m.articleNumber || m.pages)); end();
+      } else if (chapter) {
+        add('In: ' + (m.editor ? m.editor + ', ' + (m.editorIsPlural ? 'editors. ' : 'editor. ') : ''));
+        add(m.journal); add('. ' + (m.place ? m.place + ': ' : '') + (m.publisher || m.source || '') + '; ' + year + '.');
+        if (m.pages) add(' p. ' + m.pages + '.');
+      } else if (type === 'webpage' || type === 'social-media' || type === 'ai-chat') {
+        // Online resources need an actual access date. Never insert today's date.
+        add('[Internet]. ' + (m.publisher || m.source || '') + (m.publisher || m.source ? '; ' : '') + vd);
+        if (m.accessed) add(' [cited ' + m.accessed.replace(/, /g, ' ') + ']'); end();
+      } else {
+        add((m.place ? m.place + ': ' : '') + (m.publisher || m.institution || m.source || '') + '; ' + year + '.');
+        if (m.number) add(' Report No.: ' + m.number.replace(/^.*?No\.\s*/i, '') + '.');
+      }
+      if (m.doi) add(' doi: ' + m.doi + '.'); else if (m.url) add(' Available from: ' + m.url);
+    } else if (target === 'mla9') {
+      if (authors) add(period(authors) + ' ');
+      var quote = periodical || chapter || type === 'webpage' || type === 'social-media';
+      add(quote ? '“' + period(title) + '”' : title, !quote); if (!quote) end();
+      if (m.edition && book) add(' ' + m.edition + ',');
+      if (periodical || chapter || type === 'webpage') {
+        if (container || m.source) { add(' '); add(container || m.source, true); }
+        if (chapter && m.editor) add(', edited by ' + m.editor);
+        if (m.volume) add(', vol. ' + m.volume); if (m.issue) add(', no. ' + m.issue);
+        if (chapter && m.publisher) add(', ' + m.publisher);
+        add(', ' + mlaDate());
+        if (m.pages) add(', ' + (/[–-]/.test(m.pages) ? 'pp. ' : 'p. ') + m.pages);
+        else if (m.articleNumber) add(', article ' + m.articleNumber); end();
+      } else { if (m.publisher || m.source) add(' ' + (m.publisher || m.source) + ', ' + year + '.'); else add(' ' + year + '.'); }
+      link();
+    } else if (target === 'chicago') {
+      if (authors) add(period(authors) + ' '); add(year + '. ');
+      var quoted = periodical || chapter || type === 'webpage' || type === 'thesis' || type === 'social-media';
+      add(quoted ? '“' + period(title) + '”' : title, !quoted); if (!quoted) end();
+      if (m.edition && book) add(' ' + m.edition);
+      if (journal) {
+        add(' '); add(m.journal, true); if (m.volume) add(' ' + m.volume); if (m.issue) add(' (' + m.issue + ')');
+        if (m.pages || m.articleNumber) add(': ' + (m.articleNumber || m.pages)); end();
+      } else if (periodical || type === 'webpage') {
+        if (m.journal || m.source) { add(' '); add(m.journal || m.source, periodical); end(); }
+        if (fullDate() && fullDate() !== year) add(' ' + fullDate() + '.');
+      } else if (chapter) {
+        add(' In '); add(container, true); if (m.editor) add(', edited by ' + m.editor); if (m.pages) add(', ' + m.pages); end();
+        if (m.publisher) add(' ' + period(m.publisher));
+      } else if (type === 'thesis') add(' ' + (m.degree || 'Thesis') + ', ' + period(m.institution || ''));
+      else if (m.publisher || m.source) add(' ' + period(m.publisher || m.source));
+      if (m.accessed && /^n\.d\./i.test(year)) add(' Accessed ' + m.accessed + '.'); link();
+    } else { // Generic Harvard, deliberately not advertised as a named institutional variant.
+      if (authors) add(authors + ' '); add('(' + year + ') ');
+      var hQuote = periodical || chapter;
+      add(hQuote ? '‘' + title + '’' : title, !hQuote);
+      if (hQuote) { add(', '); add(m.journal || m.source, true); }
+      if (m.volume) add(', ' + m.volume); if (m.issue) add('(' + m.issue + ')');
+      if (m.pages) add(', pp. ' + m.pages); else if (m.articleNumber) add(', article ' + m.articleNumber);
+      if (m.edition) add('. ' + m.edition);
+      if (!periodical && (m.publisher || m.institution || m.source)) add('. ' + (m.place ? m.place + ': ' : '') + (m.publisher || m.institution || m.source)); end();
+      var hLink = m.doi ? 'https://doi.org/' + m.doi : m.url;
+      if (hLink) add(' Available at: ' + hLink + (m.accessed ? ' (Accessed: ' + m.accessed + ').' : ''));
+    }
+    return { line: runs.map(function(r) { return r.text; }).join(''), runs: runs };
+  }
   function render(m, target, number, authors, citationYear) {
-    if (!m || !m.title || (target !== 'apa7' && target !== 'ieee') || m.type === 'unknown' || m.type === 'legal') return null;
+    if (!m || !m.title || !PROFILES[target] || !TYPES[m.type] || MANUAL_TYPES.test(m.type)) return null;
+    if (m.noAuthor && target !== 'apa7' && target !== 'ieee') return null;
+    if (target !== 'apa7' && target !== 'ieee') return renderOtherStyle(m, target, number, authors, citationYear || m.year || 'n.d.');
     var runs = [], year = citationYear || m.year || 'n.d.';
     if (m.originalYear && year.indexOf('/') >= 0) year = m.year;
     var date = m.date && m.date.indexOf(m.year) === 0 ? year + m.date.slice(m.year.length) : (m.date || year);
     var journal = /^(?:journal-article|magazine-article|newspaper-article)$/.test(m.type);
     var chapter = /^(?:book-chapter|conference|dictionary-entry)$/.test(m.type);
     var report = /^(?:report|brochure|fact-sheet|press-release|white-paper|ethics-code)$/.test(m.type);
-    var book = /^(?:book|edited-book|manual)$/.test(m.type);
+    var book = BOOK_TYPES.test(m.type);
     var episode = /^(?:podcast-episode|tv-episode)$/.test(m.type);
     function add(t, italic) { if (t) runs.push({ text: String(t), italic: !!italic }); }
     function apaTitle(italic) {
@@ -367,7 +716,7 @@
       if (m.url) add(' [Online]. Available: ' + m.url);
     }
     if (target === 'apa7') {
-      var yearOnly = /^(?:journal-article|book|edited-book|book-chapter|dictionary-entry|conference|report|thesis|preprint|dataset|software|standard|patent|manual|unpublished)$/.test(m.type);
+      var yearOnly = /^(?:journal-article|book|edited-book|book-chapter|dictionary-entry|conference|report|thesis|preprint|dataset|software|standard|patent|manual|unpublished|diagnostic-manual|religious-work|audiobook)$/.test(m.type);
       var apaSourceDate = m.apaDate || (yearOnly ? m.year : m.date);
       if (apaSourceDate) date = apaSourceDate.indexOf(m.year) === 0 ? year + apaSourceDate.slice(m.year.length) : apaSourceDate;
       if (m.noAuthor) { add(m.title, m.type === 'webpage' || book); add('. (' + date + '). '); }
@@ -483,8 +832,10 @@
     if (runs.length) runs[runs.length - 1].text = runs[runs.length - 1].text.trimEnd();
     return { line: runs.map(function(r) { return r.text; }).join(''), runs: runs };
   }
-  var api = { TYPES: TYPES, enrich: enrich, render: render, issues: issues, abbreviate: abbreviate,
+  var api = { TYPES: TYPES, PROFILES: PROFILES, seedFromReference: seedFromReference,
+    bindingLine: bindingLine, validModel: validModel, formattingSpans: formattingSpans, validateReference: validateReference, enrich: enrich, render: render, issues: issues, abbreviate: abbreviate,
     ieeeDate: ieeeDate, titleCase: titleCase, apaDate: apaDate, splitSentence: splitSentence, parseNames: parseNames };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BibliographyEngine = api;
+  if (CE.registerBibliographyEngine) CE.registerBibliographyEngine(api);
 })(typeof window !== 'undefined' ? window : typeof self !== 'undefined' ? self : this);

@@ -144,10 +144,10 @@ function expandNumberRange(str) {
 
 function extractNumericCitations(text) {
   var results = [];
-  var bracketRegex = /\[(\d+(?:\s*[,\-–]\s*\d+)*)\]/g;
+  var bracketRegex = /\[(\d+(?:\s*[,\-–]\s*\d+)*)(?:,\s*((?:(?:pp?\.|ch\.|chap(?:ter)?\.?|sec(?:tion)?\.?|sect\.|fig(?:ure)?\.?|eq(?:uation)?\.?|para(?:graph)?s?\.?)\s*[^\[\]]+|\d{1,2}:\d{2}(?::\d{2})?(?:[–-]\d{1,2}:\d{2}(?::\d{2})?)?)))?\]/gi;
   var m;
   while ((m = bracketRegex.exec(text)) !== null) {
-    results.push({ raw: m[0], numbers: expandNumberRange(m[1]), position: m.index, form: 'bracket' });
+    results.push({ raw: m[0], numbers: expandNumberRange(m[1]), position: m.index, form: 'bracket', pageInfo: m[2] || null });
   }
   if (results.length === 0) {
     var parenRegex = /\((\d+(?:\s*[,\-–]\s*\d+)*)\)/g;
@@ -155,8 +155,9 @@ function extractNumericCitations(text) {
       results.push({ raw: m[0], numbers: expandNumberRange(m[1]), position: m.index, form: 'paren' });
     }
   } else {
-    // IEEE's own actual convention for a citation RANGE is two separate bracket tokens joined by
-    // a dash — "[4]–[7]" — not a single bracket with the range written inside it ("[4-7]", which
+    // Accept legacy ranges as input. The 2025 IEEE guide asks writers to list every number
+    // individually; validation below suggests that spelling without losing range membership.
+    // Older ranges use two separate bracket tokens joined by a dash — "[4]–[7]" — rather than ("[4-7]", which
     // the regex above already handles but which real documents essentially never use). Without
     // this, "[4]–[7]" parses as two INDEPENDENT single-number citations, "[4]" and "[7]" — [5]
     // and [6] never get expanded in, silently vanish from citedness tracking, and the two
@@ -167,7 +168,7 @@ function extractNumericCitations(text) {
       if (prev.form !== 'bracket' || cur.form !== 'bracket') continue;
       var between = text.slice(prev.position + prev.raw.length, cur.position);
       if (!/^\s*[-–]\s*$/.test(between)) continue;
-      if (prev.numbers.length !== 1 || cur.numbers.length !== 1) continue;
+      if (prev.numbers.length !== 1 || cur.numbers.length !== 1 || prev.pageInfo || cur.pageInfo) continue;
       var a = prev.numbers[0], b = cur.numbers[0];
       if (b <= a) continue; // not an ascending range — leave both as independent citations
       var merged = [];
@@ -678,7 +679,7 @@ function looksLikeFullCalendarDate(text) {
   return MONTH_DAY_YEAR_RE.test(text || '') || DAY_MONTH_YEAR_RE.test(text || '');
 }
 
-function extractAuthorPageCitations(text) {
+function extractAuthorPageCitations(text, references, referenceStyleId) {
   // MLA-style (Author Page) or (Author Page-Page) or (Author, Page) - no year
   var citations = [];
   var parenRegex = /\(((?:[^()]|\([^()]*\))+?)\)/g;
@@ -696,6 +697,20 @@ function extractAuthorPageCitations(text) {
         var cleanAuthor = authorPart.replace(/\s*,?\s*et\s+al\.?/i, '').trim();
         var authors = splitOnSeparators(cleanAuthor);
         parsedParts.push({ raw: part, authors: authors, authorCount: hasEtAl ? Math.max(authors.length,3) : authors.length, firstAuthor: authors[0] || cleanAuthor, page: pm[2], hasEtAl: hasEtAl });
+      } else if (references && references.length && !/\d/.test(part)) {
+        // MLA also allows author-only citations for unpaginated works. Require an exact
+        // known author sequence so ordinary parenthetical prose is not manufactured into
+        // a citation. Unknown unpaginated/title-only cases remain manual.
+        var hasEtAl2 = /\s+et\s+al\.?$/i.test(part);
+        var clean2 = part.replace(/\s+et\s+al\.?$/i, '').trim();
+        var candidateAuthors = splitOnSeparators(clean2);
+        var exact = references.some(function(ref) {
+          var names = ref.isInstitutional ? [ref.firstAuthor] : (ref.authors || []).filter(function(a) { return !/^et\s+al\.?$/i.test(a); }).map(function(a) { return surnameOf(a, ref.styleId || referenceStyleId || 'mla9'); });
+          if (!names.length) return false;
+          if (hasEtAl2) return normalizeKeyName(clean2, ref.isInstitutional) === normalizeKeyName(names[0], ref.isInstitutional);
+          return candidateAuthors.length <= 2 && candidateAuthors.length === names.length && candidateAuthors.every(function(a, i) { return normalizeKeyName(a, ref.isInstitutional) === normalizeKeyName(names[i], ref.isInstitutional); });
+        });
+        if (exact) parsedParts.push({ raw: part, authors: candidateAuthors, authorCount: hasEtAl2 ? 3 : candidateAuthors.length, firstAuthor: candidateAuthors[0] || clean2, page: null, hasEtAl: hasEtAl2 });
       }
     });
     if (parsedParts.length > 0) citations.push({ type: 'parenthetical', raw: m[0], content: content, parts: parsedParts, position: m.index });
@@ -724,16 +739,16 @@ var STYLES = {
     authorForm: 'all-inverted',
   },
   chicago: {
-    id: 'chicago', name: 'Chicago (Author-Date)', family: 'author-date',
-    etAlThreshold: 4, sep: 'and', altSep: '&',
+    id: 'chicago', name: 'Chicago 18 (Author-Date)', family: 'author-date',
+    etAlThreshold: 3, sep: 'and', altSep: '&',
     refOrder: 'alphabetical', yearInParens: false, titleQuote: 'double',
-    authorForm: 'first-inverted', refListFullUpTo: 10,
+    authorForm: 'first-inverted', refListFullUpTo: 6, refListTruncateTo: 3,
   },
   mla9: {
     id: 'mla9', name: 'MLA 9th Edition', family: 'author-page',
     etAlThreshold: 3, sep: 'and', altSep: '&',
     refOrder: 'alphabetical', titleQuote: 'double',
-    authorForm: 'first-inverted',
+    authorForm: 'first-inverted', refListFullUpTo: 2, refListTruncateTo: 1,
   },
   ieee: {
     id: 'ieee', name: 'IEEE', family: 'numeric',
@@ -1121,7 +1136,7 @@ function extractTitle(line, style, authorEndIdx) {
     if (dq) return dq[1].replace(/[,.]$/, '').trim();
   }
   if (style.titleQuote === 'single') {
-    var sq = after.match(/'([^']+)'/);
+    var sq = after.match(/[‘']([^’']+)[’']/);
     if (sq) return sq[1].trim();
   }
   var cleaned = after.replace(/^[.\s]+/, '');
@@ -1317,7 +1332,7 @@ function extractBibliographicFields(raw, title) {
 function parseAuthorDateOrPageStyleLine(raw, style, styleId) {
   var yearMatch, authorSeg2, year2, titleStartIdx;
   if (style.yearInParens === false) {
-    yearMatch = raw.match(/^(.*?)\.\s*(\d{4}[a-z]?)\.\s/);
+    yearMatch = raw.match(/^(.*?)\.\s*(\d{4}[a-z]?(?:[–-](?:\d{4}|present))?|n\.d\.)\.?\s/);
     if (yearMatch) { authorSeg2 = yearMatch[1]; year2 = yearMatch[2]; titleStartIdx = yearMatch.index + yearMatch[0].length; }
   } else {
     yearMatch = raw.match(REFERENCE_DATE_RE);
@@ -1330,6 +1345,19 @@ function parseAuthorDateOrPageStyleLine(raw, style, styleId) {
       var ym = raw.match(/,\s*(19|20)\d{2}\b/) || raw.match(/\b(19|20)\d{2}\b/);
       year2 = ym ? ym[0].replace(/^,\s*/, '') : null;
       titleStartIdx = dq2.index;
+    } else if (styleId === 'mla9') {
+      // Independent books have no quotation marks or date after the author in MLA.
+      // Skip periods belonging to initials when locating the author/title boundary.
+      var boundary = /\.\s+(?=[\p{Lu}\p{Lo}])/gu, found;
+      while ((found = boundary.exec(raw))) {
+        var beforeBoundary = raw.slice(0, found.index);
+        if (/(?:^|\s)\p{Lu}$/u.test(beforeBoundary) && (/^\p{Lu}\.(?:\s|$)/u.test(raw.slice(found.index + found[0].length)) || /\b(?:and|dan)\s+[^,]+$/i.test(beforeBoundary))) continue;
+        authorSeg2 = raw.slice(0, found.index); titleStartIdx = found.index + found[0].length;
+        var years = raw.slice(titleStartIdx).split(/https?:\/\/|\bdoi:/i)[0].match(/\b[12]\d{3}\b/g);
+        year2 = years && years.length ? years[years.length - 1] : null;
+        break;
+      }
+      if (!authorSeg2) return null;
     } else {
       return null;
     }
@@ -1876,6 +1904,16 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
   citeInstitutional = !!ref.isInstitutional;
 
   if (!citeInstitutional) {
+    // An unpunctuated "Wright and Wolfe" can resemble ONE organization to extraction.
+    // Reinterpret it as personal coauthors only against an exact known author sequence.
+    // Keep its score equal to a literal organization match so a genuine collision abstains.
+    if ((!allAuthorNames || allAuthorNames.length === 1) && /\s+(?:and|dan)\s+/i.test(firstAuthor)) {
+      var splitNames = splitOnSeparators(firstAuthor);
+      if (splitNames.length > 1) {
+        var splitMatch = authorDateCandidateScore(splitNames[0], splitNames, ref, styleId, acronymMap, options);
+        if (splitMatch && !splitMatch.reviewOnly) return { score: 1, confidence: 1, reason: 'exact-author-prefix' };
+      }
+    }
     var citeSurname = normalizeKeyName(surnameFromCitationToken(firstAuthor), false);
     var refSurname = normalizeKeyName(surnameOf(ref.firstAuthor, styleId), false);
     if (citeSurname && citeSurname === refSurname) {
@@ -2006,11 +2044,26 @@ function findAuthorDateReferenceMatches(firstAuthor, allAuthorNames, year, refer
 }
 
 // ---------- MAIN VALIDATOR ----------
-function MultiFormatValidator(articleText, referenceText, styleId) {
+// Registered by bibliography-engine.js after engine.js has loaded. Node can load it lazily
+// after module.exports is complete, avoiding a converter/validator dependency cycle.
+var bibliographyProvider = null;
+function registerBibliographyEngine(provider) { bibliographyProvider = provider; }
+function getBibliographyEngine() {
+  if (!bibliographyProvider && typeof module !== 'undefined' && module.exports) bibliographyProvider = require('./bibliography-engine.js');
+  return bibliographyProvider;
+}
+function bibliographyStatusText(result) {
+  var b = result && result.bibliographyValidation;
+  if (!b) return 'Pemeriksaan bibliografi bersama belum dimuat.';
+  return b.profile + ': ' + b.structured + ' referensi diperiksa menurut jenis sumber, ' + b.basic + ' dengan aturan umum, ' + b.manual + ' perlu tinjauan manual, ' + b.unparsed + ' belum terbaca. Pemeriksaan format tidak membuktikan keberadaan sumber atau kesesuaian sumber dengan klaim naskah.';
+}
+
+function MultiFormatValidator(articleText, referenceText, styleId, options) {
   this.articleText = articleText;
   this.referenceText = referenceText;
   this.styleId = styleId;
   this.style = STYLES[styleId];
+  this.options = options || {};
   this.errors = [];
   this.warnings = [];
   this.suggestions = [];
@@ -2050,6 +2103,7 @@ MultiFormatValidator.prototype.annotateLocations = function() {
 };
 
 MultiFormatValidator.prototype.validate = function() {
+  this.errors = []; this.warnings = []; this.suggestions = []; this.institutionalNotes = [];
   this.buildAcronymMap();
   this.citationCounts = new Map(); // ref object -> number of times it's actually cited (for analytics)
   var parsed = parseReferenceListDetailed(this.referenceText, this.styleId);
@@ -2078,13 +2132,14 @@ MultiFormatValidator.prototype.validate = function() {
     this.citations = extractAuthorDateCitations(this.articleText).filter(afterIntro);
     this.validateAuthorDate();
   } else if (family === 'author-page') {
-    this.citations = extractAuthorPageCitations(this.articleText).filter(afterIntro);
+    this.citations = extractAuthorPageCitations(this.articleText, this.references, this.styleId).filter(afterIntro);
     this.validateAuthorPage();
   }
 
   if (family === 'author-date' || family === 'author-page') {
     this.validateCitationFormat();
   }
+  if (family === 'numeric') this.validateNumericCitationFormat();
 
   this.validateInstitutionalConsistency();
   this.validateReferenceOrdering();
@@ -2130,6 +2185,7 @@ MultiFormatValidator.prototype.validate = function() {
     errors: this.errors, warnings: this.warnings, suggestions: this.suggestions,
     citations: this.citations, references: this.references, styleId: this.styleId,
     parseStats: this.parseStats, failedLines: this.failedLines, analytics: analytics,
+    bibliographyValidation: this.bibliographyValidation,
   };
 };
 
@@ -2179,12 +2235,24 @@ MultiFormatValidator.prototype.validateNumeric = function() {
     }
   });
 
-  // author-list length / et al. suggestion in reference list (ICMJE: 6+ -> et al.)
+  // Source-specific author rules are shared with the converter through the bibliography
+  // provider. Keep the old fallback only for consumers that deliberately omit that module.
+  if (getBibliographyEngine()) return;
+  // author-list length / et al. suggestion in reference list
   var threshold = this.style.refListFullUpTo;
   this.references.forEach(function(r) {
     if (!r.isInstitutional && r.authorCount > threshold) {
       self.suggestions.push({ title: 'Daftar penulis panjang', description: 'Referensi "' + (r.firstAuthor||'-') + '" memiliki ' + r.authorCount + ' penulis. Untuk ' + self.style.name + ', umumnya cukup cantumkan ' + threshold + ' penulis pertama diikuti "et al."', code: r.raw.substring(0, 150), severity: 'suggestion' });
     }
+  });
+};
+
+MultiFormatValidator.prototype.validateNumericCitationFormat = function() {
+  if (this.styleId !== 'ieee') return;
+  var self = this;
+  this.citations.forEach(function(c) {
+    if (c.form !== 'bracket') self.errors.push({ title: 'Kurung sitasi IEEE', description: 'IEEE memakai kurung siku, misalnya [1].', code: c.raw, severity: 'error' });
+    if (c.numbers.length > 1) self.suggestions.push({ title: 'Kelompok sitasi IEEE', description: 'IEEE Reference Guide 2025 meminta setiap nomor ditulis terpisah, misalnya ' + c.numbers.map(function(n) { return '[' + n + ']'; }).join(', ') + '. Rentang lama tetap dibaca agar sumber tidak hilang.', code: c.raw, severity: 'suggestion' });
   });
 };
 
@@ -3005,6 +3073,22 @@ var UNIVERSAL_FIELD_LABELS = { firstAuthor: 'nama penulis', year: 'tahun terbit'
 
 MultiFormatValidator.prototype.validateReferenceCompleteness = function() {
   var self = this;
+  var provider = getBibliographyEngine();
+  if (provider) {
+    this.bibliographyValidation = { profile: provider.PROFILES[this.styleId].name,
+      structured: 0, basic: 0, manual: 0, unparsed: this.parseStats.failedCount, types: {} };
+    this.references.forEach(function(r) {
+      var hints = (self.options.referenceDetails || []).filter(function(d) { return d.line === r.raw; });
+      var checked = provider.validateReference(r, self.styleId, { details: hints.length === 1 ? hints[0] : null, metadata: self.options.metadata });
+      r.bibliographicType = checked.model.type || 'unknown';
+      r.bibliographyCoverage = checked.coverage;
+      r.bibliographicModel = checked.model;
+      self.bibliographyValidation[checked.coverage]++;
+      self.bibliographyValidation.types[r.bibliographicType] = (self.bibliographyValidation.types[r.bibliographicType] || 0) + 1;
+      checked.diagnostics.forEach(function(d) { (d.severity === 'error' ? self.errors : self.suggestions).push(d); });
+    });
+    return;
+  }
   this.references.forEach(function(r) {
     if (r.sourceType === 'unknown') return; // tidak yakin jenisnya -> tidak cukup dasar untuk menuduh field tertentu hilang
     var missing = [];
@@ -3558,7 +3642,8 @@ function isLikelySentenceCaseViolationForTitleCaseStyle(text) {
 }
 
 var ITALIC_ON = { apa7: true, harvard: true, chicago: true, mla9: true, ieee: true, vancouver: false };
-var CASE_MODE = { apa7: 'sentence', harvard: 'sentence', chicago: 'sentence', mla9: 'title', ieee: null, vancouver: 'sentence' };
+var CASE_MODE = { apa7: 'sentence', harvard: 'sentence', chicago: 'title', mla9: 'title', ieee: null, vancouver: 'sentence' };
+var BOOK_CASE_TYPES = /^(?:book|edited-book|book-chapter|manual|diagnostic-manual|religious-work|software|standard|video)$/;
 
 function checkReferenceFormatting(richLines, references, styleId) {
   var issues = [];
@@ -3566,13 +3651,32 @@ function checkReferenceFormatting(richLines, references, styleId) {
   var caseMode = CASE_MODE[styleId];
 
   references.forEach(function(ref, i) {
-    var richLine = richLines[i];
+    // Parsed references can skip an unreadable line. Do not apply reference i's formatting
+    // rules to unrelated paragraph i; require an actual text match.
+    var richLine = richLines.find(function(line) { return richLineToText(line).trim() === ref.raw.trim(); });
     if (!richLine) return;
     var raw = ref.raw;
     var lineText = richLineToText(richLine);
     if (lineText.trim().length === 0) return;
 
     var titleSpan = ref.title ? findSpan(raw, ref.title) : null;
+
+    var provider = getBibliographyEngine();
+    if (provider && styleId !== 'vancouver') {
+      var model = ref.bibliographicModel || provider.validateReference(ref, styleId).model;
+      var spans = provider.formattingSpans(model, styleId, raw);
+      spans.forEach(function(span) {
+        var coverage = italicCoverage(richLine, span.start, span.end);
+        if ((span.italic && coverage < 0.6) || (!span.italic && coverage > 0.4)) issues.push({ ref: ref, severity: 'suggestion', field: 'italic',
+          message: (span.field === 'container' ? 'Judul karya induk' : span.field === 'volume' ? 'Volume' : 'Judul') + ' "' + span.text + '" ' + (span.italic ? 'seharusnya dicetak miring.' : 'seharusnya tidak dicetak miring untuk jenis sumber ini.') });
+      });
+      if (model && model.title && spans.length) {
+        var mode = styleId === 'ieee' ? (BOOK_CASE_TYPES.test(model.type) ? 'title' : null) : caseMode;
+        if ((mode === 'sentence' && isLikelyTitleCase(model.title)) || (mode === 'title' && isLikelySentenceCaseViolationForTitleCaseStyle(model.title))) issues.push({ ref: ref, severity: 'suggestion', field: 'case',
+          message: 'Judul "' + model.title + '" perlu diperiksa untuk ' + (mode === 'sentence' ? 'sentence case' : 'title case') + '. Nama diri, singkatan, dan kapitalisasi bahasa sumber harus dipertahankan.' });
+      }
+      return;
+    }
 
     if (styleId === 'vancouver') {
       var wholeCov = italicCoverage(richLine, 0, raw.length);
@@ -3805,6 +3909,9 @@ var YearRange = {
 };
 
 var CitationEngine = {
+  registerBibliographyEngine: registerBibliographyEngine,
+  getBibliographyEngine: getBibliographyEngine,
+  bibliographyStatusText: bibliographyStatusText,
   MultiFormatValidator: MultiFormatValidator,
   normalizeKeyName: normalizeKeyName,
   acronymOf: acronymOf,

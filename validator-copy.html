@@ -299,7 +299,7 @@
         <option value="auto">🔍 Auto-detect</option>
         <option value="apa7">APA 7th Edition</option>
         <option value="mla9">MLA 9th Edition</option>
-        <option value="chicago">Chicago (Author-Date)</option>
+        <option value="chicago">Chicago 18 (Author-Date)</option>
         <option value="harvard">Harvard</option>
         <option value="ieee">IEEE</option>
         <option value="vancouver">Vancouver</option>
@@ -390,6 +390,8 @@
   </div>
 
   <div class="results" id="results">
+    <div id="bibliographyStatusBanner" class="privacy-note" role="status"></div>
+    <details class="panel" id="bibliographyReviewPanel"><summary>Tinjau Jenis Sumber dan Detail Bibliografi</summary><p>Setelah validasi, periksa sumber yang ambigu di sini. Isi hanya informasi dari sumber asli, lalu jalankan validasi ulang. Detail berlaku untuk teks referensi yang sama persis.</p><div id="bibliographyReview"></div></details>
     <div id="parseStatusBanner" role="status" aria-live="polite"></div>
     <div class="summary-grid" id="summaryGrid"></div>
 
@@ -541,10 +543,12 @@ initOnboarding({
   ],
 });
 </script>
-<script src="engine.js?v=14"></script>
+<script src="engine.js?v=17"></script>
+<script src="bibliography-engine.js?v=2"></script>
+<script src="bibliography-review.js?v=1"></script>
 <script src="i18n-translate.js?v=1"></script>
 <script src="journal-rules-engine.js?v=1"></script>
 <script src="scopus-engine.js?v=1"></script>
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 </body>
 </html>

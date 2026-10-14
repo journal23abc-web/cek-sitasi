@@ -516,44 +516,7 @@
   // authors from this record. DOCX exports persist these records, bound to the exact displayed
   // reference text; a changed entry cannot accidentally reuse stale metadata.
   function bibliographyFromRef(ref, sourceStyleId) {
-    var effectiveStyle = ref.styleId || sourceStyleId;
-    var authors = canonicalAuthorsFromRef(ref, effectiveStyle);
-    var ellipsis = (ref.authors || []).some(isEllipsisTruncatedFragment);
-    authors = authors.map(function(a) { return { last: a.last.replace(/^(?:\.\s*\.\s*\.|…)\s*/u, ''), given: a.given, institutional: a.institutional }; });
-    var truncated = (ref.authors || []).some(isEtAlFragment);
-    var model = {
-      authors: authors, completeAuthors: !truncated && !ellipsis, ellipsis: ellipsis,
-      authorCount: ellipsis ? Math.max(21, ref.authorCount || 0) : ref.authorCount,
-      year: ref.year, title: ref.title, journal: ref.journal, volume: ref.volume,
-      issue: ref.issue, pages: ref.pages, articleNumber: ref.articleNumber, doi: ref.doi,
-      publisher: ref.publisher, editor: ref.editor, editorIsPlural: ref.editorIsPlural,
-      type: ref.sourceType, isBookChapter: ref.isBookChapter || false,
-      url: null, originalStyle: effectiveStyle,
-      ambiguousLocator: false, publicationDate: null,
-    };
-    var url = ref.raw.match(/https?:\/\/[^\s]+/ig);
-    if (url) model.url = url.filter(function(u) { return !/^https?:\/\/(?:dx\.)?doi\.org\//i.test(u); })[0] || null;
-    // Scope the fallback to the source details, so numbers in an article title cannot become
-    // volume/page fields. Handles ranges beginning at page 1, which the shared parser misses.
-    var titleAt = ref.title ? ref.raw.indexOf(ref.title) : -1;
-    var tail = titleAt >= 0 ? ref.raw.slice(titleAt + ref.title.length) : '';
-    if (STYLES[effectiveStyle].family === 'author-date') {
-      var suffix = tail.match(/,\s*(\d+)\s*(?:\(([^()]+)\))?\s*,\s*(Article\s+)?([A-Za-z]?\d+(?:\s*[-–]\s*\d+)?)\.?\s*(?:https?:\/\/\S+)?\s*$/i);
-      if (suffix) {
-        model.volume = suffix[1]; model.issue = suffix[2] || null;
-        var locator = suffix[4].replace(/\s*[-–]\s*/g, '–');
-        if (suffix[3] || /^e\d+/i.test(locator) || (!/[-–]/.test(locator) && locator.length >= 5)) {
-          model.articleNumber = locator; model.pages = null;
-        } else { model.pages = locator; model.articleNumber = null; model.ambiguousLocator = !/[-–]/.test(locator); }
-      }
-    }
-    if (STYLES[effectiveStyle].family === 'numeric' && model.year) {
-      var month = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?';
-      var date = tail.split(/\bdoi\s*:|https?:\/\//i)[0].match(new RegExp('(?:^|,\\s*)(' + month + '(?:/' + month + ')?\\s+(?:\\d{1,2},\\s*)?' + model.year + ')(?=[.,\\s]|$)', 'i'));
-      if (date) model.publicationDate = date[1];
-    }
-    if (model.pages) model.pages = model.pages.replace(/-/g, '–');
-    return model;
+    return BE.seedFromReference(ref, sourceStyleId, canonicalAuthorsFromRef(ref, sourceStyleId));
   }
 
   function restoreBibliography(refs, metadata, sourceStyleId, details) {
@@ -588,7 +551,9 @@
     var items = CE.extractNumericCitations(text).filter(function(c) { return c.form === 'bracket'; });
     // A quoted page locator belongs to its reference, rather than a second reference number.
     var re = /\[(\d+)\s*,\s*((?:pp?\.|Ch\.|Sect\.|para\.|Fig\.|Table|Thm\.|Lemma|Algorithm|Appendix|eq\.)\s*[^\]\r\n]+|\d+:\d+(?::\d+)?)\]/g, match;
-    while ((match = re.exec(text))) items.push({ raw: match[0], numbers: [+match[1]], position: match.index, form: 'bracket', pageInfo: normalizePageInfo(match[2]).replace(/\s*[-–]\s*/g, '–') });
+    while ((match = re.exec(text))) {
+      if (!items.some(function(c) { return c.position === match.index && c.raw === match[0]; })) items.push({ raw: match[0], numbers: [+match[1]], position: match.index, form: 'bracket', pageInfo: normalizePageInfo(match[2]).replace(/\s*[-–]\s*/g, '–') });
+    }
     items.sort(function(a, b) { return a.position - b.position; });
     var groups = [];
     items.forEach(function(c) {
@@ -984,7 +949,7 @@
 
     var referenceIssues = [];
     referenceLines.forEach(function(rl) {
-      if ((targetStyleId === 'apa7' || targetStyleId === 'ieee') && !rl.fullyFormatted) referenceIssues.push({ raw: rl.original, note: 'Jenis/struktur sumber belum dikenali sepenuhnya. Detail asli dipertahankan; format bibliografi perlu diperiksa manual.' });
+      if (!rl.fullyFormatted) referenceIssues.push({ raw: rl.original, note: 'Jenis/struktur sumber belum dikenali sepenuhnya. Detail asli dipertahankan; format bibliografi perlu diperiksa manual.' });
       if (targetStyleId === 'apa7' && !rl.model.completeAuthors && !rl.model.ellipsis) referenceIssues.push({ raw: rl.original, note: 'Daftar penulis sumber terpotong. APA 7 memerlukan nama lengkap; unggah DOCX keluaran alat ini yang menyimpan metadata, atau lengkapi dari sumber asli.' });
       BE.issues(rl.model, targetStyleId).forEach(function(note) { referenceIssues.push({ raw: rl.original, note: note }); });
       if (rl.model.ambiguousLocator) referenceIssues.push({ raw: rl.original, note: 'Angka tunggal pada sumber belum membedakan halaman dan nomor artikel. Angka dipertahankan tanpa menebak; jika ini nomor artikel, tambahkan kata Article pada referensi sumber lalu konversi ulang.' });
@@ -1058,10 +1023,11 @@
     var sourceTruncated = ref.bibliography ? !ref.bibliography.completeAuthors && !ref.bibliography.ellipsis : (ref.authors || []).length > 0 && isEtAlFragment(ref.authors[ref.authors.length - 1]);
     var threshold = style.refListFullUpTo;
     var list = canon, truncated = sourceTruncated;
-    if (threshold && n > threshold) { list = canon.slice(0, threshold); truncated = true; }
+    if (threshold && n > threshold) { list = canon.slice(0, style.refListTruncateTo || threshold); truncated = true; }
     var rendered = list.map(function(a, i) { return a.institutional ? a.last : renderAuthorForStyle(a.last, a.given, targetStyleId, i === 0 ? 'first' : 'other'); });
     if (truncated) return rendered.join(', ') + ', et al.';
     if (rendered.length === 1) return rendered[0];
+    if (style.authorForm === 'vancouver') return rendered.join(', ');
     if (style.family === 'numeric') {
       return rendered.length === 2 ? rendered[0] + ' and ' + rendered[1] : rendered.slice(0, -1).join(', ') + ', and ' + rendered[rendered.length - 1];
     }
@@ -1070,7 +1036,7 @@
     // final "&" — even for exactly two authors ("Smith, J., & Jones, K."), unlike the in-text
     // citation form ("Smith & Jones, 2020") which correctly omits it. Harvard/Chicago's "and"
     // separator convention is left as-is (not the same documented requirement).
-    if (rendered.length === 2) return sep === '&' ? rendered[0] + ', ' + sep + ' ' + rendered[1] : rendered[0] + ' ' + sep + ' ' + rendered[1];
+    if (rendered.length === 2) return sep === '&' || style.authorForm === 'first-inverted' ? rendered[0] + ', ' + sep + ' ' + rendered[1] : rendered[0] + ' ' + sep + ' ' + rendered[1];
     return rendered.slice(0, -1).join(', ') + ', ' + sep + ' ' + rendered[rendered.length - 1];
   }
 
