@@ -251,6 +251,96 @@ test('an APA journal with a season and missing volume keeps its actual issue and
   assert.equal(refText(a), ref);
   assert.equal(a.referenceLines[0].model.volume, null);
 });
+
+test('IEEE proceedings without editors or pages use the chapter template, retaining only known facts', () => {
+  const raw = '[1] S. Mathias and P. Bhattacharyya, “ASAP++: Enriching the ASAP automated essay grading dataset with essay attribute scores,” in Proc. Eleventh Int. Conf. Language Resources and Evaluation (LREC 2018), Miyazaki, Japan, 2018. [Online]. Available: https://aclanthology.org/L18-1187/';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7');
+  const r = a.referenceLines[0];
+  assert.equal(r.line, 'Mathias, S., & Bhattacharyya, P. (2018). ASAP++: Enriching the ASAP automated essay grading dataset with essay attribute scores. In Proceedings of the Eleventh International Conference on Language Resources and Evaluation (LREC 2018). https://aclanthology.org/L18-1187/');
+  assert.equal(r.model.type, 'conference'); assert.ok(r.fullyFormatted);
+  assert.equal(r.model.conferenceLocation, 'Miyazaki, Japan');
+  assert.equal(r.model.pages, null); assert.equal(r.model.publisher, null); assert.equal(r.model.editor, null);
+  assert.ok(italic(r, r.model.journal)); assert.ok(!italic(r, r.model.title));
+  assert.ok(a.referenceIssues.some(x => /Editor buku\/prosiding/.test(x.note)));
+  assert.ok(a.referenceIssues.some(x => /Penerbit buku\/prosiding/.test(x.note)));
+  const i = CC.convert(a.convertedArticle, refText(a), 'apa7', 'ieee', { metadata: a.metadata });
+  assert.ok(refText(i).includes('Miyazaki, Japan, 2018.'));
+});
+test('a proceedings title year and a city/state/country stay distinct from year and pages', () => {
+  const raw = '[1] J. Smith, "A study," in Proc. 2016 Conf. Empirical Methods Natural Language Processing, Austin, TX, USA, 2016, pp. 18–21.';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7'), m = a.referenceLines[0].model;
+  assert.equal(m.journal, 'Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing');
+  assert.equal(m.year, '2016'); assert.equal(m.conferenceLocation, 'Austin, TX, USA'); assert.equal(m.pages, '18–21');
+  assert.equal(refText(a), 'Smith, J. (2016). A study. In Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing (pp. 18–21).');
+});
+test('Mexico City, Mexico is separated before resolving the exact BEA proceedings name', () => {
+  const raw = '[1] M. Stahl, L. Biermann, A. Nehring, and H. Wachsmuth, "Exploring LLM prompting strategies for joint essay scoring and feedback generation," in Proc. 19th Workshop Innovative Use NLP for Building Educational Applications (BEA 2024), Mexico City, Mexico, 2024, pp. 283–298.';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7'), m = a.referenceLines[0].model;
+  assert.equal(m.conferenceLocation, 'Mexico City, Mexico');
+  assert.equal(m.journal, 'Proceedings of the 19th Workshop on Innovative Use of NLP for Building Educational Applications (BEA 2024)');
+  assert.ok(!refText(a).includes('Mexico')); assert.ok(!refText(a).includes('Proc.'));
+});
+test('a book-series chapter keeps its explicit volume and event location through the archive', () => {
+  const raw = '[1] M. Uto and M. Okano, "Robust neural automated essay scoring using item response theory," in Artificial Intelligence in Education, LNCS 12164, Ifrane, Morocco, 2020, pp. 549–561, doi: 10.1007/978-3-030-52237-7_44.';
+  let a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7');
+  assert.equal(a.referenceLines[0].model.type, 'book-chapter');
+  assert.equal(a.referenceLines[0].model.seriesVolume, '12164', 'The converter must not silently correct source metadata');
+  assert.equal(refText(a), 'Uto, M., & Okano, M. (2020). Robust neural automated essay scoring using item response theory. In Lecture notes in computer science: Vol. 12164. Artificial Intelligence in Education (pp. 549–561). https://doi.org/10.1007/978-3-030-52237-7_44');
+  const expected = refText(a);
+  for (let cycle = 0; cycle < 5; cycle++) {
+    const i = CC.convert(a.convertedArticle, refText(a), 'apa7', 'ieee', { metadata: a.metadata });
+    assert.ok(refText(i).includes('12164')); assert.ok(refText(i).includes('Ifrane, Morocco'));
+    a = CC.convert(i.convertedArticle, refText(i), 'ieee', 'apa7', { metadata: i.metadata });
+    assert.equal(refText(a), expected);
+  }
+});
+test('AAAI volume/issue proceedings use the APA periodical template', () => {
+  const raw = '[1] Y. Tay, M. C. Phan, L. A. Tuan, and S. C. Hui, "SkipFlow: Incorporating neural coherence features for end-to-end automatic text scoring," in Proc. AAAI Conf. Artificial Intelligence, vol. 32, no. 1, 2018, pp. 5948–5955.';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7');
+  assert.equal(refText(a), 'Tay, Y., Phan, M. C., Tuan, L. A., & Hui, S. C. (2018). SkipFlow: Incorporating neural coherence features for end-to-end automatic text scoring. Proceedings of the AAAI Conference on Artificial Intelligence, 32(1), 5948–5955.');
+  assert.equal(a.referenceLines[0].model.type, 'journal-article');
+  assert.ok(italic(a.referenceLines[0], '32'));
+});
+test('verified exact journal aliases expand, while an unrelated abbreviation remains unchanged', () => {
+  const raw = '[1] M. Uto, "A study," IEEE Trans. Learning Technologies, vol. 16, no. 6, pp. 983–1000, 2023.';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7');
+  assert.equal(refText(a), 'Uto, M. (2023). A study. IEEE Transactions on Learning Technologies, 16(6), 983–1000.');
+  assert.ok(!a.referenceIssues.some(x => /berupa singkatan/.test(x.note)));
+  const i = CC.convert(a.convertedArticle, refText(a), 'apa7', 'ieee', { metadata: a.metadata });
+  assert.ok(refText(i).includes('IEEE Trans. Learn. Technol.'));
+  const unknown = CC.convert('Evidence [1].', raw.replace('IEEE Trans. Learning Technologies', 'Int. J. Unknown'), 'ieee', 'apa7');
+  assert.ok(refText(unknown).includes('Int. J. Unknown')); assert.ok(unknown.referenceIssues.some(x => /berupa singkatan/.test(x.note)));
+});
+test('old exact-bound archives with a misclassified proceedings container are upgraded without losing hidden authors', () => {
+  const raw = '[1] A. Adams, B. Baker, C. Chen, D. Davis, E. Evans, F. Foster, and G. Garcia, "A study," in Proc. Research Conf., Paris, France, 2024, pp. 1–4.';
+  const initial = CC.convert('Evidence [1].', raw, 'ieee', 'apa7');
+  const m = JSON.parse(JSON.stringify(initial.metadata.entries[0].model));
+  m.type = 'journal-article'; m.journal = 'in Proc. Research Conf., Paris, France'; delete m.ieeeContainerVersion;
+  const line = 'Adams, A., Baker, B., Chen, C., Davis, D., Evans, E., Foster, F., & Garcia, G. (2024). A study. in Proc. Research Conf., Paris, France, 1–4.';
+  const a = CC.convert('Evidence (Adams et al., 2024).', line, 'apa7', 'apa7', { metadata: { version: 1, styleId: 'apa7', entries: [{ line, model: m }] } });
+  assert.equal(a.restoredMetadataCount, 1); assert.equal(a.referenceLines[0].model.type, 'conference');
+  assert.equal(a.referenceLines[0].model.authors.length, 7); assert.ok(refText(a).includes('Garcia, G.'));
+  assert.ok(refText(a).includes('In Proc. Research Conf. (pp. 1–4).'));
+});
+test('explicit verified APA title and container case survive reversal without corrupting acronyms', () => {
+  const raw = '[1] J. Smith, "Research on OpenAI and ESOL," in Research Methods in Education, LNCS 12, Paris, France, 2024, pp. 1–4.';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7', { referenceDetails: [{ line: raw, apaTitle: 'Research on OpenAI and ESOL', apaContainerTitle: 'Research methods in education', editor: 'A. Doe & B. Jones', publisher: 'Example Press' }] });
+  assert.equal(refText(a), 'Smith, J. (2024). Research on OpenAI and ESOL. In A. Doe & B. Jones (Eds.), Lecture notes in computer science: Vol. 12. Research methods in education (pp. 1–4). Example Press.');
+  const i = CC.convert(a.convertedArticle, refText(a), 'apa7', 'ieee', { metadata: a.metadata });
+  const back = CC.convert(i.convertedArticle, refText(i), 'ieee', 'apa7', { metadata: i.metadata });
+  assert.equal(refText(back), refText(a));
+});
+test('APA capitalizes a lowercase subtitle initial without lowercasing proper nouns', () => {
+  const raw = '[1] J. Smith, "Research on OpenAI: a study of ESOL," Journal A, vol. 1, pp. 1–4, 2024.';
+  assert.ok(refText(CC.convert('Evidence [1].', raw, 'ieee', 'apa7')).includes('Research on OpenAI: A study of ESOL.'));
+});
+test('unknown comma-containing container clauses are retained instead of being guessed as a location', () => {
+  const raw = '[1] J. Smith, "A study," in Proceedings of Research, Theory and Practice, 2024, pp. 1–4.';
+  const a = CC.convert('Evidence [1].', raw, 'ieee', 'apa7');
+  assert.equal(a.referenceLines[0].model.journal, 'Proceedings of Research, Theory and Practice');
+  assert.equal(a.referenceLines[0].model.conferenceLocation, undefined);
+});
+
 console.log(`\n${pass} passed, ${fail} failed (bibliography scenarios).`);
 if (process.argv.includes('--report')) {
   const lines = ['# Hasil uji konversi APA 7 ↔ IEEE', '', `Acuan sintetis: ${fixtures.cases.length} kasus, masing-masing ${fixtures.cycles} putaran (10 arah konversi).`,

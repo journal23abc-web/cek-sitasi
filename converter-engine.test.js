@@ -684,6 +684,39 @@ test('identical authors and years receive matching a/b suffixes in APA citations
   assert.ok(r.referenceLines.find(x => x.line.includes('Alpha')).line.includes('(2020a)'));
 });
 
+
+const jiaRefs = '[28] Q. Jia, J. Cui, R. Xi, C. Liu, P. Rashid, R. Li, and E. Gehringer, "Alpha," Journal A, vol. 1, pp. 1–4, 2024.\n[29] Q. Jia, J. Cui, H. Du, P. Rashid, R. Xi, R. Li, and E. Gehringer, "Beta," Journal A, vol. 1, pp. 5–8, 2024.';
+test('IEEE narrative disambiguation rewrites the verified author phrase and remains stable for five cycles', () => {
+  let a = CC.convert('Jia et al. [28] contrasts with Jia et al. [29]. Group [28], [29].', jiaRefs, 'ieee', 'apa7');
+  const expected = 'Jia, Cui, Xi, et al. (2024) contrasts with Jia, Cui, Du, et al. (2024). Group (Jia, Cui, Du, et al., 2024; Jia, Cui, Xi, et al., 2024).';
+  assert.strictEqual(a.convertedArticle, expected); assert.strictEqual(a.unmatched.length, 0);
+  for (let cycle = 0; cycle < 5; cycle++) {
+    const i = CC.convert(a.convertedArticle, a.referenceLines.map(x => x.line).join('\n'), 'apa7', 'ieee', { metadata: a.metadata });
+    a = CC.convert(i.convertedArticle, i.referenceLines.map(x => x.line).join('\n'), 'ieee', 'apa7', { metadata: i.metadata });
+    assert.strictEqual(a.convertedArticle, expected); assert.strictEqual(a.unmatched.length, 0);
+  }
+});
+test('narrative expansion retains its page locator exactly once', () => {
+  const a = CC.convert('Jia et al. [28, pp. 2–3] agrees.', jiaRefs, 'ieee', 'apa7');
+  assert.strictEqual(a.convertedArticle, 'Jia, Cui, Xi, et al. (2024, pp. 2–3) agrees.');
+});
+test('an unverified preceding word is never consumed while expanding a numeric citation', () => {
+  const a = CC.convert('NotJia et al. [28] agrees.', jiaRefs, 'ieee', 'apa7');
+  assert.strictEqual(a.convertedArticle, 'NotJia et al. (Jia, Cui, Xi, et al., 2024) agrees.');
+});
+test('APA grouped citations put a solo author before that author with coauthors, independent of year', () => {
+  const refs = '[1] M. D. Shermis and J. Burstein, Eds., A Handbook. New York, NY, USA: Example Press, 2013.\n[2] M. D. Shermis, "A study," Journal A, vol. 1, pp. 1–3, 2014.';
+  const a = CC.convert('Evidence [1], [2].', refs, 'ieee', 'apa7');
+  assert.strictEqual(a.convertedArticle, 'Evidence (Shermis, 2014; Shermis & Burstein, 2013).');
+  assert.ok(a.referenceLines[0].line.startsWith('Shermis, M. D. (2014)'));
+});
+test('front matter before Introduction is preserved and excluded from mixed-style citation processing', () => {
+  const article = 'To cite this article: Xin, Q. (2026). Front-matter example.\nIntroduction\nThis sufficiently long body cites the published study [28] and retains its prose.';
+  const a = CC.convert(article, jiaRefs, 'ieee', 'apa7');
+  assert.ok(a.convertedArticle.startsWith('To cite this article: Xin, Q. (2026). Front-matter example.'));
+  assert.strictEqual(a.unmatched.length, 0); assert.strictEqual(a.citationSpans.length, 1);
+});
+
 (async () => {
   for (const { name, fn } of asyncTests) {
     try { await fn(); pass++; console.log('  PASS  ' + name); }

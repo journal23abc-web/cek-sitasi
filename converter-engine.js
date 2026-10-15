@@ -214,15 +214,35 @@
     return '(' + name + ', ' + year + tail + ')';
   }
 
+  function compareAuthorDateRefs(a, b, sourceStyleId, resolveInstitution) {
+    function firstKey(ref) {
+      var value = ref.isInstitutional && resolveInstitution ? resolveInstitution(ref.firstAuthor) : surnamesFromRef(ref, sourceStyleId)[0] || ref.firstAuthor || '';
+      return value.toLowerCase().replace(/^(the|a|an)\s+/i, '');
+    }
+    var first = firstKey(a).localeCompare(firstKey(b), 'en');
+    if (first) return first;
+    var aa = canonicalAuthorsFromRef(a, sourceStyleId), bb = canonicalAuthorsFromRef(b, sourceStyleId);
+    for (var i = 0; i < Math.min(aa.length, bb.length); i++) {
+      var name = aa[i].last.localeCompare(bb[i].last, 'en', { sensitivity: 'base' }) || aa[i].given.join(' ').localeCompare(bb[i].given.join(' '), 'en', { sensitivity: 'base' });
+      if (name) return name;
+    }
+    if (aa.length !== bb.length) return aa.length - bb.length;
+    function yearKey(ref) {
+      var year = ref.citationYear || ref.year || '';
+      return /^n\.d\./.test(year) ? '0' + year : year === 'in press' ? '9' + year : '1' + year;
+    }
+    return yearKey(a).localeCompare(yearKey(b), 'en') || (a.title || '').localeCompare(b.title || '', 'en');
+  }
+
   function formatAuthorDateGroup(refs, sourceStyleId, targetStyleId, pages) {
     var isChicago = targetStyleId === 'chicago';
     var items = refs.map(function(ref, index) {
       var name = inTextDisplayName(ref, sourceStyleId, targetStyleId, 'parenthetical');
       var year = ref.citationYear || ref.year || 'n.d.';
       var sortKey = (surnamesFromRef(ref, sourceStyleId)[0] || ref.firstAuthor || '').toLowerCase();
-      return { sortKey: sortKey + '\u0000' + year, text: targetStyleId === 'apa7' ? formatAuthorDateSingle(ref, sourceStyleId, targetStyleId, 'parenthetical', pages && pages[index]).slice(1, -1) : isChicago ? (name + ' ' + year) : (name + ', ' + year) };
+      return { ref: ref, sortKey: sortKey + '\u0000' + year, text: targetStyleId === 'apa7' ? formatAuthorDateSingle(ref, sourceStyleId, targetStyleId, 'parenthetical', pages && pages[index]).slice(1, -1) : isChicago ? (name + ' ' + year) : (name + ', ' + year) };
     });
-    items.sort(function(a, b) { return a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0; });
+    items.sort(function(a, b) { return targetStyleId === 'apa7' ? compareAuthorDateRefs(a.ref, b.ref, sourceStyleId) : a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0; });
     return '(' + items.map(function(i) { return i.text; }).join('; ') + ')';
   }
 
@@ -572,7 +592,12 @@
   function verifiedNarrativeName(text, position, ref, sourceStyleId) {
     var before = text.slice(Math.max(0, position - 250), position);
     var names = [inTextDisplayName(ref, sourceStyleId, 'apa7', 'narrative')];
+    if (ref.apaPlan) {
+      var planned = formatAuthorDateSingle(ref, sourceStyleId, 'apa7', 'narrative');
+      names.push(planned.slice(0, planned.lastIndexOf(' (')));
+    }
     if (ref.isInstitutional) names.push(ref.firstAuthor);
+    names.sort(function(a, b) { return b.length - a.length; });
     for (var i = 0; i < names.length; i++) {
       var candidate = names[i];
       // Compare a full author sequence, never an arbitrary capitalized preceding word.
@@ -704,7 +729,11 @@
       return primarySpansForOverlapCheck.every(function(ps) { return s.end <= ps.start || s.start >= ps.end; });
     });
 
-    var allEvents = primaryCitations.concat(crossFamilyCitations)
+    // Use the same manuscript boundary as the validator. Journal front matter can
+    // contain the article's own suggested citation, which is not a body citation.
+    var intro = CE.findIntroductionHeading(articleText);
+    var citationStart = intro ? intro.offset + intro.lineLength : 0;
+    var allEvents = primaryCitations.concat(crossFamilyCitations).filter(function(ev) { return eventSpan(ev).start >= citationStart; })
       .sort(function(a, b) { return eventSpan(a).start - eventSpan(b).start; });
     // The shared extractor emits one event per year, but a narrative multi-year group
     // occupies ONE span. Resolve the entire group atomically before any replacement.
@@ -825,7 +854,19 @@
           var narrativeName = targetFamily === 'author-date' ? verifiedNarrativeName(articleText, c.position, numRes.refs[0], sourceStyleId) : null;
           if (narrativeName && !numRes.refs.every(function(r) { return verifiedNarrativeName(articleText, c.position, r, sourceStyleId) === narrativeName; })) narrativeName = null;
           if (narrativeName) {
-            replacement = '(' + numRes.refs.map(function(r) { return r.citationYear || r.year || 'n.d.'; }).join(', ') + (c.pageInfo ? ', ' + formatLocator(c.pageInfo, targetStyleId) : '') + ')';
+            var plannedNarratives = targetStyleId === 'apa7' ? numRes.refs.map(function(r, i) {
+              return formatAuthorDateSingle(r, sourceStyleId, targetStyleId, 'narrative', c.members && c.members[i] ? c.members[i].pageInfo : c.pageInfo);
+            }) : [];
+            var expanded = plannedNarratives.some(function(s) { return s.slice(0, s.lastIndexOf(' (')) !== narrativeName; });
+            if (expanded) {
+              // Replace only a verified author phrase and its bracket. This also
+              // fixes same-year "Jia et al. [28]" collisions in narrative prose.
+              start = articleText.slice(0, c.position).trimEnd().length - narrativeName.length;
+              raw = articleText.slice(start, end);
+              replacement = plannedNarratives.join(' and ');
+            } else {
+              replacement = '(' + numRes.refs.map(function(r) { return r.citationYear || r.year || 'n.d.'; }).join(', ') + (c.pageInfo ? ', ' + formatLocator(c.pageInfo, targetStyleId) : '') + ')';
+            }
           } else {
             replacement = renderForTarget(numRes.refs, sourceStyleId, targetStyleId, 'parenthetical', { pageInfo: c.pageInfo, pages: c.members && c.members.map(function(member) { return member.pageInfo; }) }, numberOf, null);
           }
@@ -878,13 +919,7 @@
       orderedRefs = matchedOrder.concat(uncitedRefs);
     } else {
       orderedRefs = v.references.slice().sort(function(a, b) {
-        var ka = (a.isInstitutional ? v.resolveInstitutionalName(a.firstAuthor) : CE.surnameOf(a.firstAuthor, a.styleId || sourceStyleId)) || '';
-        var kb = (b.isInstitutional ? v.resolveInstitutionalName(b.firstAuthor) : CE.surnameOf(b.firstAuthor, b.styleId || sourceStyleId)) || '';
-        ka = ka.toLowerCase().replace(/^(the|a|an)\s+/i, ''); kb = kb.toLowerCase().replace(/^(the|a|an)\s+/i, '');
-        if (ka < kb) return -1; if (ka > kb) return 1;
-        var authorsA = canonicalAuthorsFromRef(a, sourceStyleId).map(function(x) { return x.last + ', ' + x.given.join(' '); }).join('; ').toLowerCase();
-        var authorsB = canonicalAuthorsFromRef(b, sourceStyleId).map(function(x) { return x.last + ', ' + x.given.join(' '); }).join('; ').toLowerCase();
-        return authorsA.localeCompare(authorsB, 'en') || (a.citationYear || a.year || '').localeCompare(b.citationYear || b.year || '') || (a.title || '').localeCompare(b.title || '', 'en');
+        return compareAuthorDateRefs(a, b, sourceStyleId, v.resolveInstitutionalName.bind(v));
       });
     }
 

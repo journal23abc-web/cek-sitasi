@@ -180,8 +180,51 @@ async function sampleDocument() {
   }
   console.log('  PASS supplied manuscript: 13 references, 53 authors, three unresolved citations retained, five DOCX cycles, all other package parts unchanged');
 }
+
+// Optional real-manuscript check. The private input is never copied into this repository.
+async function manuscriptDocument() {
+  const arg = process.argv.indexOf('--manuscript'); if (arg < 0) return;
+  let buffer = fs.readFileSync(path.resolve(process.argv[arg + 1]));
+  await upload(buffer, 'ieee', 'apa7');
+  const initial = await convert(), referenceCount = initial.referenceLines.length;
+  const authorCount = initial.metadata.entries.reduce((n, e) => n + e.model.authors.length, 0);
+  assert.equal(initial.unmatched.length, 0, 'All body citations of this regression manuscript must resolve');
+  const initialZip = await JSZip.loadAsync(buffer), stable = {};
+  const changedParts = ['word/document.xml', 'customXml/citation-converter.xml', 'word/_rels/document.xml.rels', '[Content_Types].xml'];
+  for (const name of Object.keys(initialZip.files)) if (!initialZip.files[name].dir && !changedParts.includes(name)) stable[name] = await initialZip.file(name).async('nodebuffer');
+  const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const initialXML = await initialZip.file('word/document.xml').async('string');
+  const inputDoc = new w.DOMParser().parseFromString(initialXML, 'application/xml');
+  const tables = inputDoc.getElementsByTagNameNS(W, 'tbl').length, drawings = inputDoc.getElementsByTagNameNS(W, 'drawing').length;
+  let firstAPA, firstIEEE, canonicalAPA;
+  for (let cycle = 0; cycle < 5; cycle++) {
+    for (const [source, target] of [['ieee', 'apa7'], ['apa7', 'ieee']]) {
+      await upload(buffer, source, target); const result = await convert();
+      assert.equal(result.referenceLines.length, referenceCount); assert.equal(result.unmatched.length, 0);
+      assert.equal(result.referenceLines.filter(r => r.fullyFormatted).length, referenceCount);
+      assert.equal(result.metadata.entries.reduce((n, e) => n + e.model.authors.length, 0), authorCount);
+      buffer = await exportOriginal(); const xml = await verifyPackage(buffer, result);
+      const doc = new w.DOMParser().parseFromString(xml, 'application/xml');
+      assert.equal(doc.getElementsByTagNameNS(W, 'tbl').length, tables); assert.equal(doc.getElementsByTagNameNS(W, 'drawing').length, drawings);
+      const z = await JSZip.loadAsync(buffer);
+      for (const [name, content] of Object.entries(stable)) assert.deepEqual(await z.file(name).async('nodebuffer'), content, name);
+      if (target === 'apa7') {
+        if (!cycle) {
+          firstAPA = xml; canonicalAPA = JSON.parse(JSON.stringify(result.metadata.entries));
+          const output = process.argv.indexOf('--manuscript-output');
+          if (output >= 0) fs.writeFileSync(path.resolve(process.argv[output + 1]), buffer);
+        } else {
+          assert.ok(xml === firstAPA, 'APA document.xml changed on cycle ' + (cycle + 1));
+          assert.deepEqual(JSON.parse(JSON.stringify(result.metadata.entries)), canonicalAPA);
+        }
+      } else { if (!cycle) firstIEEE = xml; else assert.ok(xml === firstIEEE, 'IEEE document.xml changed on cycle ' + (cycle + 1)); }
+    }
+  }
+  console.log('  PASS supplied conversion case: ' + referenceCount + ' references, ' + authorCount + ' authors, no unresolved body citations, five DOCX cycles, stable XML/metadata, ' + tables + ' tables and ' + drawings + ' drawings preserved; all other package parts unchanged');
+}
+
 (async () => {
-  try { await synthetic(); await uiFeatures(); await allStyleDocx(); await sampleDocument(); console.log('\n' + (process.argv.includes('--sample') ? 4 : 3) + ' passed, 0 failed (DOCX/UI integration).'); }
+  try { await synthetic(); await uiFeatures(); await allStyleDocx(); await sampleDocument(); await manuscriptDocument(); console.log('\n' + (3 + Number(process.argv.includes('--sample')) + Number(process.argv.includes('--manuscript'))) + ' passed, 0 failed (DOCX/UI integration).'); }
   catch (e) { console.error(e.stack); process.exitCode = 1; }
   finally { w.close(); }
 })();

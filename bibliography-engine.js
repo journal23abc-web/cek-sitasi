@@ -66,8 +66,39 @@
     'Psychology of Sport and Exercise': 'Psychol. Sport Exerc.',
     'Psychological Bulletin': 'Psychol. Bull.',
     'International Journal of Medical Informatics': 'Int. J. Med. Inform.',
-    'Journal of the American Medical Informatics Association': 'J. Amer. Med. Inform. Assoc.'
+    'Journal of the American Medical Informatics Association': 'J. Amer. Med. Inform. Assoc.',
+    'IEEE Transactions on Learning Technologies': 'IEEE Trans. Learn. Technol.',
+    'Proceedings of the AAAI Conference on Artificial Intelligence': 'Proc. AAAI Conf. Artif. Intell.'
   };
+  // Exact aliases only. Generic IEEE abbreviations are not reversible ("Int." alone
+  // does not establish a publication's full title). Primary sources are recorded in
+  // CONVERTER-FIXES.md. A volume-bearing AAAI paper uses the periodical template.
+  var PERIODICAL_ALIASES = {
+    'IEEE Trans. Learning Technologies': 'IEEE Transactions on Learning Technologies',
+    'Proc. AAAI Conf. Artificial Intelligence': 'Proceedings of the AAAI Conference on Artificial Intelligence'
+  };
+  // A small exact-title catalogue, not a generic expansion of ambiguous words.
+  // Matching a known venue supplies its name only, never guessed editors/pages.
+  var CONTAINER_ALIASES = {
+    'Proc. 49th Annu. Meeting Assoc. Comput. Linguistics: Human Language Technologies': 'Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies',
+    'Proc. 2015 Conf. Empirical Methods Natural Language Processing': 'Proceedings of the 2015 Conference on Empirical Methods in Natural Language Processing',
+    'Proc. 2016 Conf. Empirical Methods Natural Language Processing': 'Proceedings of the 2016 Conference on Empirical Methods in Natural Language Processing',
+    'Proc. Eleventh Int. Conf. Language Resources and Evaluation (LREC 2018)': 'Proceedings of the Eleventh International Conference on Language Resources and Evaluation (LREC 2018)',
+    'Proc. 28th Int. Joint Conf. Artificial Intelligence (IJCAI-19)': 'Proceedings of the Twenty-Eighth International Joint Conference on Artificial Intelligence',
+    'Proc. Fifteenth Workshop Innovative Use NLP for Building Educational Applications': 'Proceedings of the Fifteenth Workshop on Innovative Use of NLP for Building Educational Applications',
+    'Proc. 14th Int. Conf. Educational Data Mining (EDM 2021)': 'Proceedings of the 14th International Conference on Educational Data Mining',
+    'Proc. 2022 6th Int. Conf. Computing Methodologies and Communication (ICCMC)': '2022 6th International Conference on Computing Methodologies and Communication (ICCMC)',
+    'Proc. 18th Workshop Innovative Use NLP for Building Educational Applications (BEA 2023)': 'Proceedings of the 18th Workshop on Innovative Use of NLP for Building Educational Applications (BEA 2023)',
+    'Proc. 2024 Joint Int. Conf. Computational Linguistics, Language Resources and Evaluation (LREC-COLING 2024)': 'Proceedings of the 2024 Joint International Conference on Computational Linguistics, Language Resources and Evaluation (LREC-COLING 2024)',
+    'Proc. 19th Workshop Innovative Use NLP for Building Educational Applications (BEA 2024)': 'Proceedings of the 19th Workshop on Innovative Use of NLP for Building Educational Applications (BEA 2024)',
+    'Proc. 17th Int. Conf. Educational Data Mining (EDM 2024)': 'Proceedings of the 17th International Conference on Educational Data Mining'
+  };
+  function normalizePeriodical(m) {
+    var full = PERIODICAL_ALIASES[m.journal];
+    if (!full) full = Object.keys(JOURNALS).find(function(title) { return JOURNALS[title] === m.journal; });
+    if (full) { m.journal = full; m.abbreviatedSource = false; }
+    return m;
+  }
   function clone(x) { return JSON.parse(JSON.stringify(x)); }
   function clean(s) { return String(s || '').trim().replace(/^[.,;]\s*|\s*[.,;]$/g, '').trim(); }
   function period(s) { return /[.!?]$/.test(s) ? s : s + '.'; }
@@ -246,7 +277,17 @@
   }
   function enrich(raw, styleId, seed, details, trusted) {
     var m = clone(seed), opt = details || {};
-    if (m.schema === 2) return applyDetails(m, opt);
+    if (m.schema === 2) {
+      // Repair archives made by the old parser, using their exact-bound original
+      // IEEE reference. Do not reparse the author list: it can contain names that
+      // the current displayed IEEE line suppresses as "et al.".
+      if (m.originalStyle === 'ieee' && !m.ieeeContainerVersion && /^in\s+/i.test(m.journal || '') &&
+          /^(?:journal-article|website|webpage|unknown)$/.test(m.type || '')) {
+        var oldTail = (m.sourceText || '').match(/["“][^"”]+["”]\s*,?\s*(in\s+.+)$/i);
+        if (oldTail) parseIEEEContainer(oldTail[1], m);
+      }
+      return applyDetails(normalizePeriodical(m), opt);
+    }
     m.schema = 2; m.notes = []; m.sourceText = raw;
     if (styleId !== 'apa7') {
       if (trusted) {
@@ -338,7 +379,7 @@
   function applyDetails(m, opt) {
     // Only explicit, style-independent facts may be supplied by the user. Bindings are
     // exact reference text, so changing the input invalidates the row's old details.
-    ['place', 'accessed', 'journalAbbreviation', 'nlmAbbreviation', 'journal', 'publisher', 'institution', 'department', 'degree', 'date', 'articleNumber'].forEach(function(k) {
+    ['place', 'accessed', 'journalAbbreviation', 'nlmAbbreviation', 'journal', 'publisher', 'institution', 'department', 'degree', 'date', 'articleNumber', 'apaTitle', 'apaContainerTitle', 'editor', 'seriesTitle', 'seriesVolume'].forEach(function(k) {
       if (typeof opt[k] === 'string' && opt[k].trim()) {
         if (k === 'date' && /^\d{4}/.test(opt[k]) && opt[k].slice(0, 4) !== String(m.year).slice(0, 4)) {
           m.notes = m.notes || []; m.notes.push('Tahun detail berbeda dari tahun sumber. Perbaiki tahun pada referensi sumber terlebih dahulu.');
@@ -347,9 +388,49 @@
     });
     if (opt.journal) m.abbreviatedSource = false;
     if (opt.publisher) m.source = m.publisher;
+    if (opt.editor) m.editorIsPlural = /(?:,|\s&\s|\sand\s)/.test(opt.editor.trim());
     if (TYPES[opt.type]) m.type = opt.type;
     if (opt.articleNumber) { m.pages = null; m.ambiguousLocator = false; }
     return m;
+  }
+  function parseIEEEContainer(tail, m) {
+    if (!/^in\s+/i.test(tail)) return false;
+    var body = tail.replace(/^in\s+/i, '').split(/\s*\[Online\]|\s+https?:\/\/|,?\s*doi:/i)[0];
+    // The publication year is a separate comma-delimited element. A year inside
+    // "Proc. 2024 ... (EDM 2024)" belongs to the title and must not end the container.
+    var years = Array.from(body.matchAll(/,\s*(?:[A-Za-z.]+\s+)?(?:19|20)\d{2}[a-z]?(?=\s*(?:[,.;]|$))/g));
+    var header = years.length ? body.slice(0, years[years.length - 1].index) : body.split(/,\s*(?:pp?\.|doi:)/i)[0];
+    var vol = body.match(/\bvol\.\s*([\w–-]+)/i), issue = body.match(/\bno\.\s*([^,.;]+)/i);
+    if (vol) m.volume = vol[1]; if (issue) m.issue = issue[1];
+    header = clean(header.replace(/,\s*(?:vol\.\s*[\w–-]+|no\.\s*[^,;]+|pp?\.\s*[\w–-]+)/gi, ''));
+    var parts = header.split(',').map(function(p) { return p.trim(); });
+    // A recognized country suffix permits separating a conference location from
+    // its title. Unknown suffixes are retained and explicitly sent for review.
+    var country = /^(?:USA|U\.S\.A\.|United States(?: of America)?|UK|U\.K\.|United Kingdom|Japan|Canada|China|India|Italy|Italia|Portugal|Morocco|Mexico|Germany|France|Australia|Netherlands|Spain|Singapore|Indonesia|South Korea|Republic of Korea|Taiwan|Brazil|Greece|Austria|Switzerland|Sweden|Finland|Denmark|Norway|Belgium|Ireland|Malaysia|Thailand|Vietnam|New Zealand|South Africa)$/i;
+    if (parts.length >= 3 && country.test(parts[parts.length - 1])) {
+      var count = parts.length >= 4 && /^[A-Z]{2}$/.test(parts[parts.length - 2]) ? 3 : 2;
+      var city = parts[parts.length - count];
+      if (!/\b(?:Proc\.|Proceedings|Conf\.|Conference|LNCS|vol\.)/i.test(city)) m.conferenceLocation = parts.splice(-count).join(', ');
+    }
+    header = parts.join(', ');
+    // Keep an explicitly supplied book-series volume separate from both the title
+    // and the event location. No expansion of an unknown series name is guessed.
+    var series = header.match(/,\s*(LNCS|Lecture Notes in Computer Science)\s+(\d+)$/i);
+    if (series) { m.seriesTitle = 'Lecture notes in computer science'; m.seriesVolume = series[2]; header = header.slice(0, series.index); }
+    m.journal = CONTAINER_ALIASES[header] || header;
+    normalizePeriodical(m);
+    if (m.journal === 'Proceedings of the AAAI Conference on Artificial Intelligence' && m.volume) {
+      m.type = 'journal-article'; m.isBookChapter = false;
+    } else {
+      m.type = /\b(?:Proc\.|Proceedings|Conf\.|Conference)\b|^Proc\./i.test(header) ? 'conference' : 'book-chapter';
+      m.isBookChapter = m.type === 'book-chapter';
+      m.containerDetails = [m.edition, m.volume ? 'Vol. ' + m.volume : null, m.issue ? 'No. ' + m.issue : null, m.pages ? 'pp. ' + m.pages : null].filter(Boolean).join(', ');
+      m.containerVolume = m.volume; m.containerIssue = m.issue;
+      m.volume = null; m.issue = null;
+    }
+    m.ieeeContainerVersion = 1;
+    m.abbreviatedSource = /\b(?:J\.|Trans\.|Int\.|Comput\.|Proc\.|Conf\.|Annu\.|Assoc\.)/.test(m.journal);
+    return true;
   }
   function parseIEEE(raw, m) {
     // External IEEE has no archive of omitted facts. Read what is present and flag the
@@ -382,6 +463,7 @@
         if (chapterEdition) m.edition = chapterEdition[1];
         m.containerDetails = [m.edition, m.pages ? 'pp. ' + m.pages : null].filter(Boolean).join(', ');
       }
+      if (!m.editor) parseIEEEContainer(tail, m);
     } else {
       var person = "(?:(?:\\p{Lu}\\.(?:-\\p{Lu}\\.)?)\\s*)+[\\p{L}][\\p{L}'’\\-]*(?:\\s+(?!and\\b)[\\p{L}][\\p{L}'’\\-]*)*";
       var authors = new RegExp('^(' + person + '(?:,\\s*' + person + ')*(?:,?\\s+and\\s+' + person + ')?)(?:,\\s*(Eds?)\\.)?,\\s+(.+)$', 'u').exec(rest);
@@ -399,15 +481,21 @@
     if (m.publisher) m.source = m.publisher;
     if (m.type === 'preprint') m.source = m.repository || 'arXiv';
     m.date = m.publicationDate ? apaDate(m.publicationDate) : (m.year || 'n.d.');
-    if (m.journal && /\b(?:J\.|Trans\.|Int\.|Comput\.|Proc\.)/.test(m.journal)) m.abbreviatedSource = true;
-    if (/^(?:book|edited-book|book-chapter|conference)$/.test(m.type)) m.notes.push('Judul IEEE dapat memakai title case. Periksa sentence case APA dan kapitalisasi nama diri dari sumber asli.');
+    if (m.journal && /\b(?:J\.|Trans\.|Int\.|Comput\.|Proc\.|Conf\.)/.test(m.journal)) m.abbreviatedSource = true;
+    normalizePeriodical(m);
     return m;
   }
 
   function issues(m, target) {
     var notes = (m.notes || []).slice();
     if (m.noAuthor) notes.push('Sumber tanpa penulis: sitasi berdasarkan judul harus diperiksa manual.');
-    if (target === 'apa7' && m.abbreviatedSource) notes.push('Nama jurnal sumber berupa singkatan; nama lengkap APA harus diverifikasi dari sumber asli.');
+    if (target === 'apa7' && m.abbreviatedSource) notes.push('Nama jurnal sumber berupa singkatan; nama lengkap APA harus diverifikasi dari sumber asli. Untuk prosiding, isi nama lengkap buku/prosiding pada detail sumber.');
+    if (target === 'apa7' && CHAPTER_TYPES.test(m.type)) {
+      if (!m.editor) notes.push('Editor buku/prosiding belum tersedia. Periksa sumber asli dan isi editor jika tercantum; jangan mengarang nama.');
+      if (!m.publisher) notes.push('Penerbit buku/prosiding belum tersedia. Lengkapi dari sumber asli.');
+    }
+    if (target === 'apa7' && m.originalStyle === 'ieee' && !m.apaTitle && (m.title || '').split(/\s+/).filter(function(w) { return /^\p{Lu}\p{Ll}+/u.test(w); }).length >= (BOOK_TYPES.test(m.type) ? 2 : 3)) notes.push('Judul mungkin masih memakai title case IEEE. Isi judul APA terverifikasi (sentence case); pertahankan nama diri dan akronim.');
+    if (target === 'apa7' && m.type === 'book-chapter' && m.originalStyle === 'ieee' && !m.apaContainerTitle) notes.push('Periksa sentence case judul buku induk; isi judul buku/prosiding APA terverifikasi bila perlu.');
     if (target === 'ieee') {
       if ((BOOK_TYPES.test(m.type) || /^(?:book-chapter|report|brochure|fact-sheet|press-release|white-paper|ethics-code|thesis)$/.test(m.type)) && !m.place) notes.push('Lokasi penerbit/institusi tidak tersedia. Lengkapi dari sumber asli untuk IEEE.');
       if ((m.type === 'conference' || m.type === 'dictionary-entry') && m.publisher && !m.place) notes.push('Lokasi penerbit prosiding/kamus belum tersedia. Lengkapi dari sumber asli untuk IEEE.');
@@ -704,9 +792,12 @@
     var episode = /^(?:podcast-episode|tv-episode)$/.test(m.type);
     function add(t, italic) { if (t) runs.push({ text: String(t), italic: !!italic }); }
     function apaTitle(italic) {
-      add(m.title, italic); if (m.details) add(' (' + m.details + ')');
+      // Only the first word and subtitle initial can be capitalized safely. Lowering
+      // every title-case word would corrupt proper names, acronyms and product names.
+      var title = (m.apaTitle || m.title).replace(/^\p{Ll}/u, function(c) { return c.toUpperCase(); }).replace(/(:\s+)\p{Ll}/gu, function(s) { return s.toUpperCase(); });
+      add(title, italic); if (m.details) add(' (' + m.details + ')');
       if (m.description) add(' [' + m.description + ']');
-      add(/[?!]$/.test(m.title) && !m.details && !m.description ? ' ' : '. ');
+      add(/[.!?]$/.test(title) && !m.details && !m.description ? ' ' : '. ');
     }
     function quoted() { add('"' + m.title.replace(/"/g, "'") + '," '); }
     function doiAndUrl() {
@@ -736,7 +827,8 @@
         add('.'); if (m.status === 'early access') add(' Advance online publication.');
       } else if (chapter) {
         apaTitle(false); add('In ' + (m.editor ? m.editor + (m.editorIsPlural ? ' (Eds.), ' : ' (Ed.), ') : ''));
-        add(m.journal, true);
+        if (m.seriesTitle) add(m.seriesTitle + (m.seriesVolume ? ': Vol. ' + m.seriesVolume : '') + '. ', true);
+        add(m.apaContainerTitle || m.journal, true);
         var cd = m.containerDetails || [m.edition, m.pages ? 'pp. ' + m.pages : null].filter(Boolean).join(', ');
         if (cd) add(' (' + cd + ')'); add('.'); if (m.publisher) add(' ' + period(m.publisher));
       } else if (m.type === 'thesis') {
@@ -804,8 +896,10 @@
           add(', ' + d); if (m.articleNumber) add(', Art. no. ' + m.articleNumber);
         } else if (chapter) {
           add('in '); add(m.type === 'conference' ? abbreviate(m.journal) : titleCase(m.journal), true);
+          if (m.seriesTitle) add(', ' + m.seriesTitle + (m.seriesVolume ? ' ' + m.seriesVolume : ''));
+          if (m.containerVolume) add(', vol. ' + m.containerVolume); if (m.containerIssue) add(', no. ' + m.containerIssue);
           if (m.editor) add(', ' + ieeeEditors(m.editor) + (m.editorIsPlural ? ', Eds.' : ', Ed.'));
-          if (m.edition) add(', ' + m.edition); if (m.place) add(', ' + m.place);
+          if (m.edition) add(', ' + m.edition); if (m.conferenceLocation) add(', ' + m.conferenceLocation); if (m.place) add(', ' + m.place);
           if (m.publisher) add((m.place ? ': ' : ', ') + m.publisher);
           add(', ' + d); if (m.pages) add(', pp. ' + m.pages);
         } else if (report) {

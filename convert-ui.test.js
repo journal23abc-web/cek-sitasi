@@ -459,6 +459,25 @@ test('IEEE labels occupy their own tab column without changing preview text or a
   }
 });
 
+
+test('the References label uses APA case, bold, centering and a new page without changing other paragraphs', () => {
+  const doc = parseDoc('<w:p>' + run('Unchanged disclosure.', false) + '</w:p><w:p><w:pPr><w:ind w:left="720" w:hanging="720"/><w:jc w:val="left"/></w:pPr><w:r><w:rPr><w:caps/><w:i/></w:rPr><w:t>REFERENCES</w:t></w:r></w:p>');
+  const ps = doc.getElementsByTagNameNS(W_NS, 'p'), before = new XMLSerializer().serializeToString(ps[0]);
+  normalizeReferenceHeading(doc, ps[1], 'apa7');
+  assert.strictEqual(textOf(ps[1]), 'References');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'jc')[0].getAttributeNS(W_NS, 'val'), 'center');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'pageBreakBefore')[0].getAttributeNS(W_NS, 'val'), '1');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'spacing')[0].getAttributeNS(W_NS, 'line'), '480');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'b')[0].getAttributeNS(W_NS, 'val'), '1');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'caps')[0].getAttributeNS(W_NS, 'val'), '0');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'i')[0].getAttributeNS(W_NS, 'val'), '0');
+  assert.strictEqual(new XMLSerializer().serializeToString(ps[0]), before);
+  const normalized = serialize(doc); normalizeReferenceHeading(doc, ps[1], 'apa7'); assert.strictEqual(serialize(doc), normalized);
+  normalizeReferenceHeading(doc, ps[1], 'ieee'); assert.strictEqual(textOf(ps[1]), 'REFERENCES');
+  assert.strictEqual(ps[1].getElementsByTagNameNS(W_NS, 'pageBreakBefore')[0].getAttributeNS(W_NS, 'val'), '0');
+  normalizeReferenceHeading(doc, ps[1], 'apa7'); assert.strictEqual(serialize(doc), normalized);
+});
+
 console.log(`\n${pass} passed, ${fail} failed.\n`);
 if (fail > 0) {
   process.exitCode = 1;

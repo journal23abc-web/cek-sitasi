@@ -91,7 +91,12 @@
       Object.keys(BE.TYPES).forEach(function(type) { var o = document.createElement('option'); o.value = type; o.textContent = BE.TYPES[type]; select.appendChild(o); });
       select.value = extra.type || ''; label.appendChild(select); row.appendChild(label);
       [['place', 'Lokasi penerbit / institusi'], ['accessed', 'Tanggal akses (mis. 2024, July 10)'],
-        ['journalAbbreviation', 'Singkatan jurnal IEEE terverifikasi'], ['nlmAbbreviation', 'Singkatan jurnal NLM terverifikasi'], ['journal', 'Nama lengkap jurnal terverifikasi'], ['publisher', 'Nama penerbit / instansi terverifikasi'], ['articleNumber', 'Nomor artikel terverifikasi'],
+        ['journalAbbreviation', 'Singkatan jurnal IEEE terverifikasi'], ['nlmAbbreviation', 'Singkatan jurnal NLM terverifikasi'], ['journal', 'Nama lengkap jurnal / buku / prosiding terverifikasi'],
+        ['apaTitle', 'Judul APA terverifikasi (sentence case; pertahankan nama diri / akronim)'],
+        ['apaContainerTitle', 'Judul buku / prosiding APA terverifikasi (sentence case)'],
+        ['editor', 'Editor terverifikasi (mis. J. Smith & A. Doe; tanpa Ed./Eds.)'],
+        ['seriesTitle', 'Nama lengkap seri buku terverifikasi'], ['seriesVolume', 'Volume seri buku terverifikasi'],
+        ['publisher', 'Nama penerbit / instansi terverifikasi'], ['articleNumber', 'Nomor artikel terverifikasi'],
         ['date', 'Tanggal terbit edisi (mis. 2024, June 12)']].forEach(function(field) {
         var l = document.createElement('label'); l.style.display = 'block'; l.style.marginTop = '8px'; l.textContent = field[1] + ' ';
         var input = document.createElement('input'); input.type = 'text'; input.dataset.field = field[0];
@@ -526,7 +531,7 @@
     // DOCX already has real paragraph boundaries. PDF unwrapping would change its offsets.
     return { article: before.trim(), articleOffset: before.length - before.trimStart().length,
       references: index.text.slice(refStart, refEnd).split('\n').map(function(line) { return line.trim(); }).filter(Boolean).join('\n'),
-      refStart: refStart, refEnd: refEnd, headingText: heading.text };
+      refStart: refStart, refEnd: refEnd, headingStart: heading.offset, headingText: heading.text };
   }
 
   function readConversionMetadata(zip) {
@@ -934,6 +939,47 @@
     return Object.keys(appliedKeys).length;
   }
 
+  function normalizeReferenceHeading(xmlDoc, paraEl, styleId) {
+    if (!paraEl || (styleId !== 'apa7' && styleId !== 'ieee')) return;
+    var texts = Array.from(paraEl.getElementsByTagNameNS(W_NS, 't'));
+    if (!texts.length) return;
+    texts.forEach(function(t, i) { t.textContent = i ? '' : styleId === 'apa7' ? 'References' : 'REFERENCES'; });
+    var pPr = paraEl.getElementsByTagNameNS(W_NS, 'pPr')[0];
+    if (!pPr) { pPr = xmlDoc.createElementNS(W_NS, 'w:pPr'); paraEl.insertBefore(pPr, paraEl.firstChild); }
+    function property(name, values) {
+      var item = pPr.getElementsByTagNameNS(W_NS, name)[0];
+      if (!item) { item = xmlDoc.createElementNS(W_NS, 'w:' + name); pPr.appendChild(item); }
+      Object.keys(values).forEach(function(k) { item.setAttributeNS(W_NS, 'w:' + k, values[k]); });
+      return item;
+    }
+    property('keepNext', { val: '1' });
+    property('pageBreakBefore', { val: styleId === 'apa7' ? '1' : '0' });
+    var numbering = property('numPr', {}); while (numbering.firstChild) numbering.removeChild(numbering.firstChild);
+    var numId = xmlDoc.createElementNS(W_NS, 'w:numId'); numId.setAttributeNS(W_NS, 'w:val', '0'); numbering.appendChild(numId);
+    var ind = property('ind', {});
+    Array.from(ind.attributes).forEach(function(a) { if (a.namespaceURI === W_NS) ind.removeAttributeNS(W_NS, a.localName); });
+    ind.setAttributeNS(W_NS, 'w:left', '0'); ind.setAttributeNS(W_NS, 'w:right', '0'); ind.setAttributeNS(W_NS, 'w:firstLine', '0');
+    property('jc', { val: 'center' });
+    property('spacing', { before: '0', after: '0', line: styleId === 'apa7' ? '480' : '240', lineRule: 'auto', beforeAutospacing: '0', afterAutospacing: '0' });
+    var order = ['pStyle', 'keepNext', 'keepLines', 'pageBreakBefore', 'framePr', 'widowControl', 'numPr', 'suppressLineNumbers', 'pBdr', 'shd', 'tabs', 'suppressAutoHyphens', 'kinsoku', 'wordWrap', 'overflowPunct', 'topLinePunct', 'autoSpaceDE', 'autoSpaceDN', 'bidi', 'adjustRightInd', 'snapToGrid', 'spacing', 'ind', 'contextualSpacing', 'mirrorIndents', 'suppressOverlap', 'jc', 'textDirection', 'textAlignment', 'textboxTightWrap', 'outlineLvl', 'divId', 'cnfStyle', 'rPr', 'sectPr', 'pPrChange'];
+    Array.from(pPr.childNodes).filter(function(n) { return n.nodeType === 1; }).sort(function(a, b) {
+      var ai = order.indexOf(a.localName), bi = order.indexOf(b.localName); return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
+    }).forEach(function(n) { pPr.appendChild(n); });
+    Array.from(paraEl.getElementsByTagNameNS(W_NS, 'r')).forEach(function(run) {
+      var rPr = run.getElementsByTagNameNS(W_NS, 'rPr')[0];
+      if (!rPr) { rPr = xmlDoc.createElementNS(W_NS, 'w:rPr'); run.insertBefore(rPr, run.firstChild); }
+      ['b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps'].forEach(function(name) {
+        var item = rPr.getElementsByTagNameNS(W_NS, name)[0];
+        if (!item) { item = xmlDoc.createElementNS(W_NS, 'w:' + name); rPr.appendChild(item); }
+        item.setAttributeNS(W_NS, 'w:val', name === 'b' || name === 'bCs' ? '1' : '0');
+      });
+      var runOrder = ['rStyle', 'rFonts', 'b', 'bCs', 'i', 'iCs', 'caps', 'smallCaps', 'strike', 'dstrike', 'outline', 'shadow', 'emboss', 'imprint', 'noProof', 'snapToGrid', 'vanish', 'webHidden', 'color', 'spacing', 'w', 'kern', 'position', 'sz', 'szCs', 'highlight', 'u', 'effect', 'bdr', 'shd', 'fitText', 'vertAlign', 'rtl', 'cs', 'em', 'lang', 'eastAsianLayout', 'specVanish', 'oMath', 'rPrChange'];
+      Array.from(rPr.childNodes).filter(function(n) { return n.nodeType === 1; }).sort(function(a, b) {
+        var ai = runOrder.indexOf(a.localName), bi = runOrder.indexOf(b.localName); return (ai < 0 ? runOrder.length : ai) - (bi < 0 ? runOrder.length : bi);
+      }).forEach(function(n) { rPr.appendChild(n); });
+    });
+  }
+
   // Date + time-of-day stamp (not just the date) so downloading more than once on the same day
   // always produces a distinct filename instead of silently overwriting the previous download.
   function fileTimestamp() {
@@ -1064,6 +1110,7 @@
         if (!split || split.article !== state.lastSourceText || split.references !== state.docxOriginalReferenceText) {
           throw new Error('Teks sumber DOCX berbeda dari pratinjau. Unggah ulang dan jalankan konversi.');
         }
+        var headingParagraph = paragraphAtOffset(index, split.headingStart);
         var locations = result.referenceLines.map(function(rl) {
           var candidates = index.paragraphs.filter(function(pi) {
             return pi.start >= split.refStart && pi.start < split.refEnd && index.text.slice(pi.start, pi.end).trim() === rl.original;
@@ -1087,6 +1134,7 @@
           }
         });
         reorderParagraphs(xmlDoc, locations);
+        normalizeReferenceHeading(xmlDoc, headingParagraph, result.targetStyleId);
         var verification = splitDocxIndex(buildDocxTextIndex(xmlDoc));
         if (verification.article !== result.convertedArticle || verification.references !== result.referenceLines.map(function(rl) { return rl.line; }).join('\n')) {
           throw new Error('Hasil DOCX tidak sama dengan pratinjau. File keluaran dibatalkan.');
