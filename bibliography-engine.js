@@ -54,16 +54,7 @@
     Informatics: 'Inform.', International: 'Int.', Journal: 'J.', Magazine: 'Mag.', Management: 'Manage.', Mathematical: 'Math.', Mathematics: 'Math.',
     Medical: 'Med.', Medicine: 'Med.', National: 'Nat.', Organization: 'Org.', Personal: 'Pers.', Proceedings: 'Proc.', Psychology: 'Psychol.',
     Quarterly: 'Quart.', Research: 'Res.', Review: 'Rev.', Science: 'Sci.', Society: 'Soc.', Symposium: 'Symp.',
-    Systems: 'Syst.', Technical: 'Tech.', Technology: 'Technol.', Transactions: 'Trans.',
-    // Tambahan dari daftar singkatan IEEE Reference Guide (kata yang sering muncul di naskah informatika).
-    Advances: 'Adv.', Artificial: 'Artif.', Intelligence: 'Intell.', Intelligent: 'Intell.', Machine: 'Mach.', Learning: 'Learn.',
-    Processing: 'Process.', Network: 'Netw.', Networks: 'Netw.', Letters: 'Lett.', Recognition: 'Recognit.', Vision: 'Vis.',
-    Software: 'Softw.', Security: 'Secur.', Knowledge: 'Knowl.', Language: 'Lang.', Computational: 'Comput.', Physics: 'Phys.',
-    Economics: 'Econ.', Environmental: 'Environ.', Industrial: 'Ind.', Mechanical: 'Mech.', Robotics: 'Robot.', Sensing: 'Sens.',
-    Geoscience: 'Geosci.', Cybernetics: 'Cybern.', Evolutionary: 'Evol.', Development: 'Develop.', Design: 'Des.', Studies: 'Stud.',
-    Electronics: 'Electron.', Optics: 'Opt.', Telecommunications: 'Telecommun.', Transportation: 'Transp.', Distributed: 'Distrib.',
-    Graphics: 'Graph.', Imaging: 'Imag.', Instrumentation: 'Instrum.', Measurement: 'Meas.', Microwave: 'Microw.', Propagation: 'Propag.',
-    Business: 'Bus.', Clinical: 'Clin.', Physical: 'Phys.', Materials: 'Mater.', Chemistry: 'Chem.'
+    Systems: 'Syst.', Technical: 'Tech.', Technology: 'Technol.', Transactions: 'Trans.'
   };
   // Exact-title exceptions retain punctuation/meaning that word replacement cannot infer.
   var JOURNALS = {
@@ -164,11 +155,6 @@
       m.accessed = apaDate(retrieval[1]); m.retrievalRequired = true;
       m.url = retrieval[2]; return clean(s.slice(0, retrieval.index));
     }
-    // Legacy "doi:10.xxxx/yyy" / "DOI: 10.xxxx/yyy" suffix (no URL). The DOI itself is already
-    // captured by the reference parser; only the tail is removed so it is not read as part of
-    // the journal name / locator.
-    var bareDoi = s.match(/[.,]?\s*\bdoi\s*:\s*10\.\d{4,}\/\S+?\.?\s*$/i);
-    if (bareDoi) s = s.slice(0, bareDoi.index) + (/^[.]/.test(bareDoi[0]) ? '.' : '');
     var link = s.match(/\s+(https?:\/\/\S+)\s*$/i);
     if (link) {
       var url = link[1];
@@ -311,7 +297,7 @@
       }
       return applyDetails(styleId === 'ieee' ? parseIEEE(raw, m) : parseOtherStyle(raw, styleId, m), opt);
     }
-    var date = raw.match(/\((\d{4}[a-z]?(?:[–-](?:\d{4}|present))?|n\.d\.(?:-?[a-z])?|in press)(?:,\s*([^()]+))?\)\s*\.?\s*/i);
+    var date = raw.match(/\((\d{4}[a-z]?(?:[–-](?:\d{4}|present))?|n\.d\.[a-z]?|in press)(?:,\s*([^()]+))?\)\s*\.?\s*/i);
     if (!date) { m.type = 'unknown'; m.notes.push('Tanggal atau struktur APA tidak dikenali.'); return applyDetails(m, opt); }
     m.year = date[1].replace(/-(?=\d{4}|present)/, '–');
     m.date = m.year + (date[2] ? ', ' + date[2] : ''); m.apaDate = m.date;
@@ -333,13 +319,6 @@
     if (original) { m.originalYear = original[1]; body = body.slice(0, original.index); }
     body = stripLink(body, m);
     var parts = splitSentence(body);
-    // "Cash or condition? Evidence from a cash transfer experiment. The Quarterly Journal…":
-    // a question/exclamation mark followed by a SUBTITLE sentence is still the title. Merge
-    // when the remainder holds another sentence and that sentence is not itself the container.
-    if (/[?!]$/.test(parts[0]) && parts[1]) {
-      var more = splitSentence(parts[1]);
-      if (more[1] && more[0] && !/,\s*\d/.test(more[0]) && !/^(?:In|Dalam)\s/.test(more[0]) && more[0].split(/\s+/).length >= 2) parts = [parts[0] + ' ' + more[0], more[1]];
-    }
     parseDetails(parts[0], m);
     // APA assigns the company to the author slot for AI tools/chats. Uppercase short
     // tokens in a company name can otherwise resemble Vancouver personal initials.
@@ -423,11 +402,7 @@
     var header = years.length ? body.slice(0, years[years.length - 1].index) : body.split(/,\s*(?:pp?\.|doi:)/i)[0];
     var vol = body.match(/\bvol\.\s*([\w–-]+)/i), issue = body.match(/\bno\.\s*([^,.;]+)/i);
     if (vol) m.volume = vol[1]; if (issue) m.issue = issue[1];
-    var headerBeforeClean = header.replace(/,\s*(?:vol\.\s*[\w–-]+|no\.\s*[^,;]+|pp?\.\s*[\w–-]+)/gi, '').trim();
-    header = clean(headerBeforeClean);
-    // clean() drops a trailing full stop, but in an already-abbreviated container name
-    // ("Proc. Adv. Neural Inf. Process. Syst.") that stop belongs to the last abbreviation.
-    if (/(?:^|\s)\p{Lu}[\p{Ll}]{0,6}\.$/u.test(headerBeforeClean) && /\b(?:Proc|Conf|Int|Symp|Trans)\./.test(headerBeforeClean) && !/\.$/.test(header)) header += '.';
+    header = clean(header.replace(/,\s*(?:vol\.\s*[\w–-]+|no\.\s*[^,;]+|pp?\.\s*[\w–-]+)/gi, ''));
     var parts = header.split(',').map(function(p) { return p.trim(); });
     // A recognized country suffix permits separating a conference location from
     // its title. Unknown suffixes are retained and explicitly sent for review.
@@ -671,9 +646,7 @@
     }
     if (styleId === 'ieee') {
       if (!/^\[\d+\]\s/.test(raw)) add('label', 'Label referensi IEEE', 'Awali setiap entri dengan nomor dalam kurung siku, misalnya [1].', 'error', 'number');
-      // Inverted "Last, F." only — "T. Brown, B. Mann" is the correct IEEE form, so a surname
-      // that is itself preceded by an initial ("T. Brown") is not evidence of inversion.
-      if (!ref.isInstitutional && /(?<!\p{Lu}\.(?:\s*\p{Ll}+)*\s?)(?<![\p{L}'’-])\p{Lu}[\p{Ll}'’-]+,\s*\p{Lu}\./u.test(authorScope)) add('author-order', 'Urutan nama penulis IEEE', 'IEEE memakai inisial di depan nama keluarga, misalnya J. Smith.', 'suggestion', 'authors');
+      if (!ref.isInstitutional && /\p{L}{2,},\s*\p{Lu}\./u.test(authorScope)) add('author-order', 'Urutan nama penulis IEEE', 'IEEE memakai inisial di depan nama keluarga, misalnya J. Smith.', 'suggestion', 'authors');
       if (display.completeAuthors && display.authors.length > 6) add('authors-over6', 'Daftar penulis IEEE lebih dari enam', 'Gunakan nama penulis pertama diikuti et al. Simpan daftar lengkap dalam metadata untuk konversi balik.', 'suggestion', 'authors');
       if (!display.completeAuthors && display.authors.length > 1) add('authors-truncated', 'Pemendekan nama penulis IEEE', 'Untuk lebih dari enam penulis, IEEE memakai penulis pertama diikuti et al.; bukan enam nama diikuti et al.', 'suggestion', 'authors');
       if ((PERIODICAL_TYPES.test(type) || CHAPTER_TYPES.test(type) || type === 'report' || type === 'thesis') && !/[“"][^”"]+[”"]/.test(raw)) add('title-quotes', 'Tanda kutip judul IEEE', 'Judul artikel/bab/makalah/laporan/tesis biasanya diletakkan dalam tanda kutip; judul karya induk diperiksa terpisah.', 'suggestion', 'title');

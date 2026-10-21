@@ -460,7 +460,7 @@ function extractAuthorDateCitations(text) {
   }
   // Consecutive connectors ("of the", "for the", "van der") belong to the
   // author name; requiring a capitalized word after each connector loses its prefix.
-  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.(?:-?[a-z])?|in press)[,)]/gu;
+  var narrativeRegex = /((?<![\p{L}\p{N}])(?:(?:van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)*(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+)(?:(?:\s*,\s*(?:and|dan)\s+|\s*,\s*|\s*&\s*|\s+(?:(?:and|dan|of|for|the|ng|sa|at|para|van|der|den|von|de|la|le|du|bin|ibn|binti|al|el|da|dos|das|do|ter|ten)\s+)+|(?<!\p{L}{2,}\.)[ \t]+)(?:[\p{Lu}\p{Lo}][\p{L}'\u2019.\-]+))*(?:\s+et\s+al\.?)?(?:\s*\[[A-Za-z]{2,8}\])?)\s*,?\s*\((\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.[a-z]?|in press)[,)]/gu;
   var skipWords = buildSkipWordSet();
   // These specific entries in skipWords exist only to catch stray "et al."/"cf."/"e.g."/"i.e."
   // fragments — always lowercase in real usage. The same letters capitalized ("Al", "Et") are
@@ -574,7 +574,7 @@ function extractAuthorDateCitations(text) {
     var years = [year];
     if (text.charAt(m.index + m[0].length - 1) === ',') {
       var scanPos = m.index + m[0].length;
-      var yearListRe = /^\s*(\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.(?:-?[a-z])?|in press)\s*([,)])/;
+      var yearListRe = /^\s*(\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.[a-z]?|in press)\s*([,)])/;
       while (true) {
         var ym = yearListRe.exec(text.slice(scanPos));
         if (!ym) break;
@@ -627,7 +627,7 @@ function parseSingleAuthorDate(text) {
   // a day as well as a month and year so genuine surnames that happen to be month names (for
   // example "May, 2020") remain valid citations.
   if (looksLikeFullCalendarDate(text)) return null;
-  var yearMatch = text.match(/,?\s*(?<![.\d])(\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.(?:-?[a-z])?|in press)(?:\s*[,:]\s*(.+))?$/);
+  var yearMatch = text.match(/,?\s*(?<![.\d])(\d{4}[a-z]?(?:(?:[–-](?:\d{4}|present))|\/\d{4})?|n\.d\.[a-z]?|in press)(?:\s*[,:]\s*(.+))?$/);
   if (!yearMatch) return null;
   var year = yearMatch[1];
   var tail = yearMatch[2] ? yearMatch[2].trim() : null;
@@ -642,7 +642,7 @@ function parseSingleAuthorDate(text) {
   var pageInfo = null;
   if (tail) {
     var tailTokens = tail.split(/\s*,\s*/);
-    var allYears = tailTokens.length > 0 && tailTokens.every(function(t) { return /^\d{4}[a-z]?$/.test(t) || /^n\.d\.(?:-?[a-z])?$/i.test(t) || /^in press(?:-?[a-z])?$/i.test(t); });
+    var allYears = tailTokens.length > 0 && tailTokens.every(function(t) { return /^\d{4}[a-z]?$/.test(t) || /^n\.d\.$/i.test(t); });
     if (allYears) years = years.concat(tailTokens);
     else pageInfo = tail;
   }
@@ -671,7 +671,7 @@ function parseSingleAuthorDate(text) {
 var MONTH_NAME_SOURCE = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember|Spring|Summer|Fall|Autumn|Winter)';
 // APA references may carry a month/day after the year. Consume the entire date so
 // "June 26" is not mistaken for author/title text, while citation keys keep just 2025.
-var REFERENCE_DATE_RE = new RegExp('\\((\\d{4}[a-z]?(?:[–-](?:\\d{4}|present))?|n\\.d\\.(?:-?[a-z])?|in press)(?:,\\s*' + MONTH_NAME_SOURCE + '\\.?(?:\\s+\\d{1,2}(?:[–-]\\d{1,2})?)?)?\\)', 'i');
+var REFERENCE_DATE_RE = new RegExp('\\((\\d{4}[a-z]?(?:[–-](?:\\d{4}|present))?|n\\.d\\.[a-z]?|in press)(?:,\\s*' + MONTH_NAME_SOURCE + '\\.?(?:\\s+\\d{1,2}(?:[–-]\\d{1,2})?)?)?\\)', 'i');
 var MONTH_DAY_YEAR_RE = new RegExp('\\b' + MONTH_NAME_SOURCE + '\\s+\\d{1,2}(?:st|nd|rd|th)?\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
 var DAY_MONTH_YEAR_RE = new RegExp('\\b\\d{1,2}(?:st|nd|rd|th)?\\s+' + MONTH_NAME_SOURCE + '\\s*,?\\s*(?:19|20)\\d{2}\\b', 'i');
 
@@ -1987,14 +1987,8 @@ function authorDateCandidateScore(firstAuthor, allAuthorNames, ref, styleId, acr
     var citeFullKey = normalizeKeyName(citeFull, true);
     var candidate = null;
 
-    var refBare = ref.firstAuthor.trim().replace(/\.$/, '');
     if (bareAcronym && refExplicitAcronym && bareAcronym === refExplicitAcronym) {
       candidate = { score: 0.99, confidence: 0.99, reason: 'explicit-acronym' };
-    } else if (citePair && ACRONYM_PATTERN.test(refBare) && citePair.acronym.toLowerCase() === refBare.toLowerCase()) {
-      // "(United Nations Educational, Scientific and Cultural Organization [UNESCO], 2020)"
-      // against a reference written only as "UNESCO. (2020)": the citation itself introduces
-      // the acronym, so the pairing is explicit.
-      candidate = { score: 0.98, confidence: 0.98, reason: 'explicit-acronym' };
     } else if (bareAcronym && refDerivedAcronym && bareAcronym === refDerivedAcronym) {
       // If the manuscript itself introduced this acronym, it is stronger than a purely derived
       // initialism, but both remain unique/high-confidence matches.
@@ -2741,56 +2735,28 @@ MultiFormatValidator.prototype.isFuzzyMatch = function(k1, k2) {
 MultiFormatValidator.prototype.validateReferenceOrdering = function() {
   if (this.style.refOrder !== 'alphabetical' || this.references.length < 2) return;
   var self = this;
-  function authorKeys(r) {
-    if (r.isInstitutional) {
-      var pr = extractAcronymPairing(r.firstAuthor);
-      return [{ sur: (pr ? pr.full : r.firstAuthor) || '', ini: '' }];
-    }
-    var list = (r.authors && r.authors.length ? r.authors : [r.firstAuthor]).filter(function(a) { return a && !/^et\s+al\.?$/i.test(a.trim()) && !/^(?:\.\s*){3}|^…/.test(a.trim()); });
-    return list.map(function(a) {
-      var sur = surnameOf(a, self.styleId) || a;
-      var ini = a.replace(sur, '').replace(/[^\p{L}]/gu, '').toLowerCase();
-      return { sur: sur, ini: ini };
-    });
-  }
-  function norm(s) { return String(s || '').toLowerCase().replace(/^(the|a|an)\s+/i, ''); }
-  function yearRank(y) {
-    y = String(y || '').toLowerCase();
-    if (/^n\.d\./.test(y)) return '0' + y;
-    if (/^in press/.test(y)) return '9' + y;
-    return '1' + y;
-  }
   var withKeys = this.references.map(function(r, idx) {
-    var keys = authorKeys(r);
-    return { idx: idx, keys: keys, sortKey: norm(keys[0] && keys[0].sur), year: r.year || '', title: r.title || '', firstAuthor: r.firstAuthor };
+    var pairing = r.isInstitutional ? extractAcronymPairing(r.firstAuthor) : null;
+    var sortBase = r.isInstitutional ? (pairing ? pairing.full : r.firstAuthor) : surnameOf(r.firstAuthor, self.styleId);
+    return { idx: idx, sortKey: (sortBase || '').toLowerCase().replace(/^(the|a|an)\s+/i, ''), year: r.year || '', firstAuthor: r.firstAuthor, authorCount: r.authorCount || 1 };
   });
-  // APA 7 §9.44–9.47: huruf demi huruf berdasarkan nama keluarga penulis pertama, lalu inisialnya;
-  // penulis pertama sama → entri tunggal lebih dulu, kemudian nama penulis ke-2, ke-3, dst.;
-  // daftar penulis identik → tahun (n.d. dulu, "in press" terakhir), lalu judul.
-  var sorted = withKeys.slice().sort(function(a, b) {
+  var sorted = withKeys.slice().sort(function(a,b) {
     var cmp = a.sortKey.localeCompare(b.sortKey, 'en', { sensitivity: 'base' });
     if (cmp !== 0) return cmp;
-    var ai = a.keys[0] ? a.keys[0].ini : '', bi = b.keys[0] ? b.keys[0].ini : '';
-    if (ai && bi && ai !== bi) return ai.localeCompare(bi, 'en');
-    for (var k = 1; k < Math.max(a.keys.length, b.keys.length); k++) {
-      if (!a.keys[k]) return -1;
-      if (!b.keys[k]) return 1;
-      var c2 = norm(a.keys[k].sur).localeCompare(norm(b.keys[k].sur), 'en', { sensitivity: 'base' });
-      if (c2 !== 0) return c2;
-      if (a.keys[k].ini && b.keys[k].ini && a.keys[k].ini !== b.keys[k].ini) return a.keys[k].ini.localeCompare(b.keys[k].ini, 'en');
-    }
-    var cy = yearRank(a.year).localeCompare(yearRank(b.year), 'en');
-    if (cy !== 0) return cy;
-    return a.title.localeCompare(b.title, 'en', { sensitivity: 'base' });
+    // APA: when the first-listed surname is the same, a SOLO-authored entry ("Teece, D.") is
+    // ordered before ANY co-authored one with the same first surname ("Teece, D. J., Pisano, G.,
+    // & Shuen, A."), regardless of publication year. This is narrower than "fewer authors always
+    // wins" — two different MULTI-author entries by the same first author (e.g. "Sundari, A.,
+    // Armanu, ... (2025)" vs "Sundari, A., Indrasari, ... (2026)", 4 vs 3 authors) are NOT
+    // solo-vs-group, so they still sort by year like any other same-surname tie.
+    if (a.authorCount === 1 && b.authorCount !== 1) return -1;
+    if (b.authorCount === 1 && a.authorCount !== 1) return 1;
+    return (a.year || '').localeCompare(b.year || '');
   });
   var isSorted = withKeys.every(function(w, i) { return w.idx === sorted[i].idx; });
   if (!isSorted) {
-    var label = function(s) { return s.firstAuthor + (s.year ? ' (' + s.year + ')' : ''); };
-    var order = sorted.map(label).join(' → ');
-    // Entri pertama yang posisinya keliru — memudahkan pembaca menemukan masalahnya.
-    var firstWrong = withKeys.findIndex(function(w, i) { return w.idx !== sorted[i].idx; });
-    var misplaced = firstWrong >= 0 ? ' Pertama kali keliru di posisi ' + (firstWrong + 1) + ': seharusnya ' + label(sorted[firstWrong]) + ', tertulis ' + label(withKeys[firstWrong]) + '.' : '';
-    this.errors.push({ title: 'Daftar referensi tidak alfabetis', description: this.style.name + ' mengharuskan daftar referensi diurutkan alfabetis berdasarkan nama belakang penulis pertama (atau nama institusi), lalu inisial dan penulis berikutnya.' + misplaced, correction: 'Urutan yang benar: ' + order, severity: 'error' });
+    var order = sorted.map(function(s){return s.firstAuthor + (s.year ? ' (' + s.year + ')' : '');}).join(' → ');
+    this.errors.push({ title: 'Daftar referensi tidak alfabetis', description: this.style.name + ' mengharuskan daftar referensi diurutkan alfabetis berdasarkan nama belakang penulis pertama (atau nama institusi).', correction: 'Urutan yang benar: ' + order, severity: 'error' });
   }
 };
 

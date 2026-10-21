@@ -758,10 +758,6 @@
     allEvents.forEach(function(ev) {
       var c = ev.c, family = ev.family, crossFamily = ev.crossFamily;
       var start, end, raw, replacement = null, matched = false, note = null;
-      // Link targets: [{text, ref}] — the visible sub-text of this citation that refers to
-      // one reference (a part of a multi-citation group, one number, or the whole citation).
-      // Consumed by the Word add-in's "Tautan" feature; ignored by every other caller.
-      var linkTargets = [];
       var mismatchNote = crossFamily
         ? ('Terlihat seperti sitasi gaya ' + familyLabel[family] + ' yang tercampur dengan gaya utama naskah — ')
         : '';
@@ -774,7 +770,6 @@
             var res = p.firstAuthor ? resolveAuthorYear(p.firstAuthor, p.authors, p.year, p.hasEtAl) : { status: 'nomatch' };
             if (res.status === 'ok') {
               register(res.ref);
-              linkTargets.push({ text: c.raw, ref: res.ref });
               var pg = normalizePageInfo(p.pageInfo);
               replacement = renderForTarget([res.ref], sourceStyleId, targetStyleId, 'parenthetical', { pageInfo: pg, page: pg }, numberOf, null);
               matched = true;
@@ -790,7 +785,6 @@
             });
             if (ok && refs.length > 0) {
               refs.forEach(register);
-              refs.forEach(function(ref, i) { linkTargets.push({ text: c.parts[i].raw, ref: ref }); });
               if (c.parts.some(function(part) { return part.pageInfo; })) {
                 var sourcePages = c.parts.map(function(part) { return normalizePageInfo(part.pageInfo); });
                 replacement = STYLES[targetStyleId].family === 'author-date'
@@ -813,8 +807,6 @@
             var res2 = narrativeDecisions.find(function(r) { return r.status !== 'ok'; }) || narrativeDecisions[0];
             if (res2.status === 'ok') {
               var narrativeRefs = narrativeDecisions.map(function(r) { return r.ref; }); narrativeRefs.forEach(register);
-              if (narrativeRefs.length === 1) linkTargets.push({ text: raw, ref: narrativeRefs[0] });
-              else (c.years || []).forEach(function(y, i) { if (narrativeRefs[i]) linkTargets.push({ text: y, ref: narrativeRefs[i] }); });
               var locator = narrativeRefs.length === 1 ? raw.match(/\([^,]*,\s*(.+)\)$/) : null;
               replacement = renderForTarget(narrativeRefs, sourceStyleId, targetStyleId, 'narrative', { pageInfo: locator ? locator[1] : null }, numberOf, c.authors);
               matched = true;
@@ -855,8 +847,6 @@
         var numRes = resolveNumbers(c.numbers);
         if (numRes.status === 'ok') {
           numRes.refs.forEach(register);
-          if (numRes.refs.length === 1) linkTargets.push({ text: c.raw, ref: numRes.refs[0] });
-          else c.numbers.forEach(function(n, i) { linkTargets.push({ text: String(n), ref: numRes.refs[i], wholeWord: true }); });
           // Single-number citation immediately preceded by a name already written in the
           // prose ("Chan and Hu [7]") converting to an author-date target: don't duplicate
           // that name — emit a year-only parenthetical instead (see precedingNarrativeName).
@@ -889,7 +879,7 @@
       if (start == null) return;
       var accepted = matched && start >= lastAcceptedEnd;
       if (matched && start < lastAcceptedEnd) { matched = false; note = 'Tumpang tindih dengan sitasi lain yang sudah diproses — dilewati.'; }
-      spans.push({ start: start, end: end, raw: raw, replacement: matched ? replacement : raw, matched: matched, note: note, crossFamily: crossFamily, family: family, linkTargets: matched ? linkTargets : [] });
+      spans.push({ start: start, end: end, raw: raw, replacement: matched ? replacement : raw, matched: matched, note: note, crossFamily: crossFamily, family: family });
       if (matched) lastAcceptedEnd = Math.max(lastAcceptedEnd, end);
     });
 
@@ -918,9 +908,7 @@
     // Full ordered span list (matched + unmatched) with original article-text coordinates —
     // used by the UI to render an inline before/after preview (e.g. <mark> around each span).
     var citationSpans = sortedSpans.map(function(s) {
-      return { start: s.start, end: s.end, original: s.raw, replacement: s.replacement, matched: s.matched, note: s.note,
-        family: s.family, crossFamily: !!s.crossFamily,
-        linkTargets: (s.linkTargets || []).map(function(t) { return { text: t.text, refRaw: t.ref.raw, wholeWord: !!t.wholeWord }; }) };
+      return { start: s.start, end: s.end, original: s.raw, replacement: s.replacement, matched: s.matched, note: s.note };
     });
 
     // ---------- Reference list: renumber/reorder + rebuild author segment only ----------
